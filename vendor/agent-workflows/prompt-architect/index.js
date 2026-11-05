@@ -1,8 +1,10 @@
 /**
  * Prompt Architect host plugin: exposes the workflow tools that disclose the
  * next step from the current phase and record empty-context subagent
- * verification. Tools are mounted per preset (see presets/prompt-architect.patch.yml)
- * and never register global state beyond the chosen project directory.
+ * verification. Mounted as a profile-level global row (global row), so blank and
+ * any-preset sessions can use prompt_forge_*; the prompt-architect preset only
+ * contributes persona/instructions. The bundled prompt-forge skill is
+ * registered from this global plugin (single source).
  */
 import { readFileSync } from 'node:fs'
 import {
@@ -138,7 +140,7 @@ export function apply(ctx, config) {
     name: 'prompt_forge_status',
     description:
       'Read the Prompt Architect project state: current phase (S0–S7), recorded artifacts, verification runs, '
-      + 'and the next phase. Call this first in a preset session; it never writes files. Protocol: prompt-forge skill; '
+      + 'and the next phase. Call this first; it never writes files. Protocol: prompt-forge skill; '
       + 'S6 is an independent fresh-context subagent gate (see team-bootstrap §2 capability index).',
     parameters: json({}),
     output: toolOutput,

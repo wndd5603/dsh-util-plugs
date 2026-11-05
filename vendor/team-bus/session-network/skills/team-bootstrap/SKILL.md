@@ -34,7 +34,7 @@ description: >-
 ## 2 能力索引（单一入口：四类 + 3 个易误解项）
 
 > 本 skill 是团队能力的**单一入口**；逐项机读清单见
-> `CAPABILITY_AUDIT.md`（本仓库根目录；59 项能力的机读清单保留在源码仓库）。
+> `CAPABILITY_AUDIT.md` 和 `CAPABILITY_AUDIT.md`（59 项）。
 > 先判断“四类 + 人工确认属性”，再选 `nextSkill`；**文档存在 ≠ 模型可调用**。
 
 ### 2.1 四类能力
@@ -42,8 +42,8 @@ description: >-
 | 类别 | 含义 | 代表能力 | 模型怎么用 |
 |---|---|---|---|
 | **可调用** | 当前工具集/会话里有工具或 skill | `context_guard_status`、`team_hooks_status`、`message_send/queue/read/ack/routes/status`、`network_info`、`pitfalls`、`auto_backup_status`、`restart_dsh`（仅 step1 预检）、`restart_status`、`workbench_status`；skills：`team-bootstrap`、`network-intro`、`session-meeting`、`delegation-priority`、`workspace-agents`、`context-usage`、`prompt-forge` | 直接调用工具/用 `skill` 加载；先看 `nextSkill` 契约（§3） |
-| **条件可调用** | 依赖预设、配置开关、会话工具集或人工前置 | `team_init`/`team_members_check`（本 bundle 由 agent-workflows row 提供；写盘前先 preview）、`prompt_forge_*`（同上 agent-workflows row）、`alias_register`/`workspace_agents_init`（人工/确认后）、`message_route_register`（operator 配置 `allowRouteRegister`）、`context_usage`（宿主工具集包含时）、`restart_dsh` step2（人工 token+PID+锁） | 先满足条件再调用；不满足就说明缺什么，不硬试 |
-| **UI-only** | 只有浏览器/插件管理器界面，模型无 DOM | host-relaunch Web 确认面板；原生设置/插件管理界面；消息中心左栏「消息」页（启用 message-bus 时）；预设选择器（本 bundle 不含 preset rows，不自行生成预设名） | **不要找同名工具**；告诉用户去界面操作/切换预设 |
+| **条件可调用** | 依赖预设、配置开关、会话工具集或人工前置 | `team_init`/`team_members_check`（captain 预设；写盘前先 preview）、`prompt_forge_*`（prompt-architect 预设）、`alias_register`/`workspace_agents_init`（人工/确认后）、`message_route_register`（operator 配置 `allowRouteRegister`）、`context_usage`（宿主工具集包含时）、`restart_dsh` step2（人工 token+PID+锁） | 先满足条件再调用；不满足就说明缺什么，不硬试 |
+| **UI-only** | 只有浏览器/插件管理器界面，模型无 DOM | `dsh-plugin-console` 左栏/卡片/搜索/配置表单/深链安装器；host-relaunch Web 确认面板；原生设置表单；预设选择器中的 `preset-context-pro`/`preset-captain`/`preset-prompt-architect`（preset rows，不是工具） | **不要找同名工具**；告诉用户去界面操作/切换预设 |
 | **自动 hook** | 策略/注入在宿主事件上自动运行，模型不能主动触发 | `[ctx %]` 每轮注入、`[context-meter]` 阈值提醒、archive 归档提醒、roleWritePolicy、delegation advisor、writeGate（默认 off）、problemLoop（默认 off）、auto-backup 写前备份、restart kill 围栏 | 只能观察状态/按提示行动；开关需人工改配置 |
 
 **横切属性：人工确认 / operator-only**（不属于第五类，是上述能力的权限属性）：
@@ -77,8 +77,30 @@ description: >-
 | 需要上下文占用/压缩纪律 | `context-usage` | 何时测占用、何时建议 /compact |
 | 提示词迭代（prompt-forge） | `prompt-forge` | S0–S7 阶段与 S6 独立验证门禁 |
 
+### 2.4 预设 × 能力矩阵（切换前先看）
+
+能力工具已从预设 entry 移到 profile 级全局 row（task-103）：**空白/标准/任意预设都能调用**；
+预设只负责 persona/instructions 与标准工具集。不要为了拿工具而切换预设。
+
+| 能力 | 提供方（全局 row） | 空白/标准 | captain | prompt-architect | context-pro |
+|---|---|---|---|---|---|
+| `team_init` / `team_members_check` | `team-tools`（captain-preset/plugin） | ✅ | ✅（队长 persona 额外指导团队流程） | ✅ | ✅ |
+| `prompt_forge_*` ×6 + `prompt-forge` skill | `prompt-forge-tools`（prompt-architect） | ✅ | ✅ | ✅（镜语 persona 额外指导 S0–S7） | ✅ |
+| `context_usage` / `context_guard_status` / `team_hooks_status` | context-sentinel 全局 rows | ✅ | ✅ | ✅ | ✅（仅 persona 强调上下文纪律） |
+| `message_*` / `network_info` / `pitfalls` / `alias_register` / `workspace_agents_init` | team-bus/message-bus 全局 rows | ✅ | ✅ | ✅ | ✅ |
+| `auto_backup_status` / `restart_*` | auto-backup / host-relaunch 全局 rows | ✅ | ✅ | ✅ | ✅ |
+| plugin-console / restart 面板 | UI-only（浏览器/人工） | ❌ 模型不可调用 | ❌ | ❌ | ❌ |
+
+**切换提示**：
+- 需要 Team Coordinator 的团队纪律/汇报口吻 ⇒ 选 `captain`；只是要 `team_init` 工具 ⇒ 不必切。
+- 需要 Prompt Architect 的镜语/九维流程指导 ⇒ 选 `prompt-architect`；只是要 `prompt_forge_*` 工具 ⇒ 不必切。
+- 需要上下文纪律强化文本 ⇒ 选 `context-pro`；工具本身全局可用。
+- 任何无法全局化的能力（UI-only/人工确认）见 §2.1 与 `OPERATOR_ONLY_BOUNDARIES.md`。
+
+详细实证见 `CAPABILITY_AUDIT.md` 与 `CAPABILITY_AUDIT.md`。
+
 ## 3 nextSkill 契约（工具与 skill 的接口）
-- 可能返回 `nextSkill`/`nextReason` 的工具：`network_info`、`pitfalls`、`workspace_agents_init`；`nextSkill` ∈ 5 个 skill 名之一或 null。
+- 可能返回 `nextSkill`/`nextReason` 的工具：`network_info`、`pitfalls`、`workspace_agents_init`（INTERFACES §5.1）；`nextSkill` ∈ 5 个 skill 名之一或 null。
 - `nextSkill` 非 null ⇒ **先** `skill({name: nextSkill})` 再继续；null/缺省 ⇒ 按本索引表选。
 - 工具提示与索引表冲突 ⇒ 以工具 `nextSkill` 为准；该 skill 不存在 ⇒ 回索引表；仍不存在 ⇒ 记一行 audit 后继续（fail-open）。
 - 返回 `unknown or no longer available` 时不要重试同名；直接按索引表执行并在结果里注明“skill 不可用：<名>”。
@@ -93,7 +115,7 @@ description: >-
 | 失败 | 处理 |
 |---|---|
 | skill/工具缺失 | 跳过该能力，继续主任务；结果中注“能力不可用：<名>” |
-| `network_info` 抛错/超时 | 只读兜底：`PEERS.json`（若工作区有）与 `network_info` 的只读字段；仍失败写 `(unset)` |
+| `network_info` 抛错/超时 | 只读兜底：`team_sessions` / `team_audit` / `PEERS.json`；仍失败写 `(unset)` |
 | 写入被 deny | 改 `<项目>/scratch/` 或交有写权限成员 |
 | headless / 无交互通道 | 不发起 AGENTS 询问、不等待用户（见 `workspace-agents`） |
 

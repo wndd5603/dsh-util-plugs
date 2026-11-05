@@ -1,10 +1,16 @@
+## 2026.11.5-3
+
+- Public README wording cleanup (root + 8 plugin READMEs); remove internal planning terms; natural zh/en install/usage copy.
+- Workflow tools are now provided by profile-level global rows: `team-tools` (`team_init` / `team_members_check`) and `prompt-forge-tools` (`prompt_forge_*` ×6 + prompt-forge skill); captain/prompt-architect presets keep only persona/instructions.
+- Bundle sync: vendored workflow/team-bus changes; 1 bundle + 8 rows; client still composes 3 halves.
+- Verification: clean profile install/dump 8 rows; blank/default preset session header.tools 62 tools with 20/20 targets; workflow 29/29; check-rules 23/23; verify-scaffold/client PASS; privacy 0/0.
 ## 2026.11.5-2
 
 - Include the Web plugin console as the eighth switchable row (vendored client+host wrapper); message center left label renamed to 跨会话消息 / Cross-session messages; compose three client halves in the root client module.
 
 # Changelog — dsh-plugs
 
-## 2026.11.5-1 (unreleased)
+## 2026.11.5-1 
 
 - **Web message center** (`message-bus`): host Remote (`messageBus` namespace) plus a
   client half — sidebar **Messages** page with search, pagination, detail/read state,
@@ -32,14 +38,14 @@
   kill fence are pattern-escaped so the privacy gate stays clean.
 - Version unified: bundle `2026.11.5-1`; rows keep their source-package versions
   (message-bus `2026.11.5-1`, host-relaunch `2026.11.4-2`, the rest `2026.11.4-1`).
-- Still one self-contained bundle, exactly seven rows, zero npm dependencies; verified by
+- Still one self-contained bundle, exactly eight rows, zero npm dependencies; verified by
   local `git+file://` install into a clean profile (`dump-config`: 1 bundle + 7 rows,
   0 duplicate ids), `npm run verify`, `npm run verify:client`, privacy gate and pack dry-run.
 
-## 2026.11.4-1 (unreleased)
+## 2026.11.4-1 
 
 - Initial single-repository GitHub scaffold: root package `dsh-plugs` with one
-  bundle patch inserting exactly seven switchable rows (`context-sentinel`,
+  bundle patch inserting exactly eight switchable rows (`context-sentinel`,
   `message-bus`, `team-bus`, `agent-workflows`, `workbench-bundle`,
   `auto-backup`, `host-relaunch`).
 - Self-contained runtime: the seven plugin modules are vendored under
@@ -48,6 +54,6 @@
   installs work offline. The host-relaunch Web header button client half is
   included as `client.js` via `dsh.client` (not enabled in a headless test).
 - Local Git install verified in a clean DSH home/profile; `dump-config` shows
-  one bundle + seven rows and zero duplicate ids; each row registers its tools.
+  one bundle + eight rows and zero duplicate ids; each row registers its tools.
 - MIT license, README, privacy/data notes, files whitelist and repository
-  metadata prepared. Nothing pushed/published; npm path remains on HOLD.
+  metadata prepared. Nothing pushed/published; no npm package is built yet.

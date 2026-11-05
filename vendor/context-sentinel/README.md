@@ -4,7 +4,7 @@ Context awareness and workflow guard for DeepSeek Harness: live occupancy, a per
 
 为 DeepSeek Harness 提供上下文可见性与工作流护栏：实时占用、每轮上下文提示、可选会话护栏，以及有状态的归档提醒循环。
 
-> Row version: 2026.11.4-1 · bundle 2026.11.5-1 (preview) · npm HOLD: install from GitHub source.
+> Version: 2026.11.4-1 · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -22,13 +22,13 @@ Example:
 [ctx 65% 649k/1M]   (usage detail on)
 ```
 
-### Install (GitHub source; npm HOLD)
+### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-The self-contained bundle adds seven switchable rows; enable `context-sentinel` for this plugin. No npm registry is used. The npm package is not published during the HOLD — do not use `dsh plugin add dsh-context-sentinel` yet.
+The self-contained bundle adds eight independently switchable plugins; enable `context-sentinel` for this plugin. No npm registry is used. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-context-sentinel`.
 
 ### Usage
 
@@ -48,9 +48,9 @@ Ask the agent to call `context_usage()` for a read-only occupancy report, or `co
 
 ### Tests & uninstall
 
-From a source checkout: `npm test`. The GitHub bundle can be checked with `npm run verify`.
+Run `npm test` from a source checkout; after installing the bundle, run `npm run verify`.
 
-Disable or remove the plugin row in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its rows. Local data under `$DSH_HOME` is not deleted automatically.
+Disable or remove the plugin entry in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its plugins. Local data under `$DSH_HOME` is not deleted automatically.
 
 ### License
 
@@ -72,13 +72,13 @@ MIT © 2026 wndd5603
 [ctx 65% 649k/1M]   （开启用量明细）
 ```
 
-### 安装（GitHub source；npm 暂缓）
+### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-自包含 bundle 会加入 7 个可切换 row；启用 `context-sentinel` 即使用本插件。安装不依赖 npm registry；npm 包在 HOLD 期间未发布，请勿使用 `dsh plugin add dsh-context-sentinel`。
+安装包自带运行代码，会加入 8 个可独立启用的插件项；启用 `context-sentinel` 即使用本插件。安装无需 npm registry；目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-context-sentinel`。
 
 ### 使用
 
@@ -98,9 +98,9 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
 
 ### 测试与卸载
 
-源码目录内运行 `npm test`；GitHub bundle 可用 `npm run verify` 自检。
+源码目录内运行 `npm test`；安装包可用 `npm run verify` 自检。
 
-在「设置 → 插件」中禁用或移除对应 row；若不再使用整个 bundle，可从 profile 移除。`$DSH_HOME` 下的本地数据不会自动删除。
+在「设置 → 插件」中禁用或移除对应插件项；若不再使用整套插件包，可从 profile 卸载。`$DSH_HOME` 下的本地数据不会自动删除。
 
 ### 许可证
 

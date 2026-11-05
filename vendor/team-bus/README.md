@@ -4,7 +4,7 @@ Team collaboration suite for DeepSeek Harness: session network, identity/alias r
 
 为 DeepSeek Harness 提供团队协作套件：会话网络、身份/别名注册、会议、共享坑点、协作技能与本地消息总线，一次安装。
 
-> Row version: 2026.11.4-1 · bundle 2026.11.5-1 (preview) · npm HOLD: install from GitHub source.
+> Version: 2026.11.4-1 · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -12,8 +12,7 @@ Team collaboration suite for DeepSeek Harness: session network, identity/alias r
 
 - **Session network** — `network_info()` shows sessions, aliases, liveness and contacts (read-only).
 - **Identity & meetings** — alias registry, meeting records and shared pitfalls across sessions.
-- **Five coordination skills** — `network-intro`, `session-meeting` (with §0.5 task-complexity triage),
-  `team-bootstrap`, `delegation-priority`, `workspace-agents`.
+- **Five coordination skills** — `network-intro`, `session-meeting`, `team-bootstrap`, `delegation-priority`, `workspace-agents`.
   `team-bootstrap` is the single capability index: four classes (callable / conditional / UI-only /
   automatic hook), human-confirmation boundaries and three common misreads; it points to
   `CAPABILITY_AUDIT.md`.
@@ -27,13 +26,13 @@ skill("team-bootstrap")        # start a team workspace
 message_send({ to: "<alias>", body: "status: green" })
 ```
 
-### Install (GitHub source; npm HOLD)
+### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-The bundle adds seven rows; enable `team-bus`. npm is on HOLD — do not use `dsh plugin add dsh-team-bus` yet.
+The bundle adds eight plugins; enable `team-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-team-bus`.
 
 ### Usage
 
@@ -51,9 +50,9 @@ Enable/disable the plugin and set its local data directory. Identity/alias/meeti
 
 ### Tests & uninstall
 
-From a source checkout: `npm test`. The GitHub bundle can be checked with `npm run verify`.
+Run `npm test` from a source checkout; after installing the bundle, run `npm run verify`.
 
-Disable or remove the plugin row in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its rows. Local data under `$DSH_HOME` is not deleted automatically.
+Disable or remove the plugin entry in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its plugins. Local data under `$DSH_HOME` is not deleted automatically.
 
 ### License
 
@@ -65,7 +64,7 @@ MIT © 2026 wndd5603
 
 - **会话网络**：`network_info()` 只读展示会话、别名、活跃度与联系方式。
 - **身份与会议**：跨会话别名注册、会议记录、共享坑点。
-- **5 个协作技能**：`network-intro`、`session-meeting`（含 §0.5 任务分诊）、`team-bootstrap`、`delegation-priority`、`workspace-agents`。
+- **5 个协作技能**：`network-intro`、`session-meeting`、`team-bootstrap`、`delegation-priority`、`workspace-agents`。
 - **本地消息总线**：无需网络服务即可收/发/确认跨会话消息。
 
 示例：
@@ -76,13 +75,13 @@ skill("team-bootstrap")        # 初始化团队工作区
 message_send({ to: "<alias>", body: "状态：正常" })
 ```
 
-### 安装（GitHub source；npm 暂缓）
+### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-bundle 会加入 7 个 row；启用 `team-bus`。npm 在 HOLD 期间未发布，请勿使用 `dsh plugin add dsh-team-bus`。
+安装包会加入 8 个插件项；启用 `team-bus`。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-team-bus`。
 
 ### 使用
 
@@ -100,9 +99,9 @@ bundle 会加入 7 个 row；启用 `team-bus`。npm 在 HOLD 期间未发布，
 
 ### 测试与卸载
 
-源码目录内运行 `npm test`；GitHub bundle 可用 `npm run verify` 自检。
+源码目录内运行 `npm test`；安装包可用 `npm run verify` 自检。
 
-在「设置 → 插件」中禁用或移除对应 row；若不再使用整个 bundle，可从 profile 移除。`$DSH_HOME` 下的本地数据不会自动删除。
+在「设置 → 插件」中禁用或移除对应插件项；若不再使用整套插件包，可从 profile 卸载。`$DSH_HOME` 下的本地数据不会自动删除。
 
 ### 许可证
 

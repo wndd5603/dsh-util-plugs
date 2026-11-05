@@ -1,10 +1,10 @@
 # dsh-message-bus — 跨会话消息总线
 
-Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wake envelopes, dedupe, priorities, read receipts, inspection tools and a Web message center.
+Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wake envelopes, dedupe, priorities, read receipts and inspection tools.
 
-为 DeepSeek Harness 提供跨会话消息总线：本地 SQLite、轻量唤醒信封、去重/优先级、已读回执、只读检查工具与 Web 消息中心。
+为 DeepSeek Harness 提供跨会话消息总线：本地 SQLite、轻量唤醒信封、去重/优先级、已读回执与只读检查工具。
 
-> Row version: 2026.11.5-1 · bundle 2026.11.5-1 (preview) · npm HOLD: install from GitHub source.
+> Version: 2026.11.5-1 · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -14,7 +14,6 @@ Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wa
 - Lightweight wake envelopes: the message body stays in the store, not in the wake event.
 - Dedupe keys, priority delivery, read receipts and optional route registration.
 - Read-only inspection: `message_queue`, `message_read`, `message_ack`, `message_routes`, `message_bus_status`.
-- **Web message center** — a sidebar Messages page to search, paginate, read details, delete with a typed confirmation and copy an “ask the agent” prompt. It reads/writes through the local `messageBus` Remote; the browser stores nothing and the model cannot click the UI.
 
 Example:
 
@@ -24,17 +23,17 @@ message_queue({ unreadOnly: true })
 message_read({ messageId: "msg-..." })
 ```
 
-### Install (GitHub source; npm HOLD)
+### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-The self-contained bundle adds seven switchable rows; enable `message-bus`. The npm package is not published during the HOLD — do not use `dsh plugin add dsh-message-bus` yet.
+The self-contained bundle adds eight independently switchable plugins; enable `message-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-message-bus`.
 
 ### Usage
 
-Send with `message_send`; read with `message_queue` / `message_read`; acknowledge with `message_ack`; inspect routes/status with `message_routes` / `message_bus_status`. Open the sidebar **Messages** page for the same data in the Web UI (search/pagination/delete). The model receives only a lightweight envelope and reads the body on demand.
+Send with `message_send`; read with `message_queue` / `message_read`; acknowledge with `message_ack`; inspect routes/status with `message_routes` / `message_bus_status`. The model receives only a lightweight envelope and reads the body on demand.
 
 ### Configuration
 
@@ -58,9 +57,9 @@ Send with `message_send`; read with `message_queue` / `message_read`; acknowledg
 
 ### Tests & uninstall
 
-From a source checkout: `npm test`. The GitHub bundle can be checked with `npm run verify`.
+Run `npm test` from a source checkout; after installing the bundle, run `npm run verify`.
 
-Disable or remove the plugin row in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its rows. Local data under `$DSH_HOME` is not deleted automatically.
+Disable or remove the plugin entry in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its plugins. Local data under `$DSH_HOME` is not deleted automatically.
 
 ### License
 
@@ -74,7 +73,6 @@ MIT © 2026 wndd5603
 - 轻量唤醒信封：正文留在消息库中，不进入唤醒事件。
 - 支持去重键、优先级投递、已读回执与可选路由注册。
 - 只读检查：`message_queue`、`message_read`、`message_ack`、`message_routes`、`message_bus_status`。
-- **Web 消息中心**：左栏「消息」页支持搜索、分页、详情、输入确认词删除、复制「向智能体询问」入口。窗口通过本地 `messageBus` Remote 读写；浏览器不留存数据，模型不能操作该 UI。
 
 示例：
 
@@ -84,30 +82,27 @@ message_queue({ unreadOnly: true })
 message_read({ messageId: "msg-..." })
 ```
 
-### 安装（GitHub source；npm 暂缓）
+### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-bundle 会加入 7 个可切换 row；启用 `message-bus` 即使用本插件。npm 包在 HOLD 期间未发布，请勿使用 `dsh plugin add dsh-message-bus`。
+安装包会加入 8 个可独立启用的插件项；启用 `message-bus` 即使用本插件。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-message-bus`。
 
 ### 使用
 
-用 `message_send` 发送，`message_queue` / `message_read` 读取，`message_ack` 标记已读；`message_routes` / `message_bus_status` 检查路由与状态。Web 端打开左栏「消息」页可搜索/分页/删除同一份消息。模型只收到轻量信封，需要时再取正文。
+用 `message_send` 发送，`message_queue` / `message_read` 读取，`message_ack` 标记已读；`message_routes` / `message_bus_status` 检查路由与状态。模型只收到轻量信封，需要时再取正文。
 
 ### 配置
 
 `dbPath`（默认 `$DSH_HOME/message-bus/bus.sqlite`）、`enabled`、优先级/去重窗口与可选路由。`message_purge` 是破坏性操作，需要显式确认。
 
-### 仅操作员 / 人工确认
+### 人工确认
 
-- `message_purge`：永久删除消息、投递与已读状态，必须提供 `confirm:"PURGE"` 和 `before`（ISO 时间）或 `all:true`；
-  先说明影响范围并取得操作员/用户明确确认，**不得**用来掩盖投递失败。
-- `message_route_register`：修改别名→会话路由；默认关闭（`allowRouteRegister:false`），需操作员配置后才存在；
-  不要假设可用，也不要用它劫持其他会话别名。
-- `message_send` 可由模型调用，但“已投递 ≠ ACK”；确认与跨会话协议见 `message_read`/`message_ack` 和
-  team-bootstrap 能力索引。
+- `message_purge`：永久删除消息、投递与已读状态，需要显式提供范围并确认影响；操作前请说明将删除的内容。
+- `message_route_register`：维护本地别名到会话的路由；默认关闭，开启后才可用。
+- `message_send` 可由模型调用；投递成功不等于对方已读，可用 `message_read` / `message_ack` 确认。
 
 ### 权限、兼容与隐私
 
@@ -117,9 +112,9 @@ bundle 会加入 7 个可切换 row；启用 `message-bus` 即使用本插件。
 
 ### 测试与卸载
 
-源码目录内运行 `npm test`；GitHub bundle 可用 `npm run verify` 自检。
+源码目录内运行 `npm test`；安装包可用 `npm run verify` 自检。
 
-在「设置 → 插件」中禁用或移除对应 row；若不再使用整个 bundle，可从 profile 移除。`$DSH_HOME` 下的本地数据不会自动删除。
+在「设置 → 插件」中禁用或移除对应插件项；若不再使用整套插件包，可从 profile 卸载。`$DSH_HOME` 下的本地数据不会自动删除。
 
 ### 许可证
 

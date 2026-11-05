@@ -11,7 +11,9 @@ description: >
 # Prompt Architect（镜语·迭代器）· Skill
 
 > 插件 `dsh-prompt-architect` v1.0.0｜人格提示词元优化器：**优化「写视频提示词的智能体人格提示词」**，不直接写视频提示词。
-> 本 skill 是流程说明书；真正的进度与门禁由工具持有。会话里先 `prompt_forge_status`，再 `prompt_forge_next`，不要靠记忆。
+> 本 skill 由 `dsh-agent-workflows` 的**全局 `prompt-forge-tools` row** 注册（global row），空白/任意预设会话均可加载；
+> 不再依赖 `.agents/skills` 同名副本或预设内 `customSkillDirs`。真正的进度与门禁由工具持有。
+> 会话里先 `prompt_forge_status`，再 `prompt_forge_next`，不要靠记忆。
 
 ## 0. 铁律
 

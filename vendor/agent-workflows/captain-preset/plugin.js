@@ -4,7 +4,8 @@
  * names: normal teammates follow <domain>-<role> (e.g. toolbox-env); *-captain is
  * reserved for sessions that actually act as captains.
  *
- * Registers three tools for the captain session:
+ * Registers two profile-level global tools (global row), available in blank and
+ * any-preset sessions; the captain preset only contributes persona/instructions:
  * - team_init:  initialize the project's team workspace (documents, member role
  *               files, zero-dependency audit CLIs, legacy file-based pipe2 templates).
  *               Idempotent: existing files are reported as skipped, never

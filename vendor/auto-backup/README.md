@@ -4,7 +4,7 @@ Automatic pre-write file backups for DeepSeek Harness: snapshot files before edi
 
 为 DeepSeek Harness 提供写前自动备份：编辑前保存快照、项目内保留策略，以及随时可查的只读状态。
 
-> Row version: 2026.11.4-1 · bundle 2026.11.5-1 (preview) · npm HOLD: install from GitHub source.
+> Version: 2026.11.4-1 · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -22,13 +22,13 @@ auto_backup_status()
 → enabled, project root, backup count/size and retention
 ```
 
-### Install (GitHub source; npm HOLD)
+### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-The bundle adds seven rows; enable `auto-backup`. npm is on HOLD — do not use `dsh plugin add dsh-auto-backup` yet.
+The bundle adds eight plugins; enable `auto-backup`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-auto-backup`.
 
 ### Usage
 
@@ -46,9 +46,9 @@ Use the normal write/edit tools; existing files are copied before the edit. Chec
 
 ### Tests & uninstall
 
-From a source checkout: `npm test`. The GitHub bundle can be checked with `npm run verify`.
+Run `npm test` from a source checkout; after installing the bundle, run `npm run verify`.
 
-Disable or remove the plugin row in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its rows. Local data under `$DSH_HOME` is not deleted automatically.
+Disable or remove the plugin entry in Settings → Plugins. Remove the bundle from the profile if you no longer need any of its plugins. Local data under `$DSH_HOME` is not deleted automatically.
 
 ### License
 
@@ -70,13 +70,13 @@ auto_backup_status()
 → 启用状态、项目根、备份数量/大小与保留策略
 ```
 
-### 安装（GitHub source；npm 暂缓）
+### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-1
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 ```
 
-bundle 会加入 7 个 row；启用 `auto-backup`。npm 在 HOLD 期间未发布，请勿使用 `dsh plugin add dsh-auto-backup`。
+安装包会加入 8 个插件项；启用 `auto-backup`。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-auto-backup`。
 
 ### 使用
 
@@ -94,9 +94,9 @@ bundle 会加入 7 个 row；启用 `auto-backup`。npm 在 HOLD 期间未发布
 
 ### 测试与卸载
 
-源码目录内运行 `npm test`；GitHub bundle 可用 `npm run verify` 自检。
+源码目录内运行 `npm test`；安装包可用 `npm run verify` 自检。
 
-在「设置 → 插件」中禁用或移除对应 row；若不再使用整个 bundle，可从 profile 移除。`$DSH_HOME` 下的本地数据不会自动删除。
+在「设置 → 插件」中禁用或移除对应插件项；若不再使用整套插件包，可从 profile 卸载。`$DSH_HOME` 下的本地数据不会自动删除。
 
 ### 许可证
 
