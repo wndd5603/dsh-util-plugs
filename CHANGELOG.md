@@ -1,3 +1,30 @@
+## 2026.11.5-8
+
+- **Inactive-session recovery (`autoResume`, default true)**: a non-live session-id/alias target is resumed
+  before delivery through the host agents API with a properly composed preset setup (`sessionQuery` →
+  `agentPresets.resolve`/`mount`), falling back to `resumeModel` when no current model selection exists;
+  archived sessions and missing presets refuse resume instead of creating a half-composed session;
+  concurrent sends share one in-flight resume, stale resumed handles are revalidated against live state and
+  dropped when the agent is disposed.
+- **Queue semantics and hardening**: failed/refused/rate-limited resumes stay accepted into the persisted
+  queue (`accepted:true, stored:true, queued:true, wakeError`) instead of `SESSION_GONE`; queued envelopes are
+  flushed exactly once when the target becomes live (in-flight dedupe by delivery id, restart/initial flush
+  covered). Auto-resume is per-caller rate-limited (`autoResumeRateLimitPerMinute`, default 12/min); extra
+  sends stay queued with `wakeError:'autoResume-rate-limited'`. `message_bus_status` exposes
+  `autoResume`/`resumedCount`/`strictMode` and the limit.
+- **Permission binding / strict mode**: strict mode stays default-on and is bound to the session sandbox
+  mode — direct session-id delivery needs an `allowed-once` approval in confined modes (`workspace-write`/
+  `read-only`); with no approval answerer it returns `STRICT_SESSION_ID_DENIED` without storing/delivering;
+  `danger-full-access` bypasses the approval gate (no answerer) per product semantics. Alias/join delivery
+  never asks for approval, and the Web message center remains exempt.
+- **Web message center**: the page header now shows the effective strict-mode state; the single composed Web
+  client was rebuilt for the final bundle (three halves, registered id `dsh-util-plugs`).
+- **Vendored sync**: message-bus host module, store, client half, README and CHANGELOG aligned with the
+  workspace; only public-document path adaptations remain (recorded in the release audit notes). Bundle stays
+  one install + eight switchable rows, zero npm dependencies.
+- **Final candidate verification**: verify-scaffold / verify-client pass, `node --check` 56/56, npm pack
+  dry-run clean (shasum recorded in the source-workspace packaging report), privacy 0/0; the four release
+  warnings were closed by an independent re-check. Not tagged, not pushed, not installed into a live profile.
 ## 2026.11.5-7
 
 - Strict mode is now tied to the session sandbox mode: it enforces direct session-id approval only in confined modes (`workspace-write` / `read-only`); `danger-full-access` has no approval answerer, so strict mode is automatically bypassed there instead of failing closed.

@@ -13,11 +13,10 @@ Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wa
 - One local SQLite queue shared by DSH sessions.
 - Lightweight wake envelopes: the message body stays in the store, not in the wake event.
 - Dedupe keys, priority delivery, read receipts and optional route registration.
+- Host-native target resolution: session-id → live `agents.get`, alias → host
+  `sessionDirectory`, header alias/displayName → `agents.list`; missing/inactive targets fail with
+  `SESSION_GONE`, and same-Team targets prefer `agentTeams.sendMessage` over `followup`.
 - Read-only inspection: `message_queue`, `message_read`, `message_ack`, `message_routes`, `message_bus_status`.
-- Host-native delivery: session-id resolves through a live agent, aliases through the host
-  `sessionDirectory`, header aliases/display names through the live agent list; missing or inactive
-  targets fail with `SESSION_GONE` instead of being silently queued, and same-team targets prefer the
-  team message channel over a plain follow-up.
 
 Example:
 
@@ -30,7 +29,7 @@ message_read({ messageId: "msg-..." })
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-8
 ```
 
 The self-contained bundle adds eight independently switchable plugins; enable `message-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-message-bus`.
@@ -41,7 +40,7 @@ Send with `message_send`; read with `message_queue` / `message_read`; acknowledg
 
 ### Configuration
 
-`dbPath` (default `$DSH_HOME/message-bus/bus.sqlite`), `enabled`, `strictMode` (default `true`), priority/dedupe windows and optional routes. `message_purge` is destructive and requires explicit confirmation.
+`dbPath` (default `$DSH_HOME/message-bus/bus.sqlite`), `enabled`, `strictMode` (default `true`), `autoResume` (default `true`), `resumeModel`, priority/dedupe windows and optional routes. `message_purge` is destructive and requires explicit confirmation.
 
 ### Strict mode (default true)
 
@@ -53,6 +52,45 @@ Send with `message_send`; read with `message_queue` / `message_read`; acknowledg
 - Alias/join delivery never asks for approval. `strictMode:false` keeps the legacy direct-id behavior.
 - The Web message center is a human surface and is exempt from the tool approval gate.
 - `message_bus_status` exposes the effective `strictMode`.
+
+### Auto-resume (default true)
+
+- An inactive `session-<uuid>`/alias target is resumed before delivery: `agents.resume({resumeSessionId, agentOptions?, setup})`.
+  `setup` resolves the session's preset via `sessionQuery.observeSession` → `agentPresets.resolve` → `agentPresets.mount`; a
+  missing preset refuses resume rather than creating a half-composed session.
+- Model: `agentDefaultModel.currentSelection()` first, then config `resumeModel` (`{provider,model}`).
+- Archived sessions (`workspaceRegistry.archivedSessionIds`) are never resumed. Concurrent sends share one in-flight
+  resume (`resuming` map); handles are kept in `resumedHandles`.
+- A failed/refused resume is **accepted into the persisted queue** (`ok:true, accepted:true, stored:true, delivered:false,
+  queued:true, wakeError`), not `SESSION_GONE`. When the session becomes live, `agent/created`/`agent/status` flush the
+  queued envelopes and mark deliveries delivered. `message_bus_status` exposes `autoResume` and `resumedCount`.
+- Set `autoResume:false` to disable resume: inactive targets are still accepted into the persisted queue
+  (`queued:true`, `wakeError:'autoResume-disabled'`) and are flushed when the session becomes live.
+  Alias/join and strictMode approval remain unchanged.
+- Auto-resume is per-caller rate-limited (`autoResumeRateLimitPerMinute`, default 12/min); excess
+  stays queued with `wakeError:'autoResume-rate-limited'`. `message_bus_status` exposes the limit.
+
+### Auto-resume 中文说明（默认开启）
+
+- 非 live 的 session-id/alias 目标会先 `agents.resume`；setup 通过 `sessionQuery.observeSession` 读取 preset，
+  再 `agentPresets.resolve` + `mount`；无 preset 不 resume；模型优先 `agentDefaultModel.currentSelection()`，
+  否则用 `resumeModel`。
+- 归档会话不 resume；并发消息共享同一 in-flight resume；resume 句柄放入 `resumedHandles`。
+- resume 失败/拒绝时消息**入库并接受**（`ok:true, accepted:true, stored:true, delivered:false, queued:true, wakeError`），
+  不再抛 `SESSION_GONE`；会话后续存活时通过 `agent/created`/`agent/status` 自动补投并标记 delivered。
+- `message_bus_status` 暴露 `autoResume`/`resumedCount`；`autoResume:false` 仍按队列语义接受消息
+  （`queued:true`, `wakeError:'autoResume-disabled'`），后续 live 时补投。
+- 自动 resume 按调用方限频（`autoResumeRateLimitPerMinute`，默认 12/分钟），超限消息保留下队
+  并标记 `wakeError:'autoResume-rate-limited'`；status 暴露该阈值。
+
+### Retired legacy surfaces (intentional)
+
+- `PEERS.json`, file-based pipe2 routes/inboxes, `team_audit`/`pipe2_*` bridge tools and their
+  file-watch behavior are **intentionally retired** in the host-native v2 line. They are not
+  reimplemented and must not be used for new work; use `network_info`, the host
+  `sessionDirectory`/alias path and `message_*` tools instead. `legacyTools:true` only registers
+  a minimal compatibility alias surface where still mounted; see CHANGELOG.
+
 ### Operator-only / human confirmation
 
 - `message_purge` — destructive permanent deletion of messages, deliveries and read-state rows. It requires
@@ -87,7 +125,7 @@ MIT © 2026 wndd5603
 - 轻量唤醒信封：正文留在消息库中，不进入唤醒事件。
 - 支持去重键、优先级投递、已读回执与可选路由注册。
 - 只读检查：`message_queue`、`message_read`、`message_ack`、`message_routes`、`message_bus_status`。
-- Host-native 投递：session-id 通过在线 agent 解析，别名经宿主 `sessionDirectory`，header 别名/显示名经在线 agent 列表；目标不存在或非 active 时返回 `SESSION_GONE`，不再静默入队；同团队目标优先走团队消息通道。
+- Host-native 投递：session-id 通过在线 agent 解析，别名经宿主 `sessionDirectory`，header 别名/显示名经在线 agent 列表；目标不存在或非 active 时走 autoResume/队列语义；同团队目标优先走团队消息通道。
 
 示例：
 
@@ -100,7 +138,7 @@ message_read({ messageId: "msg-..." })
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-8
 ```
 
 安装包会加入 8 个可独立启用的插件项；启用 `message-bus` 即使用本插件。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-message-bus`。
@@ -111,7 +149,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 
 ### 配置
 
-`dbPath`（默认 `$DSH_HOME/message-bus/bus.sqlite`）、`enabled`、`strictMode`（默认 `true`）、优先级/去重窗口与可选路由。`message_purge` 是破坏性操作，需要显式确认。
+`dbPath`（默认 `$DSH_HOME/message-bus/bus.sqlite`）、`enabled`、`strictMode`（默认 `true`）、`autoResume`（默认 `true`）、`resumeModel`、优先级/去重窗口与可选路由。`message_purge` 是破坏性操作，需要显式确认。
 
 ### 严格模式（默认开启）
 
@@ -123,6 +161,13 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 - alias/join 路径不触发审批；`strictMode:false` 保持原直接 session-id 行为。
 - Web 消息中心是人工界面，不受工具审批门禁影响。
 - `message_bus_status` 暴露生效的 `strictMode`。
+
+### 有意退役的旧接口
+
+- `PEERS.json`、文件式 pipe2 routes/inbox、`team_audit`/`pipe2_*` bridge 工具及其 file-watch 行为
+  在 host-native v2 线中**有意退役**，不再实现，也不用于新工作；请使用 `network_info`、host
+  `sessionDirectory`/alias 路径和 `message_*` 工具。`legacyTools:true` 仅保留最小兼容别名面。
+
 ### 人工确认
 
 - `message_purge`：永久删除消息、投递与已读状态，需要显式提供范围并确认影响；操作前请说明将删除的内容。

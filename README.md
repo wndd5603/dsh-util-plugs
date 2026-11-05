@@ -4,7 +4,7 @@ A single install that adds eight independently switchable plugins to DeepSeek Ha
 
 一次安装，为 DeepSeek Harness 增加 8 个可独立启用的插件。
 
-> Version: 2026.11.5-7 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.5-8 · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -12,10 +12,20 @@ A single install that adds eight independently switchable plugins to DeepSeek Ha
 
 The `dsh-util-plugs` package gives DeepSeek Harness context awareness, cross-session messaging with a Web message center, team collaboration, agent workflows, a workbench status overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
+### What is new in 2026.11.5-8
+
+- **Cross-session delivery recovery**: message-bus now resumes inactive target sessions before delivery (host
+  agents API with the session preset), queues messages when resume fails or is rate-limited, and flushes them
+  exactly once when the target becomes live. Auto-resume is per-caller rate-limited.
+- **Strict mode bound to the sandbox**: direct session-id delivery needs a one-time approval in confined modes
+  and fails closed as `STRICT_SESSION_ID_DENIED` when no approval answerer exists; alias/join delivery is
+  unaffected. The Web message center shows the effective strict-mode state in its header.
+- **Final v8 bundle**: eight switchable rows, zero npm dependencies, one composed Web client with three
+  surfaces (messages / restart / plugin console); docs and vendored code aligned.
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-8
 ```
 
 The package is self-contained: the eight runtime plugins live under `vendor/`, and an install works without publishing them to npm. No npm package is published yet.
@@ -25,7 +35,7 @@ The package is self-contained: the eight runtime plugins live under `vendor/`, a
 | Plugin | What it adds | Docs |
 |---|---|---|
 | `context-sentinel` | Context occupancy, a per-turn `[ctx]` signal, archive reminders and optional guard rails. | [`vendor/context-sentinel/README.md`](vendor/context-sentinel/README.md) |
-| `message-bus` | Local SQLite cross-session messaging, read receipts, priorities and a Web message center. | [`vendor/message-bus/README.md`](vendor/message-bus/README.md) |
+| `message-bus` | Local SQLite cross-session messaging, read receipts, priorities, inactive-session recovery (`autoResume`) and a Web message center. | [`vendor/message-bus/README.md`](vendor/message-bus/README.md) |
 | `team-bus` | Session network, alias/meeting registry, shared pitfalls and five coordination skills. | [`vendor/team-bus/README.md`](vendor/team-bus/README.md) |
 | `agent-workflows` | Team Coordinator and Prompt Studio workflow tools. | [`vendor/agent-workflows/README.md`](vendor/agent-workflows/README.md) |
 | `workbench-bundle` | A read-only `workbench_status()` overview and a first-turn capability pointer. | [`vendor/workbench-bundle/README.md`](vendor/workbench-bundle/README.md) |
@@ -33,7 +43,7 @@ The package is self-contained: the eight runtime plugins live under `vendor/`, a
 | `host-relaunch` | Two-step safe restart, a Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | A unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin can be enabled, disabled and configured independently. The package version is 2026.11.5-7; individual plugins keep their own versions.
+Each plugin can be enabled, disabled and configured independently. The package version is 2026.11.5-8; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -50,6 +60,7 @@ All three surfaces are UI-only for the model: agents can read or request the sam
 - Enable/disable and configure each plugin in Settings → Plugins.
 - Local-first: no network calls and no credentials. SQLite databases, JSONL audits and backups stay under `$DSH_HOME` or the session workspace.
 - Safe defaults: write-related guards and real host restarts are opt-in (`allowRealRestart:false`).
+- message-bus: `strictMode` (default on, bound to the sandbox mode) and `autoResume` (default on, per-caller rate-limited) are live config fields, editable in the plugin console.
 - See [`PRIVACY.md`](PRIVACY.md) for local data locations and cleanup.
 
 ### Compatibility and uninstall
@@ -74,10 +85,18 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 8 个可独立启用的插件：上下文感知、带 Web 消息中心的跨会话消息、团队协作、智能体工作流、工作台状态总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用即可。
 
+### 2026.11.5-8 新增
+
+- **跨会话投递恢复**：message-bus 在投递前恢复非在线目标会话（宿主 agents + 会话预设组合）；恢复失败或触发限频时
+  消息保留入队，目标变为在线时恰好补投一次；自动恢复按调用方限频。
+- **严格模式与沙箱绑定**：受限模式下直接 session-id 投递需要一次性审批；无审批通道时以 `STRICT_SESSION_ID_DENIED`
+  失败关闭且不投递；alias/join 不受影响。Web 消息中心头部展示当前严格模式状态。
+- **最终 v8 安装包**：8 个可独立启用插件、0 npm 依赖、一个组合 client 提供三个界面（消息 / 重启 / 插件控制台）；
+  文档与 vendored 代码已对齐。
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-8
 ```
 
 安装包自带全部运行代码（8 个插件位于 `vendor/`），无需先把它们发布到 npm。目前尚未发布 npm 包。
@@ -87,7 +106,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 | 插件 | 提供什么 | 文档 |
 |---|---|---|
 | `context-sentinel` | 上下文占用、每轮 `[ctx]` 提示、归档提醒与可选护栏。 | [`vendor/context-sentinel/README.md`](vendor/context-sentinel/README.md) |
-| `message-bus` | 本地 SQLite 跨会话消息、已读回执、优先级与 Web 消息中心。 | [`vendor/message-bus/README.md`](vendor/message-bus/README.md) |
+| `message-bus` | 本地 SQLite 跨会话消息、已读回执、优先级、离线会话恢复（`autoResume`）与 Web 消息中心。 | [`vendor/message-bus/README.md`](vendor/message-bus/README.md) |
 | `team-bus` | 会话网络、别名/会议注册、共享坑点与 5 个协作技能。 | [`vendor/team-bus/README.md`](vendor/team-bus/README.md) |
 | `agent-workflows` | Team Coordinator 与 Prompt Studio 工作流工具。 | [`vendor/agent-workflows/README.md`](vendor/agent-workflows/README.md) |
 | `workbench-bundle` | 只读 `workbench_status()` 总览与首轮能力提示。 | [`vendor/workbench-bundle/README.md`](vendor/workbench-bundle/README.md) |
@@ -95,7 +114,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：插件卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.5-7，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.5-8，各插件保留自己的版本号。
 
 ### Web 界面
 
@@ -112,6 +131,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 - 在「设置 → 插件」中逐个启用/禁用/配置插件项。
 - 本地优先：无网络请求、无凭据；SQLite、JSONL 审计与备份保存在 `$DSH_HOME` 或会话工作区。
 - 安全默认：写相关护栏与真实宿主重启均需显式开启（`allowRealRestart:false`）。
+- message-bus：`strictMode`（默认开、与沙箱模式绑定）与 `autoResume`（默认开、按调用方限频）是可在插件控制台编辑的实时配置。
 - 本地数据位置与清理见 [`PRIVACY.md`](PRIVACY.md)。
 
 ### 兼容与卸载

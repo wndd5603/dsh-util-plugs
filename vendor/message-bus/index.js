@@ -63,6 +63,16 @@ export const Config = objectSchema({
     description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval in confined modes; set false to allow direct ids. Auto-bypassed under danger-full-access (no approval answerer). Alias/join is always unaffected.',
     volatile: true,
   }),
+  autoResume: boolean(true, {
+    description: '自动恢复 inactive 会话后投递/Auto-resume inactive targets (default true): resume + preset mount before delivery; failures leave the message stored in the queue.',
+  }),
+  autoResumeRateLimitPerMinute: number(12, {
+    description: 'Per-caller auto-resume attempts per minute (default 12); excess stays queued with wakeError autoResume-rate-limited.',
+    int: true, min: 1, max: 120,
+  }),
+  resumeModel: record({}, {
+    description: 'Fallback {provider,model} when resuming an inactive session and agentDefaultModel has no current selection.',
+  }),
   delivery: nested(objectSchema({
     lightweight: boolean(true, { description: 'Wake envelopes carry only metadata, never the body.' }),
     dedupeWindowMs: number(600000, { description: 'Same (from,to,bodySha256) or dedupeKey window; 0 disables dedupe.', min: 0, int: true }),
@@ -138,6 +148,11 @@ function normalizeConfig(config) {
   return {
     enabled: merged.enabled !== false,
     strictMode: merged.strictMode !== false,
+    autoResume: merged.autoResume !== false,
+    autoResumeRateLimitPerMinute: Math.max(1, Math.min(120, Math.trunc(num(merged.autoResumeRateLimitPerMinute, 12)))),
+    resumeModel: merged.resumeModel !== null && typeof merged.resumeModel === 'object'
+      && typeof merged.resumeModel.provider === 'string' && typeof merged.resumeModel.model === 'string'
+      ? { provider: merged.resumeModel.provider, model: merged.resumeModel.model } : null,
     dbPath,
     delivery: {
       lightweight: delivery.lightweight !== false,
@@ -273,12 +288,12 @@ export function apply(ctx, config) {
     const sessionId = typeof exec?.agent?.session?.id === 'string' ? exec.agent.session.id : null
     return { sessionId, displayName: sessionId === null ? 'unknown' : resolveDisplayName(sessionId, null) }
   }
-  const resolveTarget = (to) => {
+  const resolveTarget = (to, { allowInactive = false } = {}) => {
     const raw = String(to ?? '').trim()
-    // 1) exact session id -> live Agent registry
+    // 1) exact session id -> live Agent registry (or a resumable id)
     if (SESSION_ID_RE.test(raw)) {
       const sessionId = raw.toLowerCase()
-      const agent = requireLive(sessionId)
+      const agent = allowInactive ? resolveAgent(sessionId) : requireLive(sessionId)
       return { sessionId, agent, alias: null, displayName: resolveDisplayName(sessionId, null), source: 'agents' }
     }
     // 2) alias -> host-native sessionDirectory (only joined aliases)
@@ -286,7 +301,7 @@ export function apply(ctx, config) {
     let joined = null
     try { joined = directory?.resolve?.(raw) ?? null } catch { joined = null }
     if (joined !== null && typeof joined.sessionId === 'string') {
-      const agent = requireLive(joined.sessionId)
+      const agent = allowInactive ? resolveAgent(joined.sessionId) : requireLive(joined.sessionId)
       return {
         sessionId: joined.sessionId,
         agent,
@@ -298,7 +313,7 @@ export function apply(ctx, config) {
     // 3) legacy route table fallback (migration only; never PEERS)
     const route = store.resolveRoute(raw)
     if (route !== undefined && route !== null && typeof route.session_id === 'string') {
-      const agent = requireLive(route.session_id)
+      const agent = allowInactive ? resolveAgent(route.session_id) : requireLive(route.session_id)
       return { sessionId: route.session_id, agent, alias: route.alias, displayName: route.display_name, source: 'legacy-route' }
     }
     // 4) live Agent header alias/displayName -> unique match only
@@ -368,9 +383,174 @@ export function apply(ctx, config) {
     if (typeof entry.timer.unref === 'function') entry.timer.unref()
   }
 
+  /** Deliver previously queued messages once a session becomes live (old bridge watcher equivalent). */
+  const flushQueuedDeliveries = (agent) => {
+    if (agent === undefined || typeof agent?.session?.id !== 'string') return 0
+    let rows = []
+    try { rows = store.pendingDeliveries(agent.session.id) } catch { rows = [] }
+    let delivered = 0
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (flushingDeliveries.has(row.delivery_id)) continue
+      flushingDeliveries.add(row.delivery_id)
+      try {
+        const item = {
+          id: row.message_id,
+          at: row.message_at ?? row.delivery_at ?? nowIso(),
+          from: row.from_display ?? 'unknown',
+          to: agent.session.id,
+          subject: row.subject ?? '',
+          bytes: row.bytes ?? 0,
+          sha: row.sha256 ?? '',
+          priority: false,
+        }
+        agent.followup(createUserMessage('[message-bus] ' + envelopeLine(item)))
+        store.markDeliveryDelivered?.(row.delivery_id)
+        store.markEnvelopeDelivered?.(agent.session.id, row.message_id)
+        delivered += 1
+      } catch (error) {
+        logger.warn('[message-bus] queued delivery flush failed for ' + agent.session.id + ': ' + String(error))
+      } finally {
+        flushingDeliveries.delete(row.delivery_id)
+      }
+    }
+    if (delivered > 0) logger.info('[message-bus] flushed ' + delivered + ' queued message(s) to ' + agent.session.id)
+    return delivered
+  }
+  const flushAllQueuedForLive = () => {
+    const agents = safeCtxGet(ctx, 'agents')
+    if (agents === undefined || typeof agents.list !== 'function') return
+    for (const agent of safeCall(() => agents.list(), [])) flushQueuedDeliveries(agent)
+  }
+  if (typeof ctx.on === 'function') {
+    try {
+      ctx.on('agent/created', ({ agent }) => flushQueuedDeliveries(agent))
+      ctx.on('agent/status', ({ agent, status }) => {
+        if (status === 'idle' || status === 'running') flushQueuedDeliveries(agent)
+      })
+      ctx.on('agent/disposed', ({ agent }) => {
+        if (typeof agent?.session?.id === 'string') resumedHandles.delete(agent.session.id)
+      })
+    } catch (error) {
+      logger.warn('[message-bus] agent lifecycle listener unavailable: ' + String(error))
+    }
+  }
+  try {
+    const initialFlush = setTimeout(flushAllQueuedForLive, 0)
+    if (typeof initialFlush.unref === 'function') initialFlush.unref()
+    if (typeof ctx.effect === 'function') ctx.effect(() => () => clearTimeout(initialFlush))
+  } catch { /* best effort */ }
+
   const jsonOutput = {
     schema: { type: 'object', additionalProperties: true },
     render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+  }
+
+  // ---- auto-resume inactive targets (task-112, ported from pipe2 bridge) ----
+  const resumedHandles = new Map()
+  const resuming = new Map()
+  const resumeAttempts = new Map()
+  const flushingDeliveries = new Set()
+  const resumeSelection = () => {
+    try {
+      const selection = safeCtxGet(ctx, 'agentDefaultModel')?.currentSelection?.()
+      if (selection !== null && selection !== undefined && typeof selection === 'object'
+        && typeof selection.provider === 'string' && selection.provider.length > 0
+        && typeof selection.model === 'string' && selection.model.length > 0) return selection
+    } catch { /* fall through */ }
+    return cfg.resumeModel
+  }
+  const archivedSessionIds = () => {
+    try {
+      const ids = safeCtxGet(ctx, 'workspaceRegistry')?.archivedSessionIds
+      return Array.isArray(ids) ? ids.map(String) : []
+    } catch { return [] }
+  }
+  const resumeComposition = async (sessionId) => {
+    const presets = safeCtxGet(ctx, 'agentPresets')
+    if (presets === undefined || typeof presets.resolve !== 'function' || typeof presets.mount !== 'function') return undefined
+    let presetId
+    try {
+      const query = safeCtxGet(ctx, 'sessionQuery')
+      if (query !== undefined && typeof query.observeSession === 'function') {
+        const observation = await query.observeSession(sessionId)
+        try {
+          const projected = observation?.projections?.values?.agentPreset
+          if (typeof projected === 'string' && projected.length > 0) presetId = projected
+        } finally {
+          try { observation?.[Symbol.dispose]?.() } catch { /* disposed */ }
+        }
+      }
+    } catch { /* use default preset */ }
+    try {
+      const resolved = await presets.resolve(presetId)
+      const id = resolved?.id
+      if (typeof id !== 'string' || id.length === 0) return undefined
+      return { agentPreset: id, setup: async agentCtx => { await presets.mount(agentCtx, id) } }
+    } catch (error) {
+      logger.warn('[message-bus] preset resolve failed for ' + sessionId + ': ' + String(error))
+      return undefined
+    }
+  }
+  const resumeTargetAgent = async (sessionId, callerSessionId = null) => {
+    if (!cfg.autoResume) return { agent: undefined, error: 'autoResume-disabled' }
+    const rateKey = typeof callerSessionId === 'string' && callerSessionId !== '' ? callerSessionId : 'unknown'
+    const now = Date.now()
+    const recent = (resumeAttempts.get(rateKey) ?? []).filter(at => now - at < 60000)
+    if (recent.length >= cfg.autoResumeRateLimitPerMinute) {
+      resumeAttempts.set(rateKey, recent)
+      return { agent: undefined, error: 'autoResume-rate-limited' }
+    }
+    recent.push(now)
+    resumeAttempts.set(rateKey, recent)
+    const agents = safeCtxGet(ctx, 'agents')
+    const existing = resumedHandles.get(sessionId)
+    if (existing?.agent !== undefined) {
+      const liveAgent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
+      const active = liveAgent !== undefined
+        && (liveAgent.status === undefined || liveAgent.status === 'idle' || liveAgent.status === 'running')
+      if (active && liveAgent === existing.agent) return { agent: liveAgent, error: null }
+      // Cached handle is stale/disposed: drop it and resume again.
+      resumedHandles.delete(sessionId)
+      if (active) return { agent: liveAgent, error: null }
+    }
+    const inflight = resuming.get(sessionId)
+    if (inflight !== undefined) return await inflight
+    if (agents === undefined || typeof agents.resume !== 'function') {
+      return { agent: undefined, error: 'agents-resume-unavailable' }
+    }
+    if (archivedSessionIds().includes(sessionId)) {
+      logger.warn('[message-bus] session ' + sessionId + ' is archived; refusing auto-resume (message stays queued)')
+      return { agent: undefined, error: 'archived' }
+    }
+    const task = (async () => {
+      try {
+        const composition = await resumeComposition(sessionId)
+        if (composition === undefined) {
+          logger.warn('[message-bus] no preset composition for ' + sessionId + '; refusing auto-resume (message stays queued)')
+          return { agent: undefined, error: 'no-preset' }
+        }
+        const selection = resumeSelection()
+        const handle = await agents.resume({
+          resumeSessionId: sessionId,
+          ...(selection === undefined || selection === null ? {} : {
+            agentOptions: { provider: selection.provider, model: selection.model },
+          }),
+          setup: composition.setup,
+        })
+        resumedHandles.set(sessionId, handle)
+        logger.info('[message-bus] auto-resumed ' + sessionId
+          + (selection === undefined || selection === null ? '' : ' (' + selection.provider + '/' + selection.model + ')')
+          + ' preset=' + composition.agentPreset)
+        return { agent: handle?.agent, error: handle?.agent === undefined ? 'resume-no-agent' : null }
+      } catch (error) {
+        logger.warn('[message-bus] auto-resume failed for ' + sessionId + ': ' + String(error))
+        return { agent: undefined, error: String(error?.message ?? error) }
+      } finally {
+        resuming.delete(sessionId)
+      }
+    })()
+    resuming.set(sessionId, task)
+    return await task
   }
 
   const send = async (args, exec) => {
@@ -379,8 +559,12 @@ export function apply(ctx, config) {
     const body = typeof args.body === 'string' ? args.body : ''
     if (body.trim().length === 0) throw new Error('body must not be empty')
     if (cfg.strictMode && sandboxModeOf(exec) !== 'danger-full-access' && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
-    const target = resolveTarget(to)
-    const agent = target.agent
+    const target = resolveTarget(to, { allowInactive: true })
+    let agent = target.agent
+    if (agent !== undefined && agent.status !== undefined && agent.status !== 'idle' && agent.status !== 'running') {
+      agent = undefined
+    }
+    let wakeError = null
     const caller = callerOf(exec)
     const explicitFrom = typeof args.from === 'string' && args.from.trim() !== '' ? args.from.trim() : null
     const fromDisplay = explicitFrom === null ? caller.displayName : explicitFrom
@@ -417,6 +601,14 @@ export function apply(ctx, config) {
       }
     }
 
+    if (agent === undefined && cfg.autoResume) {
+      const resumed = await resumeTargetAgent(target.sessionId, caller.sessionId)
+      agent = resumed.agent
+      wakeError = resumed.error
+    } else if (agent === undefined) {
+      wakeError = 'autoResume-disabled'
+    }
+
     const messageId = 'msg-' + Date.now().toString(36) + '-' + sha.slice(0, 8)
       + (nonce !== '' ? '-' + nonce.slice(0, 8) : '-' + Math.random().toString(36).slice(2, 6))
     store.insertMessage({
@@ -425,7 +617,17 @@ export function apply(ctx, config) {
       dedupeKey, nonce, forced: force, priority, test, projectScope,
     })
     if (agent === undefined) {
-      throw codedError('SESSION_GONE', 'recipient session is not live: ' + target.sessionId)
+      store.insertDelivery({
+        messageId, at, fromSession: caller.sessionId, fromDisplay, toSession: target.sessionId,
+        subject, bodyBytes: bytes, bodySha256: sha, lightweight, delivered: false,
+        dedupeKey, dedupeWindowMs, priority, forced: force, test,
+        error: 'not delivered yet: ' + String(wakeError ?? 'not-live') + '; message stays queued',
+      })
+      return {
+        ok: true, accepted: true, delivered: false, stored: true, queued: true,
+        wakeError: wakeError ?? 'not-live',
+        session: target.sessionId, messageId, bodySha256: sha, subject,
+      }
     }
     const shouldWake = !selfDelivery || wakeSelf
     store.insertDelivery({
@@ -715,6 +917,10 @@ export function apply(ctx, config) {
         version: PLUGIN_VERSION,
         enabled: cfg.enabled,
         strictMode: cfg.strictMode,
+        autoResume: cfg.autoResume,
+        resumedCount: resumedHandles.size,
+        autoResumeRateLimitPerMinute: cfg.autoResumeRateLimitPerMinute,
+        resumeModel: cfg.resumeModel,
         dbPath: cfg.dbPath,
         database: { ...facts, ...(hostDb ?? {}), ...(dbError === null ? {} : { error: dbError }) },
         transport,
@@ -899,7 +1105,7 @@ export function apply(ctx, config) {
         offset,
         readBy,
         counts: store.counts(),
-        capabilities: { send: cfg.webUi.allowSend, audit: cfg.webUi.audit },
+        capabilities: { send: cfg.webUi.allowSend, audit: cfg.webUi.audit, strictMode: cfg.strictMode, autoResume: cfg.autoResume },
         remote: { service: WEB_REMOTE_SERVICE_KEY, namespace: WEB_REMOTE_NAMESPACE, actor: 'ui' },
       }
     }

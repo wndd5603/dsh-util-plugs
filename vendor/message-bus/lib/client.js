@@ -119,6 +119,8 @@ function normalizeListResult(result) {
     readBy: typeof value.readBy === 'string' ? value.readBy : null,
     counts: value.counts !== null && typeof value.counts === 'object' ? value.counts : {},
     allowSend: value.capabilities?.send === true,
+    strictMode: value.capabilities?.strictMode === true,
+    autoResume: value.capabilities?.autoResume === true,
   }
 }
 
@@ -270,6 +272,8 @@ const zh = {
   sendDuplicate: '消息已存在（去重）：{id}',
   sendFailed: '发送失败：{error}',
   sendDisabled: '当前配置禁用了 Web 发送。',
+  strictModeOn: '严格模式：开（直接 session-id 需审批）',
+  strictModeOff: '严格模式：关',
   prev: '上一页',
   next: '下一页',
   page: '第 {page} / {pages} 页',
@@ -326,6 +330,8 @@ const en = {
   sendDuplicate: 'Already exists (deduped): {id}',
   sendFailed: 'Send failed: {error}',
   sendDisabled: 'Web sending is disabled by configuration.',
+  strictModeOn: 'Strict mode: on (direct session-id needs approval)',
+  strictModeOff: 'Strict mode: off',
   prev: 'Previous',
   next: 'Next',
   page: 'Page {page} / {pages}',
@@ -520,6 +526,7 @@ function MessageCenterPage(props) {
   const [readByInput, setReadByInput] = React.useState('')
   const [readBy, setReadBy] = React.useState('')
   const [allowSend, setAllowSend] = React.useState(false)
+  const [strictMode, setStrictMode] = React.useState(true)
   const [counts, setCounts] = React.useState({})
   const [selected, setSelected] = React.useState(undefined)
   const [detail, setDetail] = React.useState(undefined)
@@ -557,6 +564,7 @@ function MessageCenterPage(props) {
         setOffset(normalized.offset)
         setLimit(normalized.limit)
         setAllowSend(normalized.allowSend)
+        setStrictMode(normalized.strictMode)
         setCounts(normalized.counts)
       }
     } catch (caught) {
@@ -670,7 +678,9 @@ function MessageCenterPage(props) {
     panel('div', { style: style.header },
       panel('div', null,
         panel('h1', { style: style.title }, t('title')),
-        panel('p', { style: style.subtitle }, t('subtitle'))),
+        panel('p', { style: style.subtitle }, t('subtitle')),
+        panel('p', { style: style.subtitle, 'data-message-strict-mode': strictMode ? 'on' : 'off' },
+          strictMode ? t('strictModeOn') : t('strictModeOff'))),
       panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
         panel('button', { type: 'button', style: style.button, onClick: () => { void load({ offset }) } }, t('refresh')))),

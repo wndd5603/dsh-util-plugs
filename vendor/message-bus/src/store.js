@@ -219,6 +219,19 @@ export function openMessageStore(dbPath) {
       .all(...params, limit)
   }
 
+  /** Undelivered stored messages for one session, oldest first (auto-resume flush). */
+  const pendingDeliveries = (toSession, limit = 50) => db.prepare(`
+    SELECT d.id AS delivery_id, d.message_id, d.to_session, d.from_display, d.at AS delivery_at,
+           m.at AS message_at, m.subject, m.bytes, m.sha256
+    FROM deliveries d JOIN messages m ON m.id = d.message_id
+    WHERE d.to_session = ? AND d.delivered = 0 AND d.suppressed = 0 AND d.message_id IS NOT NULL
+    ORDER BY d.id ASC LIMIT ?`).all(String(toSession), Math.max(1, Math.min(200, Math.trunc(limit))))
+
+  const markDeliveryDelivered = (deliveryId) => {
+    const result = db.prepare("UPDATE deliveries SET delivered = 1, error = NULL WHERE id = ?").run(deliveryId)
+    return Number(result.changes ?? 0) > 0
+  }
+
   const markRead = (sessionId, messageId, at = nowIso()) => {
     db.prepare(`INSERT INTO read_state (session_id, message_id, read_at) VALUES (?, ?, ?)
       ON CONFLICT(session_id, message_id) DO UPDATE SET read_at = excluded.read_at`)
@@ -346,6 +359,7 @@ export function openMessageStore(dbPath) {
     db, dbPath,
     insertMessage, insertDelivery, findDuplicate, getMessage, listMessages, countMessages,
     deleteMessage, listSuppressed,
+    pendingDeliveries, markDeliveryDelivered,
     markRead, getReadAt, upsertRoute, resolveRoute, listRoutes, counts, purge,
     envelopeState, markEnvelopeDelivered, markEnvelopeConsumed, envelopeCounts,
     databaseFacts, checkpoint,

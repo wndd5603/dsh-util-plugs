@@ -79,7 +79,7 @@ description: >-
 
 ### 2.4 预设 × 能力矩阵（切换前先看）
 
-能力工具已从预设 entry 移到 profile 级全局 row（task-103）：**空白/标准/任意预设都能调用**；
+能力工具已从预设 entry 移到 profile 级全局 row：**空白/标准/任意预设都能调用**；
 预设只负责 persona/instructions 与标准工具集。不要为了拿工具而切换预设。
 
 | 能力 | 提供方（全局 row） | 空白/标准 | captain | prompt-architect | context-pro |
