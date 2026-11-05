@@ -4,18 +4,18 @@ A single install that adds eight independently switchable plugins to DeepSeek Ha
 
 一次安装，为 DeepSeek Harness 增加 8 个可独立启用的插件。
 
-> Version: 2026.11.5-4 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.5-5 · Not yet published on npm; install from GitHub.
 
 ## English
 
 ### What it adds
 
-The `dsh-plugs` package gives DeepSeek Harness context awareness, cross-session messaging with a Web message center, team collaboration, agent workflows, a workbench status overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
+The `dsh-util-plugs` package gives DeepSeek Harness context awareness, cross-session messaging with a Web message center, team collaboration, agent workflows, a workbench status overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-5
 ```
 
 The package is self-contained: the eight runtime plugins live under `vendor/`, and an install works without publishing them to npm. No npm package is published yet.
@@ -33,7 +33,7 @@ The package is self-contained: the eight runtime plugins live under `vendor/`, a
 | `host-relaunch` | Two-step safe restart, a Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | A unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin can be enabled, disabled and configured independently. The package version is 2026.11.5-4; individual plugins keep their own versions.
+Each plugin can be enabled, disabled and configured independently. The package version is 2026.11.5-5; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -72,12 +72,12 @@ MIT © 2026 wndd5603
 
 ### 这个安装包增加什么
 
-`dsh-plugs` 一次安装，为 DeepSeek Harness 增加 8 个可独立启用的插件：上下文感知、带 Web 消息中心的跨会话消息、团队协作、智能体工作流、工作台状态总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用即可。
+`dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 8 个可独立启用的插件：上下文感知、带 Web 消息中心的跨会话消息、团队协作、智能体工作流、工作台状态总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用即可。
 
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-5
 ```
 
 安装包自带全部运行代码（8 个插件位于 `vendor/`），无需先把它们发布到 npm。目前尚未发布 npm 包。
@@ -95,7 +95,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：插件卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.5-4，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.5-5，各插件保留自己的版本号。
 
 ### Web 界面
 

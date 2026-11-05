@@ -1,6 +1,6 @@
 # Operator-only / human-confirmation boundaries
 
-Irreversible or identity-changing actions in `dsh-plugs` are separated from normal
+Irreversible or identity-changing actions in `dsh-util-plugs` are separated from normal
 tool calls. The model may prepare, preview and explain them; a human/operator must
 confirm. Capability inventory: [`CAPABILITY_AUDIT.md`](CAPABILITY_AUDIT.md) and the
 `team-bootstrap` skill.

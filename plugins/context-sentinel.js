@@ -1,5 +1,5 @@
 /**
- * dsh-plugs row: context-sentinel
+ * dsh-util-plugs row: context-sentinel
  *
  * One self-contained bundle row that mounts the two runtime components of the
  * former `dsh-context-sentinel` package: context-meter (occupancy tool/status)

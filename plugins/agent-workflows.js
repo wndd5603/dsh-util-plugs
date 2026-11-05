@@ -1,5 +1,5 @@
 /**
- * dsh-plugs row: agent-workflows
+ * dsh-util-plugs row: agent-workflows
  *
  * Mounts the two runtime plugins shipped by `dsh-agent-workflows`: the captain
  * workflow tools (team_init/team_members_check) and the prompt-forge tools/skill.

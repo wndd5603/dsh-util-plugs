@@ -59,6 +59,9 @@ export const Config = objectSchema({
   dbPath: string('', {
     description: 'SQLite path. Empty = $DSH_HOME/message-bus/bus.sqlite; a leading ~ is expanded to the home dir.',
   }),
+  strictMode: boolean(true, {
+    description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval; set false to allow direct ids. Alias/join is always unaffected.',
+  }),
   delivery: nested(objectSchema({
     lightweight: boolean(true, { description: 'Wake envelopes carry only metadata, never the body.' }),
     dedupeWindowMs: number(600000, { description: 'Same (from,to,bodySha256) or dedupeKey window; 0 disables dedupe.', min: 0, int: true }),
@@ -133,6 +136,7 @@ function normalizeConfig(config) {
   const webUi = merged.webUi !== null && typeof merged.webUi === 'object' ? merged.webUi : {}
   return {
     enabled: merged.enabled !== false,
+    strictMode: merged.strictMode !== false,
     dbPath,
     delivery: {
       lightweight: delivery.lightweight !== false,
@@ -214,6 +218,40 @@ export function apply(ctx, config) {
       throw codedError('SESSION_GONE', 'recipient session is not active: ' + sessionId)
     }
     return agent
+  }
+  /**
+   * Strict mode: direct session-id delivery is a one-time, user-approved escape
+   * hatch. Alias/join is the normal path. The Web UI is itself a human approval
+   * surface, so its Remote invocation is exempt.
+   */
+  const requestDirectSessionIdApproval = async (exec, targetSessionId) => {
+    if (exec?.remote === true) return
+    const approval = safeCtxGet(ctx, 'approval')
+    if (approval === undefined || typeof approval.request !== 'function' || typeof exec?.agent !== 'object') {
+      throw codedError('STRICT_SESSION_ID_DENIED',
+        'strictMode: direct session-id delivery requires approval; use alias_register to join first')
+    }
+    let outcome
+    try {
+      outcome = await approval.request({
+        agent: exec.agent,
+        toolName: 'message_send',
+        callId: exec.callId,
+        reason: 'strictMode: direct session-id delivery requires a one-time approval; use alias_register to join instead',
+        displayReason: {
+          en: 'Strict mode: direct session-id delivery requires one-time approval. Use alias_register to join first.',
+          zh: '严格模式：直接 session-id 投递需一次性审批；建议先 alias_register join。',
+        },
+        signal: exec.signal ?? AbortSignal.timeout(60000),
+      })
+    } catch (error) {
+      throw codedError('STRICT_SESSION_ID_DENIED',
+        'strictMode: approval failed (' + String(error?.message ?? error) + '); use alias_register to join first')
+    }
+    if (outcome !== 'allowed-once') {
+      throw codedError('STRICT_SESSION_ID_DENIED',
+        'strictMode: approval outcome "' + String(outcome) + '"; use alias_register to join first or retry approval')
+    }
   }
   const resolveDisplayName = (sessionId, alias) => {
     if (typeof cfg.displayNamesBySession[sessionId] === 'string') return cfg.displayNamesBySession[sessionId]
@@ -324,11 +362,12 @@ export function apply(ctx, config) {
     render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
   }
 
-  const send = (args, exec) => {
+  const send = async (args, exec) => {
     const to = String(args.to ?? args.session ?? '').trim()
     if (to === '') throw new Error('to/session is required')
     const body = typeof args.body === 'string' ? args.body : ''
     if (body.trim().length === 0) throw new Error('body must not be empty')
+    if (cfg.strictMode && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
     const target = resolveTarget(to)
     const agent = target.agent
     const caller = callerOf(exec)
@@ -434,7 +473,8 @@ export function apply(ctx, config) {
     name: 'message_send',
     description: 'Send a message to any DSH session (id or registered alias). Bodies are stored in a '
       + 'global SQLite database; the recipient gets only a lightweight envelope and reads the body '
-      + 'with message_read. Supports dedupeKey/force/nonce and priority bypass. Project-agnostic. '
+      + 'with message_read. Supports dedupeKey/force/nonce and priority bypass. strictMode (default true) '
+      + 'requires a one-time approval for direct session-id targets; alias/join is preferred. Project-agnostic. '
       + 'Capability/operator-only index: skill("team-bootstrap") §2 / CAPABILITY_AUDIT.md.',
     parameters: {
       type: 'object',
@@ -663,6 +703,7 @@ export function apply(ctx, config) {
         plugin: 'dsh-message-bus',
         version: PLUGIN_VERSION,
         enabled: cfg.enabled,
+        strictMode: cfg.strictMode,
         dbPath: cfg.dbPath,
         database: { ...facts, ...(hostDb ?? {}), ...(dbError === null ? {} : { error: dbError }) },
         transport,
@@ -890,12 +931,12 @@ export function apply(ctx, config) {
       logger.info('[message-bus] web delete id=' + messageId + ' deleted=' + String(deleted))
       return { ok: deleted, deleted, messageId, counts: store.counts() }
     }
-    const remoteSendTask = (toArg, subjectArg, bodyArg, fromArg) => {
+    const remoteSendTask = async (toArg, subjectArg, bodyArg, fromArg) => {
       const args = toArg !== null && typeof toArg === 'object'
         ? toArg : { to: toArg, subject: subjectArg, body: bodyArg, from: fromArg }
       if (!cfg.webUi.allowSend) return { ok: false, error: 'Web send is disabled by config (webUi.allowSend=false)' }
       try {
-        const result = send({
+        const result = await send({
           to: args.to,
           subject: args.subject,
           body: args.body,

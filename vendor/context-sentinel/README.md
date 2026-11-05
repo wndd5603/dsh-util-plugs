@@ -25,7 +25,7 @@ Example:
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-5
 ```
 
 The self-contained bundle adds eight independently switchable plugins; enable `context-sentinel` for this plugin. No npm registry is used. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-context-sentinel`.
@@ -75,7 +75,7 @@ MIT © 2026 wndd5603
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-5
 ```
 
 安装包自带运行代码，会加入 8 个可独立启用的插件项；启用 `context-sentinel` 即使用本插件。安装无需 npm registry；目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-context-sentinel`。

@@ -1,6 +1,6 @@
 # Capability audit — what this bundle can and cannot call
 
-`dsh-plugs` ships **seven plugin rows**. This page is the public, bundle-scoped
+`dsh-util-plugs` ships **eight plugin rows**. This page is the public, bundle-scoped
 capability index behind the `team-bootstrap` skill: it separates what the model
 can call from what needs a human/operator, what is UI-only and what is an
 automatic hook. The source workspace's internal audit (per-file evidence,

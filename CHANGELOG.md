@@ -1,3 +1,18 @@
+## 2026.11.5-5
+
+- Package rename: bundle package name `dsh-plugs` → **`dsh-util-plugs`** (matches the repository name);
+  bundle rows now resolve as `dsh-util-plugs/plugins/*`, and the package-root row (`workbench-bundle`)
+  mounts `dsh-util-plugs`, so the single Web client module registers under the new package name.
+- Strict session delivery sync (message-bus): new `strictMode` config (default `true`) denies direct
+  `session-<uuid>` delivery unless the user approves once via the host approval request; only
+  `allowed-once` proceeds, otherwise `STRICT_SESSION_ID_DENIED` with a join-first hint. Alias/join
+  delivery is unaffected; `strictMode:false` keeps the legacy behavior. `send` is async and
+  `message_bus_status` exposes `strictMode`. Bilingual README sections added.
+- Rebuilt composed Web client for the new id (`dsh-util-plugs`, three client halves); vendored
+  message-bus host module synced; docs/assertions updated. Bundle still one install + eight rows,
+  zero npm dependencies.
+- Candidate verification: verify-scaffold / verify-client pass, npm pack dry-run clean, privacy 0/0.
+  Not tagged, not pushed, not installed into a live profile.
 ﻿## 2026.11.5-4
 
 - Host-native session communication sync: message-bus target resolution via live agents + host
@@ -26,7 +41,7 @@
 
 - Include the Web plugin console as the eighth switchable row (vendored client+host wrapper); message center left label renamed to 跨会话消息 / Cross-session messages; compose three client halves in the root client module.
 
-# Changelog — dsh-plugs
+# Changelog — dsh-util-plugs
 
 ## 2026.11.5-1 
 

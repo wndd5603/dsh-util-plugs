@@ -30,7 +30,7 @@ message_read({ messageId: "msg-..." })
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-5
 ```
 
 The self-contained bundle adds eight independently switchable plugins; enable `message-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-message-bus`.
@@ -41,8 +41,18 @@ Send with `message_send`; read with `message_queue` / `message_read`; acknowledg
 
 ### Configuration
 
-`dbPath` (default `$DSH_HOME/message-bus/bus.sqlite`), `enabled`, priority/dedupe windows and optional routes. `message_purge` is destructive and requires explicit confirmation.
+`dbPath` (default `$DSH_HOME/message-bus/bus.sqlite`), `enabled`, `strictMode` (default `true`), priority/dedupe windows and optional routes. `message_purge` is destructive and requires explicit confirmation.
 
+### Strict mode (default true)
+
+- `strictMode:true` forbids direct `session-<uuid>` delivery; register/join an alias first (preferred).
+- A direct session-id may still be sent after a **one-time approval**: the tool calls
+  `ctx.get('approval').request({agent, toolName:'message_send', callId, reason, displayReason, signal})`;
+  only `allowed-once` proceeds. `rejected`/`cancelled`/`unavailable`/missing approval returns
+  `STRICT_SESSION_ID_DENIED` ("join first or retry approval").
+- Alias/join delivery never asks for approval. `strictMode:false` keeps the legacy direct-id behavior.
+- The Web message center is a human surface and is exempt from the tool approval gate.
+- `message_bus_status` exposes the effective `strictMode`.
 ### Operator-only / human confirmation
 
 - `message_purge` — destructive permanent deletion of messages, deliveries and read-state rows. It requires
@@ -90,7 +100,7 @@ message_read({ messageId: "msg-..." })
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-5
 ```
 
 安装包会加入 8 个可独立启用的插件项；启用 `message-bus` 即使用本插件。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-message-bus`。
@@ -101,8 +111,18 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 
 ### 配置
 
-`dbPath`（默认 `$DSH_HOME/message-bus/bus.sqlite`）、`enabled`、优先级/去重窗口与可选路由。`message_purge` 是破坏性操作，需要显式确认。
+`dbPath`（默认 `$DSH_HOME/message-bus/bus.sqlite`）、`enabled`、`strictMode`（默认 `true`）、优先级/去重窗口与可选路由。`message_purge` 是破坏性操作，需要显式确认。
 
+### 严格模式（默认开启）
+
+- `strictMode:true` 时**禁止直接 session-<uuid> 投递**；优先先 `alias_register` join。
+- 直接 session-id 可通过**一次性审批**放行：工具调用
+  `ctx.get('approval').request({agent, toolName:'message_send', callId, reason, displayReason, signal})`；
+  仅 `allowed-once` 放行；`rejected`/`cancelled`/`unavailable`/无审批通道返回
+  `STRICT_SESSION_ID_DENIED`（提示先 join 或重试审批）。
+- alias/join 路径不触发审批；`strictMode:false` 保持原直接 session-id 行为。
+- Web 消息中心是人工界面，不受工具审批门禁影响。
+- `message_bus_status` 暴露生效的 `strictMode`。
 ### 人工确认
 
 - `message_purge`：永久删除消息、投递与已读状态，需要显式提供范围并确认影响；操作前请说明将删除的内容。

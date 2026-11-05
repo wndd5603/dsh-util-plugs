@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-	id: "dsh-plugs",
+	id: "dsh-util-plugs",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
@@ -2839,4 +2839,4 @@ function apply(ctx) {
 		return module.exports;
 	}
 });
-//# sourceURL=dsh-plugs/client.js
+//# sourceURL=dsh-util-plugs/client.js

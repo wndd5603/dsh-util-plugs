@@ -1,6 +1,6 @@
 # Privacy and local data
 
-`dsh-plugs` is local-first. It makes no network calls, collects no telemetry
+`dsh-util-plugs` is local-first. It makes no network calls, collects no telemetry
 and stores no credentials.
 
 ## What is stored where

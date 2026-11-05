@@ -1,11 +1,11 @@
-# dsh-plugs — one bundle, eight switchable rows
+# dsh-util-plugs — one bundle, eight switchable rows
 #
 # Self-contained: all eight runtime modules live inside this package under
 # plugins/ and vendor/. No unpublished npm package, workspace resolution or
 # network registry is required at install time.
 - insert:
     - id: context-sentinel
-      name: dsh-plugs/plugins/context-sentinel
+      name: dsh-util-plugs/plugins/context-sentinel
       config:
         contextMeter:
           notifyPercent: 78
@@ -13,22 +13,22 @@
         teamHooks2:
           enabled: true
     - id: message-bus
-      name: dsh-plugs/plugins/message-bus
+      name: dsh-util-plugs/plugins/message-bus
     - id: team-bus
-      name: dsh-plugs/plugins/team-bus
+      name: dsh-util-plugs/plugins/team-bus
     - id: agent-workflows
-      name: dsh-plugs/plugins/agent-workflows
+      name: dsh-util-plugs/plugins/agent-workflows
     - id: workbench-bundle
-      name: dsh-plugs
+      name: dsh-util-plugs
     - id: auto-backup
-      name: dsh-plugs/plugins/auto-backup
+      name: dsh-util-plugs/plugins/auto-backup
       config:
         enabled: true
         backupDir: file_backups
     - id: host-relaunch
-      name: dsh-plugs/plugins/host-relaunch
+      name: dsh-util-plugs/plugins/host-relaunch
       config:
         enabled: true
         allowRealRestart: false
     - id: plugin-console
-      name: dsh-plugs/plugins/plugin-console
+      name: dsh-util-plugs/plugins/plugin-console

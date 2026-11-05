@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Static verification for the dsh-plugs release scaffold. Run from the repo root:
+// Static verification for the dsh-util-plugs release scaffold. Run from the repo root:
 //   node scripts/verify-scaffold.mjs
 // It never installs, pushes or starts a host.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -12,9 +12,9 @@ const check = (ok, message) => { if (!ok) failures.push(message) }
 const read = rel => readFileSync(join(root, rel), 'utf8')
 const exists = rel => existsSync(join(root, rel))
 
-const EXPECTED_VERSION = '2026.11.5-4'
+const EXPECTED_VERSION = '2026.11.5-5'
 const pkg = JSON.parse(read('package.json'))
-check(pkg.name === 'dsh-plugs', 'package name must be dsh-plugs')
+check(pkg.name === 'dsh-util-plugs', 'package name must be dsh-util-plugs')
 check(pkg.version === EXPECTED_VERSION, 'package version must be ' + EXPECTED_VERSION)
 check(pkg.license === 'MIT', 'license must be MIT')
 check(pkg.dsh?.bundle?.patch === './cordis.patch.yml', 'dsh.bundle.patch must point at cordis.patch.yml')
@@ -31,7 +31,7 @@ const expected = ['context-sentinel', 'message-bus', 'team-bus', 'agent-workflow
 check(ids.length === 8, 'bundle patch must insert exactly 8 rows, got ' + String(ids.length))
 check(JSON.stringify(ids) === JSON.stringify(expected), 'row ids/order mismatch: ' + JSON.stringify(ids))
 check(new Set(ids).size === ids.length, 'row ids must be unique')
-const rootRows = [...patch.matchAll(/^\s*- id: [a-z0-9-]+\n\s+name: dsh-plugs$/gmu)]
+const rootRows = [...patch.matchAll(/^\s*- id: [a-z0-9-]+\n\s+name: dsh-util-plugs$/gmu)]
 check(rootRows.length === 1, 'exactly one row must mount the package root (dsh.client visibility), got ' + String(rootRows.length))
 
 const modules = {

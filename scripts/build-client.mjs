@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Assemble the single Web client bundle for dsh-plugs.
+ * Assemble the single Web client bundle for dsh-util-plugs.
  *
  * The bundle ships one `./client` module but THREE browser halves:
  * - `vendor/message-bus/lib/client.js` — the sidebar Messages page;
@@ -10,7 +10,7 @@
  * registrations produced by their source packages (`scripts/build-client.mjs`).
  * This script extracts each factory body (the module body between the React
  * require and the `return module.exports`) and composes them into ONE
- * registration whose id is the bundle package name (`dsh-plugs`): the client
+ * registration whose id is the bundle package name (`dsh-util-plugs`): the client
  * module system keys a package's client row by its package name, so a single
  * composed factory is required.
  *

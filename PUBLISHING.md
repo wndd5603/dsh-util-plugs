@@ -1,8 +1,9 @@
-# Publishing / tag checklist — dsh-plugs
+# Publishing / tag checklist — dsh-util-plugs
 
-The latest published tag is **`v2026.11.5-4`** (`wndd5603/dsh-util-plugs`).
-are **author actions**: agents prepare and verify locally, then wait for explicit author confirmation.
-Nothing below is executed automatically by an agent.
+The latest published tag is **`v2026.11.5-4`** (`wndd5603/dsh-util-plugs`); the working tree is the
+**2026.11.5-5 candidate** and is not tagged or pushed. Future pushes and tags are **author actions**:
+agents prepare and verify locally, then wait for explicit author confirmation. Nothing below is
+executed automatically by an agent.
 
 ## Why this repository is self-contained
 
@@ -32,7 +33,7 @@ node --check client.js && node --check plugins/*.js
 
 The client bundle is a **single** `dsh.client` module for the package. All browser
 halves (message center + restart button + plugin console) are composed into it and
-registered under the package name (`dsh-plugs`), which is what the client module
+registered under the package name (`dsh-util-plugs`), which is what the client module
 system keys the bundle's client row by. Re-run `build:client` whenever a vendored
 client half changes.
 
@@ -42,17 +43,17 @@ client half changes.
 # from the repository root
 git init
 git add -A
-git -c user.email=you@example.invalid -c user.name=you commit -m "dsh-plugs 2026.11.5-4"
-git tag v2026.11.5-4
+git -c user.email=you@example.invalid -c user.name=you commit -m "dsh-util-plugs 2026.11.5-5"
+git tag v2026.11.5-5
 
 # isolated DSH home/profile
-export DSH_HOME=/tmp/dsh-plugs-test
-dsh plugin --profile plugs-test add --offline "git+file:///absolute/path/to/dsh-plugs#v2026.11.5-4"
+export DSH_HOME=/tmp/dsh-util-plugs-test
+dsh plugin --profile plugs-test add --offline "git+file:///absolute/path/to/dsh-util-plugs#v2026.11.5-5"
 dsh --profile plugs-test --dump-config
 dsh --profile plugs-test --dump-config-schema
 ```
 
-Expected: one bundle (`dsh-plugs`) and exactly eight rows
+Expected: one bundle (`dsh-util-plugs`) and exactly eight rows
 (`context-sentinel`, `message-bus`, `team-bus`, `agent-workflows`,
 `workbench-bundle`, `auto-backup`, `host-relaunch`, `plugin-console`), no duplicate ids. Each row
 already has all runtime code under `vendor/`; there are no npm dependencies.
@@ -94,7 +95,7 @@ payload must list the client row; `npm run verify:client` covers the registratio
 
 ## GitHub release path (author action)
 
-1. Push `main` and the version tag (for example `v2026.11.5-4`) after author confirmation.
+1. Push `main` and the version tag (for example `v2026.11.5-5`) after author confirmation.
 2. Create a GitHub Release named after the tag; attach a source tarball/zip and
    a `sha256` checksum.
 3. Install command (no npm publish):
