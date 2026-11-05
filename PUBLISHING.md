@@ -1,7 +1,6 @@
 # Publishing / tag checklist — dsh-util-plugs
 
-The latest published tag is **`v2026.11.5-4`** (`wndd5603/dsh-util-plugs`); the working tree is the
-**2026.11.5-5 candidate** and is not tagged or pushed. Future pushes and tags are **author actions**:
+The latest published tag is **`v2026.11.5-5`** (`wndd5603/dsh-util-plugs`). Future pushes and tags are **author actions**:
 agents prepare and verify locally, then wait for explicit author confirmation. Nothing below is
 executed automatically by an agent.
 
