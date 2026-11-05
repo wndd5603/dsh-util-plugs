@@ -36,7 +36,7 @@ dsh plugin --profile web add github:wndd5603/dsh-plugin-console
 
 After adding it, restart/refresh the DSH Web UI and look for the「插件控制台」entry in the left sidebar. Do not add the same client plugin twice.
 
-**Current machine state:** the live web profile has this plugin installed as an independent client plugin; `dsh-util-plugs` 2026.11.5-6 also includes it as the eighth plugin.
+**Current machine state:** the live web profile has this plugin installed as an independent client plugin; `dsh-util-plugs` 2026.11.5-7 also includes it as the eighth plugin.
 
 ### Configuration, permissions & privacy
 
@@ -103,7 +103,7 @@ dsh plugin --profile web add github:wndd5603/dsh-plugin-console
 
 加入后重启/刷新 DSH Web UI，在左栏查找「插件控制台」入口；不要重复添加同一个客户端插件。
 
-**当前机器状态**：本机 web profile 已作为独立客户端插件安装；`dsh-util-plugs` 2026.11.5-6 也已将本插件作为第 8 个插件项收录。
+**当前机器状态**：本机 web profile 已作为独立客户端插件安装；`dsh-util-plugs` 2026.11.5-7 也已将本插件作为第 8 个插件项收录。
 
 ### 配置、权限与隐私
 

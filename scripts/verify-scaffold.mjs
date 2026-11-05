@@ -12,7 +12,7 @@ const check = (ok, message) => { if (!ok) failures.push(message) }
 const read = rel => readFileSync(join(root, rel), 'utf8')
 const exists = rel => existsSync(join(root, rel))
 
-const EXPECTED_VERSION = '2026.11.5-6'
+const EXPECTED_VERSION = '2026.11.5-7'
 const pkg = JSON.parse(read('package.json'))
 check(pkg.name === 'dsh-util-plugs', 'package name must be dsh-util-plugs')
 check(pkg.version === EXPECTED_VERSION, 'package version must be ' + EXPECTED_VERSION)

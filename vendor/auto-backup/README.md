@@ -25,7 +25,7 @@ auto_backup_status()
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-6
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 ```
 
 The bundle adds eight plugins; enable `auto-backup`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-auto-backup`.
@@ -73,7 +73,7 @@ auto_backup_status()
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-6
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-7
 ```
 
 安装包会加入 8 个插件项；启用 `auto-backup`。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-auto-backup`。

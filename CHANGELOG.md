@@ -1,3 +1,7 @@
+## 2026.11.5-7
+
+- Strict mode is now tied to the session sandbox mode: it enforces direct session-id approval only in confined modes (`workspace-write` / `read-only`); `danger-full-access` has no approval answerer, so strict mode is automatically bypassed there instead of failing closed.
+- `strictMode` config description documents this; new unit test covers danger-full-access bypass; message-bus 30/30.
 ## 2026.11.5-6
 
 - **Plugin console settings exposure**: message-bus `strictMode` is marked as a live (volatile) config field; the zero-dependency schema now emits Schemastery-compatible `{uid,refs}` JSON so the host can render the volatile form.

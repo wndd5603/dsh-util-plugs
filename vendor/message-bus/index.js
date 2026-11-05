@@ -60,7 +60,7 @@ export const Config = objectSchema({
     description: 'SQLite path. Empty = $DSH_HOME/message-bus/bus.sqlite; a leading ~ is expanded to the home dir.',
   }),
   strictMode: boolean(true, {
-    description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval; set false to allow direct ids. Alias/join is always unaffected.',
+    description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval in confined modes; set false to allow direct ids. Auto-bypassed under danger-full-access (no approval answerer). Alias/join is always unaffected.',
     volatile: true,
   }),
   delivery: nested(objectSchema({
@@ -220,10 +220,20 @@ export function apply(ctx, config) {
     }
     return agent
   }
+  const sandboxModeOf = (exec) => {
+    try {
+      const policy = safeCtxGet(ctx, 'sandboxPolicy')
+      const resolved = policy?.resolve?.({ session: exec?.agent?.session })
+      return typeof resolved?.mode === 'string' ? resolved.mode : undefined
+    } catch {
+      return undefined
+    }
+  }
   /**
    * Strict mode: direct session-id delivery is a one-time, user-approved escape
    * hatch. Alias/join is the normal path. The Web UI is itself a human approval
-   * surface, so its Remote invocation is exempt.
+   * surface, so its Remote invocation is exempt. danger-full-access has no
+   * approval answerer in this harness, so strict approval is confined-mode-only.
    */
   const requestDirectSessionIdApproval = async (exec, targetSessionId) => {
     if (exec?.remote === true) return
@@ -368,7 +378,7 @@ export function apply(ctx, config) {
     if (to === '') throw new Error('to/session is required')
     const body = typeof args.body === 'string' ? args.body : ''
     if (body.trim().length === 0) throw new Error('body must not be empty')
-    if (cfg.strictMode && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
+    if (cfg.strictMode && sandboxModeOf(exec) !== 'danger-full-access' && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
     const target = resolveTarget(to)
     const agent = target.agent
     const caller = callerOf(exec)
