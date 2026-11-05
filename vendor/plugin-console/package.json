@@ -1,0 +1,41 @@
+{
+  "name": "dsh-plugin-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Unified plugin console for the DSH web client: one sidebar entry listing plugins with live configuration, status, deep links, and a contribution registry for future plugins.",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "src/core.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "test": "npm run build && node --check lib/client.js && node --test test/core.test.mjs test/client-bundle.test.mjs"
+  },
+  "author": "wndd5603 <2863689939@qq.com>"
+}

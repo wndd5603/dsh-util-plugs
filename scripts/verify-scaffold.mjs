@@ -12,7 +12,7 @@ const check = (ok, message) => { if (!ok) failures.push(message) }
 const read = rel => readFileSync(join(root, rel), 'utf8')
 const exists = rel => existsSync(join(root, rel))
 
-const EXPECTED_VERSION = '2026.11.5-1'
+const EXPECTED_VERSION = '2026.11.5-2'
 const pkg = JSON.parse(read('package.json'))
 check(pkg.name === 'dsh-plugs', 'package name must be dsh-plugs')
 check(pkg.version === EXPECTED_VERSION, 'package version must be ' + EXPECTED_VERSION)
@@ -27,8 +27,8 @@ for (const doc of ['CAPABILITY_AUDIT.md', 'OPERATOR_ONLY_BOUNDARIES.md', 'PRIVAC
 
 const patch = read('cordis.patch.yml')
 const ids = [...patch.matchAll(/^\s*- id: ([a-z0-9-]+)/gmu)].map(match => match[1])
-const expected = ['context-sentinel', 'message-bus', 'team-bus', 'agent-workflows', 'workbench-bundle', 'auto-backup', 'host-relaunch']
-check(ids.length === 7, 'bundle patch must insert exactly 7 rows, got ' + String(ids.length))
+const expected = ['context-sentinel', 'message-bus', 'team-bus', 'agent-workflows', 'workbench-bundle', 'auto-backup', 'host-relaunch', 'plugin-console']
+check(ids.length === 8, 'bundle patch must insert exactly 8 rows, got ' + String(ids.length))
 check(JSON.stringify(ids) === JSON.stringify(expected), 'row ids/order mismatch: ' + JSON.stringify(ids))
 check(new Set(ids).size === ids.length, 'row ids must be unique')
 const rootRows = [...patch.matchAll(/^\s*- id: [a-z0-9-]+\n\s+name: dsh-plugs$/gmu)]
@@ -42,6 +42,7 @@ const modules = {
   'workbench-bundle': './index.js',
   'auto-backup': './plugins/auto-backup.js',
   'host-relaunch': './plugins/host-relaunch.js',
+  'plugin-console': './plugins/plugin-console.js',
 }
 for (const [id, rel] of Object.entries(modules)) {
   check(exists(rel), id + ' plugin module missing: ' + rel)
@@ -65,7 +66,8 @@ check(client.includes('sidebar.panellist'), 'client.js must register the message
 check(/PANEL_ID = 'messages'|PANEL_ID = "messages"/.test(client), 'message center panel id must be messages')
 check(client.includes('conversation.session.header.utilities'), 'client.js must register the restart header button')
 check(client.includes('dsh-message-bus'), 'client.js must mount the messageBus Remote contribution')
-check(client.includes('dsh-host-relaunch'), 'client.js must mount the relaunch Remote contribution')
+check(client.includes('dsh-host-relaunch'), 'client.js must mount the relaunch Remote contribution');
+check(client.includes('dsh-plugin-console') || client.includes('pluginConsole'), 'client.js must include the plugin console client half')
 
 // Shipped files must not leak internal workspace paths.
 const SHIPPED_TEXT = [

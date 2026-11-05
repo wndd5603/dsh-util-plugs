@@ -1,8 +1,8 @@
 {
   "name": "dsh-plugs",
-  "version": "2026.11.5-1",
+  "version": "2026.11.5-2",
   "private": true,
-  "description": "Self-contained DeepSeek Harness bundle: context sentinel, message bus with a Web message center, team bus, agent workflows, workbench overview, auto backup and safe host relaunch in one install.",
+  "description": "Self-contained DeepSeek Harness bundle with context sentinel, message/team buses, agent workflows, workbench, auto backup, safe host relaunch and a unified plugin console (eight switchable rows).",
   "author": "wndd5603 <2863689939@qq.com>",
   "license": "MIT",
   "type": "module",
@@ -37,7 +37,8 @@
     "./plugins/auto-backup": "./plugins/auto-backup.js",
     "./plugins/host-relaunch": "./plugins/host-relaunch.js",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./plugins/plugin-console": "./plugins/plugin-console.js"
   },
   "files": [
     "index.js",
@@ -64,7 +65,9 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-api-remote-access"
+        "@deepseek-ai/dsh-api-remote-access",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
   },

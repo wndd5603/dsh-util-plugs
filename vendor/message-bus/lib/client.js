@@ -224,8 +224,8 @@ function canDelete(typed) {
  */
 
 const zh = {
-  panel: '消息',
-  title: '消息中心',
+  panel: '跨会话消息',
+  title: '跨会话消息',
   subtitle: '查看跨会话消息总线：搜索、详情、删除与可选发送。',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
@@ -280,8 +280,8 @@ const zh = {
 }
 
 const en = {
-  panel: 'Messages',
-  title: 'Message center',
+  panel: 'Cross-session messages',
+  title: 'Cross-session messages',
   subtitle: 'Browse the cross-session message bus: search, detail, delete and optional send.',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',

@@ -30,3 +30,5 @@
       config:
         enabled: true
         allowRealRestart: false
+    - id: plugin-console
+      name: dsh-plugs/plugins/plugin-console

@@ -2,7 +2,7 @@
 /**
  * Assemble the single Web client bundle for dsh-plugs.
  *
- * The bundle ships one `./client` module but TWO browser halves:
+ * The bundle ships one `./client` module but THREE browser halves:
  * - `vendor/message-bus/lib/client.js` — the sidebar Messages page;
  * - `vendor/host-relaunch/lib/client.js` — the conversation-header restart button.
  *
@@ -53,6 +53,7 @@ function half(name, relativePath) {
 const halves = [
   half('messageCenter', 'vendor/message-bus/lib/client.js'),
   half('hostRelaunch', 'vendor/host-relaunch/lib/client.js'),
+  half('pluginConsole', 'vendor/plugin-console/lib/client.js'),
 ]
 
 const bundle = `window.__ModuleLoader__.load({
@@ -69,8 +70,9 @@ ${halves.join('\n\n')}
 \t\tfunction apply(ctx) {
 \t\t\tmessageCenter.apply(ctx);
 \t\t\thostRelaunch.apply(ctx);
+\t\t\tpluginConsole.apply(ctx);
 \t\t}
-\t\tconst inject = [...new Set([...messageCenter.inject, ...hostRelaunch.inject])];
+\t\tconst inject = [...new Set([...messageCenter.inject, ...hostRelaunch.inject, ...pluginConsole.inject])];
 \t\texports.apply = apply;
 \t\texports.inject = inject;
 
@@ -80,4 +82,4 @@ ${halves.join('\n\n')}
 //# sourceURL=${pkg.name}/client.js
 `
 writeFileSync(join(repoRoot, 'client.js'), bundle, 'utf8')
-console.log('built ' + pkg.name + ': client.js (' + Buffer.byteLength(bundle) + ' bytes, 2 client halves)')
+console.log('built ' + pkg.name + ': client.js (' + Buffer.byteLength(bundle) + ' bytes, 3 client halves)')

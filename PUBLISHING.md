@@ -40,12 +40,12 @@ bundle's client row by. Re-run `build:client` whenever a vendored client half ch
 # from the repository root
 git init
 git add -A
-git -c user.email=you@example.invalid -c user.name=you commit -m "dsh-plugs 2026.11.5-1"
-git tag v2026.11.5-1
+git -c user.email=you@example.invalid -c user.name=you commit -m "dsh-plugs 2026.11.5-2"
+git tag v2026.11.5-2
 
 # isolated DSH home/profile
 export DSH_HOME=/tmp/dsh-plugs-test
-dsh plugin --profile plugs-test add --offline "git+file:///absolute/path/to/dsh-plugs#v2026.11.5-1"
+dsh plugin --profile plugs-test add --offline "git+file:///absolute/path/to/dsh-plugs#v2026.11.5-2"
 dsh --profile plugs-test --dump-config
 dsh --profile plugs-test --dump-config-schema
 ```
@@ -75,11 +75,11 @@ Booting `--profile plugs-test web --port <spare>` must serve
 
 ## GitHub release path (later, author action)
 
-1. Create `wndd5603/dsh-util-plugs`, push `main` and tag `v2026.11.5-1`.
-2. Create a GitHub Release named `v2026.11.5-1`; attach a source tarball/zip and
+1. Create `wndd5603/dsh-util-plugs`, push `main` and tag `v2026.11.5-2`.
+2. Create a GitHub Release named `v2026.11.5-2`; attach a source tarball/zip and
    a `sha256` checksum.
 3. Suggested install command (no npm publish):
-   `dsh plugin --profile <profile> add github:wndd5603/dsh-util-plugs#v2026.11.5-1`.
+   `dsh plugin --profile <profile> add github:wndd5603/dsh-util-plugs#v2026.11.5-2`.
 4. npm remains **HOLD**; do not run `npm publish`/`pnpm publish` for this
    scaffold until a separate publish decision and identity review.
 5. Before pushing, run the release gate above and inspect the staged file list

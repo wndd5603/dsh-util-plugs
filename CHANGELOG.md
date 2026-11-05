@@ -1,3 +1,7 @@
+## 2026.11.5-2
+
+- Include the Web plugin console as the eighth switchable row (vendored client+host wrapper); message center left label renamed to 跨会话消息 / Cross-session messages; compose three client halves in the root client module.
+
 # Changelog — dsh-plugs
 
 ## 2026.11.5-1 (unreleased)
