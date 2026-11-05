@@ -113,3 +113,10 @@ payload must list the client row; `npm run verify:client` covers the registratio
 - Internal design docs that are not part of the public README/privacy/capability story.
   This repository intentionally contains only runtime code and public docs; the
   machine-readable capability audit and incident evidence stay in the source workspace.
+
+## Branches and releases (2026-11-05)
+- **master** is the stable/default branch; **dev** is the integration branch.
+- All changes (code, docs, skills, vendored files) land on `dev` first; merge `dev` into `master` only after verification.
+- Release tags are created from `master` (e.g. `0.0.1`, then `0.0.2`); do not tag or push directly from a feature branch.
+- Current release: tag **`0.0.1`** (package `2026.11.5-8`, commit `46485aa`); GitHub Release asset `dsh-util-plugs-0.0.1.tgz`.
+- Branch workflow: `docs/publish/GIT_BRANCH_RELEASE_WORKFLOW.md` in the workspace.
