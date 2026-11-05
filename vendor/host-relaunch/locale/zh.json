@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "title": "Restart（两步安全重启）",
+    "description": "两步确认重启宿主：只读预检 + 一次性令牌 + PID 后 4 位确认；allowRealRestart 默认关闭；诊断脱敏；supervisor 拉起与启动重放。"
+  },
+  "client": {
+    "button": "重启 DSH",
+    "dialogTitle": "重启 DSH",
+    "confirmWord": "RESTART",
+    "locked": "重启已锁定（allowRealRestart 关闭）",
+    "blocked": "有运行中的会话，确认已禁用"
+  }
+}

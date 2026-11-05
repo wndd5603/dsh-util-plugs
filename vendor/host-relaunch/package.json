@@ -1,0 +1,7 @@
+{
+  "name": "dsh-host-relaunch",
+  "version": "2026.11.4-2",
+  "private": true,
+  "type": "module",
+  "description": "Runtime vendor copy for the dsh-plugs host-relaunch row."
+}

@@ -1,0 +1,10 @@
+# Ignore dependencies and local test/build artifacts. The release bundle is
+# self-contained: no node_modules or generated tarballs are committed.
+node_modules/
+pnpm-lock.yaml
+*.tgz
+*.log
+.DS_Store
+Thumbs.db
+coverage/
+.tmp/

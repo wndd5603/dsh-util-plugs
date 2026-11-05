@@ -1,0 +1,232 @@
+{
+  "version": "v1.1",
+  "source": "<source-labelset>",
+  "description": "Phase L v1.1 deny signatures: prefix+scan-signature, exact match only",
+  "count": 32,
+  "signatures": [
+    {
+      "id": "pl-001",
+      "label": "expected",
+      "prefix": "policy-reject:",
+      "denySignature": "policy-reject:tool/Error: unknown tool \"write\"",
+      "signature": "tool/Error: unknown tool \"write\""
+    },
+    {
+      "id": "pl-003",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/Error: [team-hooks2] 角色写权限：当前角色 \"cr-probe\" 命中只读角色策略（cr-*），不允许用 write 写项目文件（目标：<home>\\Documents\\<checkout>\\<workspace>\\dsh-session-network\\docs\\meetings\\TEAM-20261104-R1\\R1_cr-probe.md）。允许的例外：tea",
+      "signature": "tool/Error: [team-hooks2] 角色写权限：当前角色 \"cr-probe\" 命中只读角色策略（cr-*），不允许用 write 写项目文件（目标：<home>\\Documents\\<checkout>\\<workspace>\\dsh-session-network\\docs\\meetings\\TEAM-20261104-R1\\R1_cr-probe.md）。允许的例外：tea"
+    },
+    {
+      "id": "pl-008",
+      "label": "expected",
+      "prefix": "policy-reject:",
+      "denySignature": "policy-reject:tool/Error: phase S1 does not produce artifact \"patches\" (allowed: drill)",
+      "signature": "tool/Error: phase S1 does not produce artifact \"patches\" (allowed: drill)"
+    },
+    {
+      "id": "pl-013",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/=== stash 内容确认（可恢复）=== untracked in stash: === 工作树干净 === entries=0 === 当前 13080 健康 === LocalPort OwningProcess --------- ------------- 13080 19928 === 13081 无残留 === False [stderr] out-file : Could not",
+      "signature": "tool/=== stash 内容确认（可恢复）=== untracked in stash: === 工作树干净 === entries=0 === 当前 13080 健康 === LocalPort OwningProcess --------- ------------- 13080 19928 === 13081 无残留 === False [stderr] out-file : Could not"
+    },
+    {
+      "id": "pl-017",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/OK | llm/retry :: TIMEOUT :: pi-ai stream idle timeout after <n>ms | session-<uuid:778b0d79> | 9 OK | edit :: {\"name\":\"FsError\",\"code\":\"FS_STALE_VERSION\"} | session-<uuid:ced95f34> | 88 OK | edit :: {",
+      "signature": "tool/OK | llm/retry :: TIMEOUT :: pi-ai stream idle timeout after <n>ms | session-<uuid:778b0d79> | 9 OK | edit :: {\"name\":\"FsError\",\"code\":\"FS_STALE_VERSION\"} | session-<uuid:ced95f34> | 88 OK | edit :: {"
+    },
+    {
+      "id": "pl-027",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/=== B4-④：5-4 的 P8 实际 owner === === B4-③：FINAL_SCALE 实际值 与 3200 的关系 === 3200 x 0.00024 = 0.768 px 3200 x 0.0006 = 1.920 px [stderr] [eval]:3 let s=-1;for(let i=0;i<L.length;i++) if(/^ \\[\" 5-4\\\\] ^ Unte",
+      "signature": "tool/=== B4-④：5-4 的 P8 实际 owner === === B4-③：FINAL_SCALE 实际值 与 3200 的关系 === 3200 x 0.00024 = 0.768 px 3200 x 0.0006 = 1.920 px [stderr] [eval]:3 let s=-1;for(let i=0;i<L.length;i++) if(/^ \\[\" 5-4\\\\] ^ Unte"
+    },
+    {
+      "id": "pl-039",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/syntax=0 [driver5] ok [stderr] <home>\\AppData\\Local\\Temp\\patch_need4_rerun.js:9 \" _G.__sim_dispatchTransport = function()\\n Main._winPending = true -- ★ 模拟\"占下仓库 trigger\"（5-4 真实流程会置它 ✓）\\n Event.dispatc",
+      "signature": "tool/syntax=0 [driver5] ok [stderr] <home>\\AppData\\Local\\Temp\\patch_need4_rerun.js:9 \" _G.__sim_dispatchTransport = function()\\n Main._winPending = true -- ★ 模拟\"占下仓库 trigger\"（5-4 真实流程会置它 ✓）\\n Event.dispatc"
+    },
+    {
+      "id": "pl-041",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/<home>\\AppData\\Local\\Temp\\rec.js:34 L.push(' ★ 给 S4 做\"整段替换\"时，我**自己算下标**（`indexOf(\\'};', i0)`）✗ ⇒ ★ **一次把文件弄成语法错** ✗✗（★ `SyntaxError: Unexpected identifier` ✓）'); ^^^^^^^^^^^ System.Management.Automati",
+      "signature": "tool/<home>\\AppData\\Local\\Temp\\rec.js:34 L.push(' ★ 给 S4 做\"整段替换\"时，我**自己算下标**（`indexOf(\\'};', i0)`）✗ ⇒ ★ **一次把文件弄成语法错** ✗✗（★ `SyntaxError: Unexpected identifier` ✓）'); ^^^^^^^^^^^ System.Management.Automati"
+    },
+    {
+      "id": "pl-052",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/--- 目录: <private-project> Mode LastWriteTime Length Name ---- ------------- ------ ---- d----- 2026/11/3 9:37 files d----- 2026/11/3 9:47 report d----- 2026/11/3 9:47 work --- --- --- --- [stderr] hea",
+      "signature": "tool/--- 目录: <private-project> Mode LastWriteTime Length Name ---- ------------- ------ ---- d----- 2026/11/3 9:37 files d----- 2026/11/3 9:47 report d----- 2026/11/3 9:47 work --- --- --- --- [stderr] hea"
+    },
+    {
+      "id": "pl-053",
+      "label": "expected",
+      "prefix": "policy-reject:",
+      "denySignature": "policy-reject:tool/Error: unknown tool \"pwsh\"",
+      "signature": "tool/Error: unknown tool \"pwsh\""
+    },
+    {
+      "id": "pl-061",
+      "label": "expected",
+      "prefix": "approval:",
+      "denySignature": "approval:tool/Error: approval for escalating to \"danger-full-access\" was cancelled",
+      "signature": "tool/Error: approval for escalating to \"danger-full-access\" was cancelled"
+    },
+    {
+      "id": "pl-063",
+      "label": "expected",
+      "prefix": "sandbox-policy:",
+      "denySignature": "sandbox-policy:tool/Error: [sandbox: file access denied under workspace-write mode] [sandbox: escalation available — retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + jus",
+      "signature": "tool/Error: [sandbox: file access denied under workspace-write mode] [sandbox: escalation available — retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + jus"
+    },
+    {
+      "id": "pl-072",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/exit=1 [stderr] node : node:internal/modules/cjs/loader:1503 At line:1 char:129 + ... ew($false); node \"<private-project> ... + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ + CategoryInfo",
+      "signature": "tool/exit=1 [stderr] node : node:internal/modules/cjs/loader:1503 At line:1 char:129 + ... ew($false); node \"<private-project> ... + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ + CategoryInfo"
+    },
+    {
+      "id": "pl-080",
+      "label": "expected",
+      "prefix": "policy-reject:",
+      "denySignature": "policy-reject:tool/Error: unknown tool \"team_sessions\"",
+      "signature": "tool/Error: unknown tool \"team_sessions\""
+    },
+    {
+      "id": "pl-082",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/Found 4 matches <path:2390494a> Line 103: 'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout', 'shortcuts', 'remoteAccess', Line 125: ctx, ctx.remote.directoryPic",
+      "signature": "tool/Found 4 matches <path:2390494a> Line 103: 'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout', 'shortcuts', 'remoteAccess', Line 125: ctx, ctx.remote.directoryPic"
+    },
+    {
+      "id": "pl-084",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/--- error/warn lines mentioning local plugins --- 1: WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing. 10: error: StartupError: dsh: st",
+      "signature": "tool/--- error/warn lines mentioning local plugins --- 1: WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing. 10: error: StartupError: dsh: st"
+    },
+    {
+      "id": "pl-088",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/=== 新树 JSON.parse / stringified / coerce 出现点 === batch.ts:101 return raw ? JSON.parse(raw) : {} pipeline.ts:644 * is stringified. === 新树 pipeline.ts 620-690 === } return detached } catch (error: unkno",
+      "signature": "tool/=== 新树 JSON.parse / stringified / coerce 出现点 === batch.ts:101 return raw ? JSON.parse(raw) : {} pipeline.ts:644 * is stringified. === 新树 pipeline.ts 620-690 === } return detached } catch (error: unkno"
+    },
+    {
+      "id": "pl-099",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/Error: cannot read \"<home>\\AppData\\Local\\Temp\\editordev_20261021\\probe_output_css2b.txt\": binary file",
+      "signature": "tool/Error: cannot read \"<home>\\AppData\\Local\\Temp\\editordev_20261021\\probe_output_css2b.txt\": binary file"
+    },
+    {
+      "id": "pl-103",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/fk [Object: null prototype] { foreign_keys: 1 } THROW SQLITE_ERROR SQLITE_ERROR: FOREIGN KEY constraint failed === EXDEV 探针 === { \"ok\": false, \"mode\": \"apply\", \"dryRun\": false, \"from\": \"<path:b384af6f",
+      "signature": "tool/fk [Object: null prototype] { foreign_keys: 1 } THROW SQLITE_ERROR SQLITE_ERROR: FOREIGN KEY constraint failed === EXDEV 探针 === { \"ok\": false, \"mode\": \"apply\", \"dryRun\": false, \"from\": \"<path:b384af6f"
+    },
+    {
+      "id": "pl-104",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/==== startup-2026-10-20T09-53-23.482Z-<uuid:8d64ecaf>.log 749: at composeError (<path:0047588c>) 756: [cause]: Error: ENOENT: no such file or directory, stat '<path:cdb4fb26>' 766: at composeError (<p",
+      "signature": "tool/==== startup-2026-10-20T09-53-23.482Z-<uuid:8d64ecaf>.log 749: at composeError (<path:0047588c>) 756: [cause]: Error: ENOENT: no such file or directory, stat '<path:cdb4fb26>' 766: at composeError (<p"
+    },
+    {
+      "id": "pl-111",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/zstandard 0.23.0 [stderr] python : Traceback (most recent call last): 所在位置 行:3 字符: 1 + python -c \"import pyzstd; print('pyzstd')\" 2>&1 + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ + CategoryInfo ",
+      "signature": "tool/zstandard 0.23.0 [stderr] python : Traceback (most recent call last): 所在位置 行:3 字符: 1 + python -c \"import pyzstd; print('pyzstd')\" 2>&1 + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ + CategoryInfo "
+    },
+    {
+      "id": "pl-113",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/★ 1-1 在 L55，events 在 L104 OK 变异已生成 ✓ ═══ _a ═══ node:fs:441 return binding.readFileUtf8(path, stringToFlags(options.flag)); ^ System.Management.Automation.RemoteException Error: ENOENT: no such file o",
+      "signature": "tool/★ 1-1 在 L55，events 在 L104 OK 变异已生成 ✓ ═══ _a ═══ node:fs:441 return binding.readFileUtf8(path, stringToFlags(options.flag)); ^ System.Management.Automation.RemoteException Error: ENOENT: no such file o"
+    },
+    {
+      "id": "pl-115",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/Error: [team-hooks2] 角色写权限：当前角色 \"cr-probe\" 命中只读角色策略（cr-*），不允许用 write 写项目文件（目标：<private-project> scratch/ 与 file_backups/ 目录。如需改其他文件，请把改动计划交给有写权限的成员（或让 Lead 指派）执行，不要尝试绕过。",
+      "signature": "tool/Error: [team-hooks2] 角色写权限：当前角色 \"cr-probe\" 命中只读角色策略（cr-*），不允许用 write 写项目文件（目标：<private-project> scratch/ 与 file_backups/ 目录。如需改其他文件，请把改动计划交给有写权限的成员（或让 Lead 指派）执行，不要尝试绕过。"
+    },
+    {
+      "id": "pl-123",
+      "label": "expected",
+      "prefix": "policy-reject:",
+      "denySignature": "policy-reject:tool/Error: unknown tool \"restart_dsh\"",
+      "signature": "tool/Error: unknown tool \"restart_dsh\""
+    },
+    {
+      "id": "pl-130",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/A_LLMӦ��_Agent_20261031_v1.pdf pages= 2 chars= 2392 {'phone': False, 'email': False, 'recent_expr': True, 'cifar_phrase': False, 'skills6': True} [stderr] python : Traceback (most recent call last): A",
+      "signature": "tool/A_LLMӦ��_Agent_20261031_v1.pdf pages= 2 chars= 2392 {'phone': False, 'email': False, 'recent_expr': True, 'cifar_phrase': False, 'skills6': True} [stderr] python : Traceback (most recent call last): A"
+    },
+    {
+      "id": "pl-133",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/Found 250 of 400 matches <path:24704e85> Line 43: - `inject`: `tools` · `agents` · `sessionProjections` · `remoteAccess` Line 207: - `inject`: `typert` · `remoteAccess` Line 247: - `inject`: `agentDef",
+      "signature": "tool/Found 250 of 400 matches <path:24704e85> Line 43: - `inject`: `tools` · `agents` · `sessionProjections` · `remoteAccess` Line 207: - `inject`: `typert` · `remoteAccess` Line 247: - `inject`: `agentDef"
+    },
+    {
+      "id": "pl-135",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/Error: [dsh-restart] 围栏拒绝：这条命令会直接结束宿主进程（Stop-Process 会结束 node/dsh 进程）。重启宿主请改用 restart_dsh 工具：第一步只返回警告与令牌，第二步带 confirm=令牌 才执行；宿主退出后由 detached supervisor 用原命令行拉起，并重放 handoff 恢复会话（工具结果不会丢失）。",
+      "signature": "tool/Error: [dsh-restart] 围栏拒绝：这条命令会直接结束宿主进程（Stop-Process 会结束 node/dsh 进程）。重启宿主请改用 restart_dsh 工具：第一步只返回警告与令牌，第二步带 confirm=令牌 才执行；宿主退出后由 detached supervisor 用原命令行拉起，并重放 handoff 恢复会话（工具结果不会丢失）。"
+    },
+    {
+      "id": "pl-141",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/✓ 已投递 bridge → test-captain（seq 39，id 40ce207e） subject: 唤醒诊断 3：请回复收到 === debug 日志 === {\"at\":\"2026-10-24T11:26:51.237Z\",\"event\":\"resume-error\",\"detail\":\"session-<uuid:e2816134>: RemoteError: tool-suba",
+      "signature": "tool/✓ 已投递 bridge → test-captain（seq 39，id 40ce207e） subject: 唤醒诊断 3：请回复收到 === debug 日志 === {\"at\":\"2026-10-24T11:26:51.237Z\",\"event\":\"resume-error\",\"detail\":\"session-<uuid:e2816134>: RemoteError: tool-suba"
+    },
+    {
+      "id": "pl-144",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/log: startup-2026-10-20T09-53-23.482Z-<uuid:8d64ecaf>.log [10/20/2026 17:53:23] === lines mentioning context-pro / agent preset (last 30) === 918: Error: tool-subagent: toolFilter is no longer support",
+      "signature": "tool/log: startup-2026-10-20T09-53-23.482Z-<uuid:8d64ecaf>.log [10/20/2026 17:53:23] === lines mentioning context-pro / agent preset (last 30) === 918: Error: tool-subagent: toolFilter is no longer support"
+    },
+    {
+      "id": "pl-150",
+      "label": "verification",
+      "prefix": "verify:",
+      "denySignature": "verify:tool/Length : 1397 LastWriteTime : 2026/10/24 19:30:47 {\"at\":\"2026-10-24T11:26:51.237Z\",\"event\":\"resume-error\",\"detail\":\"session-<uuid:e2816134>: RemoteError: tool-subagent-list-agents (@deepseek-ai/dsh-to",
+      "signature": "tool/Length : 1397 LastWriteTime : 2026/10/24 19:30:47 {\"at\":\"2026-10-24T11:26:51.237Z\",\"event\":\"resume-error\",\"detail\":\"session-<uuid:e2816134>: RemoteError: tool-subagent-list-agents (@deepseek-ai/dsh-to"
+    },
+    {
+      "id": "pl-152",
+      "label": "expected",
+      "prefix": "expected:",
+      "denySignature": "expected:tool/Found 23 matches <path:ff6244f6> Line 66: useRemoteAccess = allowAllAccess.useRemoteAccess, useWorkspaceAccess = allowAllAccess.useWorkspaceAccess, ...props Line 67: }: Omit<ProjectRowItemProps, 'useR",
+      "signature": "tool/Found 23 matches <path:ff6244f6> Line 66: useRemoteAccess = allowAllAccess.useRemoteAccess, useWorkspaceAccess = allowAllAccess.useWorkspaceAccess, ...props Line 67: }: Omit<ProjectRowItemProps, 'useR"
+    },
+    {
+      "id": "pl-157",
+      "label": "expected",
+      "prefix": "ownership:",
+      "denySignature": "ownership:tool/Error: team task \"task-21\" is owned by another member",
+      "signature": "tool/Error: team task \"task-21\" is owned by another member"
+    }
+  ]
+}

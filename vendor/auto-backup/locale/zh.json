@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Auto Backup（写前自动备份）",
+    "description": "write/edit 前把目标文件复制到项目 file_backups，分级保留 + 容量上限 + 只读状态工具；项目根按会话工作区解析。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Team bus",
+    "description": "Cross-session network plus a universal SQLite message bus."
+  }
+}

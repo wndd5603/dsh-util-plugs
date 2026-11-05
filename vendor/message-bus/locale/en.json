@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session message bus",
+    "description": "Project-agnostic SQLite message bus: send messages to any session, read bodies on demand, dedupe, priority wakes and read state."
+  }
+}

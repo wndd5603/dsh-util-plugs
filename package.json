@@ -1,0 +1,81 @@
+{
+  "name": "dsh-plugs",
+  "version": "2026.11.5-1",
+  "private": true,
+  "description": "Self-contained DeepSeek Harness bundle: context sentinel, message bus with a Web message center, team bus, agent workflows, workbench overview, auto backup and safe host relaunch in one install.",
+  "author": "wndd5603 <2863689939@qq.com>",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wndd5603/dsh-util-plugs.git"
+  },
+  "homepage": "https://github.com/wndd5603/dsh-util-plugs",
+  "bugs": {
+    "url": "https://github.com/wndd5603/dsh-util-plugs/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "harness",
+    "bundle",
+    "plugins",
+    "context",
+    "message-bus",
+    "team",
+    "workflow",
+    "backup",
+    "restart"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./plugins/context-sentinel": "./plugins/context-sentinel.js",
+    "./plugins/message-bus": "./plugins/message-bus.js",
+    "./plugins/team-bus": "./plugins/team-bus.js",
+    "./plugins/agent-workflows": "./plugins/agent-workflows.js",
+    "./plugins/workbench-bundle": "./plugins/workbench-bundle.js",
+    "./plugins/auto-backup": "./plugins/auto-backup.js",
+    "./plugins/host-relaunch": "./plugins/host-relaunch.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "plugins",
+    "vendor",
+    "client.js",
+    "README.md",
+    "CHANGELOG.md",
+    "PRIVACY.md",
+    "PUBLISHING.md",
+    "CAPABILITY_AUDIT.md",
+    "OPERATOR_ONLY_BOUNDARIES.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-api-remote-access"
+      ]
+    }
+  },
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "verify:client": "node scripts/verify-client.mjs",
+    "verify": "node scripts/verify-scaffold.mjs"
+  },
+  "engines": {
+    "node": ">=24",
+    "dsh": ">=0.2.0 <0.3.0"
+  },
+  "main": "./index.js"
+}

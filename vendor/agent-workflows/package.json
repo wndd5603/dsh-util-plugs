@@ -1,0 +1,7 @@
+{
+  "name": "dsh-agent-workflows",
+  "version": "2026.11.4-1",
+  "private": true,
+  "type": "module",
+  "description": "Runtime vendor copy for the dsh-plugs agent-workflows row."
+}

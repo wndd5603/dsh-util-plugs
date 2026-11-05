@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "团队总线",
+    "description": "跨会话网络 + 通用 SQLite 消息总线合并包。"
+  }
+}

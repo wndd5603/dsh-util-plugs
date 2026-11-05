@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workflow presets",
+    "description": "Captain (team bootstrap) and Prompt Architect (prompt-forge) agent presets in one bundle. Tools mount inside their preset sessions only."
+  }
+}

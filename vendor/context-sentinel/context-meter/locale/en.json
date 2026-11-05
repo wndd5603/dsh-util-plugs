@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Context Meter",
+    "description": "Agent tool and skill that measure session context-token occupancy."
+  }
+}

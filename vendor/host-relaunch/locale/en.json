@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "title": "Restart",
+    "description": "Two-step host restart: read-only preflight, one-time token + PID-suffix confirmation, allowRealRestart safety lock (default off), redacted diagnostics, detached supervisor relaunch and boot replay."
+  },
+  "client": {
+    "button": "Restart DSH",
+    "dialogTitle": "Restart DSH",
+    "confirmWord": "RESTART",
+    "locked": "Restart locked (allowRealRestart is off)",
+    "blocked": "A session is running, so confirmation is disabled"
+  }
+}

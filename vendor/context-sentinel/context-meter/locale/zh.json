@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "上下文占用表",
+    "description": "提供检查会话上下文 Token 占用的 Agent 工具与配套技能。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Auto Backup",
+    "description": "Copies write/edit targets into the project file_backups before execution with tiered retention and a read-only status tool; the project root resolves from the session workspace."
+  }
+}

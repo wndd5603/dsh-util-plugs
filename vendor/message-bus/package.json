@@ -1,0 +1,51 @@
+{
+  "name": "dsh-message-bus",
+  "version": "2026.11.5-1",
+  "private": true,
+  "type": "module",
+  "description": "Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wake envelopes, dedupe, priorities, read receipts, inspection tools and a Web message center.",
+  "author": "wndd5603 <2863689939@qq.com>",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./store": "./src/store.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "lib",
+    "client-src",
+    "scripts/build-client.mjs",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-api-remote-access"
+      ]
+    }
+  },
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "test": "node scripts/build-client.mjs && node --check lib/client.js && node --test"
+  },
+  "engines": {
+    "node": ">=24",
+    "dsh": ">=0.2.0 <0.3.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent workbench",
+    "description": "One-step meta bundle: context guard, workflow presets (Captain and Prompt Architect), message bus and session network."
+  }
+}

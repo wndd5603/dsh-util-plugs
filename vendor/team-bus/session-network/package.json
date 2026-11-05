@@ -1,0 +1,7 @@
+{
+  "name": "dsh-team-bus-session-network",
+  "version": "2026.11.4-1",
+  "private": true,
+  "type": "module",
+  "description": "Runtime vendor copy for the dsh-plugs team-bus row."
+}
