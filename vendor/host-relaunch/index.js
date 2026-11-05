@@ -92,7 +92,7 @@ export const Config = objectSchema({
   autoResume: boolean(true, { description: 'Replay a pending handoff on boot.' }),
   fence: boolean(true, { description: 'Deny shell commands that would kill the Host.' }),
   audit: boolean(true, { description: 'Append one JSONL audit line per decision (never contains the token).' }),
-  allowRealRestart: boolean(false, { description: 'SAFETY DOUBLE-LOCK. false refuses a real (non-dryRun) restart. Enable only after verify-relaunch passed and the author approved; keep drill values in the machine-local profile override.' }),
+  allowRealRestart: boolean(false, { description: 'SAFETY DOUBLE-LOCK. false refuses a real (non-dryRun) restart. Enable only after verify-relaunch passed and the author approved; keep drill values in the machine-local profile override.', volatile: true }),
   diagnostics: enumOf('redacted', ['redacted', 'full'], { description: "Diagnostic output mode: 'redacted' (default) masks the home directory/user segment in host/process command lines; 'full' prints raw paths." }),
   dshHome: string('', { description: 'DSH home override; empty = DSH_HOME env or ~/.dsh.' }),
   handoffDir: string('', { description: 'Handoff/audit directory override; empty = <dshHome>/restart.' }),
@@ -998,7 +998,7 @@ export function judgeSelfKillCommand(command, hostPid) {
   const hasHostPid = containsPid(text, hostPid)
   const mentionsNode = /\bnode(?:\.exe)?\b/i.test(text) || /\bnodejs\b/i.test(text)
   const mentionsDsh = /\bdsh(?:\.exe)?\b/i.test(text)
-  const mentionsHostPattern = /apps[\\/]cli|deepseek[-_]harness|dsh web/i.test(text)
+  const mentionsHostPattern = /apps[\\/]cli|deepseek-harness|dsh web/i.test(text)
 
   if (/\btaskkill(?:\.exe)?\b/i.test(text)) {
     if (hasHostPid) return 'taskkill 直接指向宿主 PID'
@@ -1012,7 +1012,7 @@ export function judgeSelfKillCommand(command, hostPid) {
   }
   if (/\bpkill(?:\.exe)?\b/i.test(text)) {
     if (hasHostPid) return 'pkill 直接指向宿主 PID'
-    if (/\bpkill\b[^\n]*(?:\bnode\b|\bdsh\b|apps[\\/]cli|deepseek[-_]harness)/i.test(text)) {
+    if (/\bpkill\b[^\n]*(?:\bnode\b|\bdsh\b|apps[\\/]cli|deepseek-harness)/i.test(text)) {
       return 'pkill 的模式会匹配 node/dsh 宿主进程'
     }
   }

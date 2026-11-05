@@ -1,3 +1,8 @@
+## 2026.11.5-9
+
+- Host-relaunch config is now exposed in the plugin console: `allowRealRestart` is marked volatile and the restart schema emits Schemastery-compatible `{uid,refs}` JSON for the settings form.
+- Message-bus autoResume/strict-mode behavior unchanged from v8.
+
 ## 2026.11.5-8
 
 - **Inactive-session recovery (`autoResume`, default true)**: a non-live session-id/alias target is resumed

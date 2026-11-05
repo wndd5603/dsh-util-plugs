@@ -1,10 +1,10 @@
 # Publishing / tag checklist — dsh-util-plugs
 
-The latest published tag is **`v2026.11.5-8`** (`wndd5603/dsh-util-plugs`). Future pushes and tags are **author actions**:
+The latest published tag is **`v2026.11.5-9`** (`wndd5603/dsh-util-plugs`). Future pushes and tags are **author actions**:
 agents prepare and verify locally, then wait for explicit author confirmation. Nothing below is
 executed automatically by an agent.
 
-**2026.11.5-8 final candidate**: the four release warnings were closed by an independent re-check (inactive-session recovery, initial flush, unavailable approval, plugin-console visibility); verification evidence is recorded in the source-workspace packaging report. This candidate is untagged and not pushed — tag/push still requires explicit author confirmation (one push = one version/tag).
+**2026.11.5-9 final candidate**: the four release warnings were closed by an independent re-check (inactive-session recovery, initial flush, unavailable approval, plugin-console visibility); verification evidence is recorded in the source-workspace packaging report. This candidate is untagged and not pushed — tag/push still requires explicit author confirmation (one push = one version/tag).
 
 ## Why this repository is self-contained
 
@@ -44,12 +44,12 @@ client half changes.
 # from the repository root
 git init
 git add -A
-git -c user.email=you@example.invalid -c user.name=you commit -m "dsh-util-plugs 2026.11.5-8"
-git tag v2026.11.5-8
+git -c user.email=you@example.invalid -c user.name=you commit -m "dsh-util-plugs 2026.11.5-9"
+git tag v2026.11.5-9
 
 # isolated DSH home/profile
 export DSH_HOME=/tmp/dsh-util-plugs-test
-dsh plugin --profile plugs-test add --offline "git+file:///absolute/path/to/dsh-util-plugs#v2026.11.5-8"
+dsh plugin --profile plugs-test add --offline "git+file:///absolute/path/to/dsh-util-plugs#v2026.11.5-9"
 dsh --profile plugs-test --dump-config
 dsh --profile plugs-test --dump-config-schema
 ```
@@ -96,7 +96,7 @@ payload must list the client row; `npm run verify:client` covers the registratio
 
 ## GitHub release path (author action)
 
-1. Push `main` and the version tag (for example `v2026.11.5-8`) after author confirmation.
+1. Push `main` and the version tag (for example `v2026.11.5-9`) after author confirmation.
 2. Create a GitHub Release named after the tag; attach a source tarball/zip and
    a `sha256` checksum.
 3. Install command (no npm publish):
@@ -118,5 +118,4 @@ payload must list the client row; `npm run verify:client` covers the registratio
 - **master** is the stable/default branch; **dev** is the integration branch.
 - All changes (code, docs, skills, vendored files) land on `dev` first; merge `dev` into `master` only after verification.
 - Release tags are created from `master` (e.g. `0.0.1`, then `0.0.2`); do not tag or push directly from a feature branch.
-- Current release: tag **`0.0.1`** (package `2026.11.5-8`, commit `46485aa`); GitHub Release asset `dsh-util-plugs-0.0.1.tgz`.
-- Branch workflow: `docs/publish/GIT_BRANCH_RELEASE_WORKFLOW.md` in the workspace.
+- Current release: tag **`0.0.1`** (package `2026.11.5-9`, commit `46485aa`); GitHub Release asset `dsh-util-plugs-0.0.1.tgz`.
