@@ -34,7 +34,7 @@ description: >-
 ## 2 能力索引（单一入口：四类 + 3 个易误解项）
 
 > 本 skill 是团队能力的**单一入口**；逐项机读清单见
-> `CAPABILITY_AUDIT.md` 和 `CAPABILITY_AUDIT.md`（59 项）。
+> `CAPABILITY_AUDIT.md`（59 项能力的公开清单；机读清单保留在源码仓库）。
 > 先判断“四类 + 人工确认属性”，再选 `nextSkill`；**文档存在 ≠ 模型可调用**。
 
 ### 2.1 四类能力
@@ -97,7 +97,7 @@ description: >-
 - 需要上下文纪律强化文本 ⇒ 选 `context-pro`；工具本身全局可用。
 - 任何无法全局化的能力（UI-only/人工确认）见 §2.1 与 `OPERATOR_ONLY_BOUNDARIES.md`。
 
-详细实证见 `CAPABILITY_AUDIT.md` 与 `CAPABILITY_AUDIT.md`。
+详细实证见 `CAPABILITY_AUDIT.md`。
 
 ## 3 nextSkill 契约（工具与 skill 的接口）
 - 可能返回 `nextSkill`/`nextReason` 的工具：`network_info`、`pitfalls`、`workspace_agents_init`（INTERFACES §5.1）；`nextSkill` ∈ 5 个 skill 名之一或 null。

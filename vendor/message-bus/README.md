@@ -14,6 +14,10 @@ Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wa
 - Lightweight wake envelopes: the message body stays in the store, not in the wake event.
 - Dedupe keys, priority delivery, read receipts and optional route registration.
 - Read-only inspection: `message_queue`, `message_read`, `message_ack`, `message_routes`, `message_bus_status`.
+- Host-native delivery: session-id resolves through a live agent, aliases through the host
+  `sessionDirectory`, header aliases/display names through the live agent list; missing or inactive
+  targets fail with `SESSION_GONE` instead of being silently queued, and same-team targets prefer the
+  team message channel over a plain follow-up.
 
 Example:
 
@@ -26,7 +30,7 @@ message_read({ messageId: "msg-..." })
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 ```
 
 The self-contained bundle adds eight independently switchable plugins; enable `message-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-message-bus`.
@@ -73,6 +77,7 @@ MIT © 2026 wndd5603
 - 轻量唤醒信封：正文留在消息库中，不进入唤醒事件。
 - 支持去重键、优先级投递、已读回执与可选路由注册。
 - 只读检查：`message_queue`、`message_read`、`message_ack`、`message_routes`、`message_bus_status`。
+- Host-native 投递：session-id 通过在线 agent 解析，别名经宿主 `sessionDirectory`，header 别名/显示名经在线 agent 列表；目标不存在或非 active 时返回 `SESSION_GONE`，不再静默入队；同团队目标优先走团队消息通道。
 
 示例：
 
@@ -85,7 +90,7 @@ message_read({ messageId: "msg-..." })
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 ```
 
 安装包会加入 8 个可独立启用的插件项；启用 `message-bus` 即使用本插件。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-message-bus`。

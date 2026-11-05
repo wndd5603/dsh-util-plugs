@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS read_state (
   PRIMARY KEY (session_id, message_id)
 );
 
+-- One envelope per (target session, message) even across retries: delivered_at
+-- is set when the wake envelope is handed to the transport; consumed_at when
+-- the target reads/acks the body. A consumed pair is never re-enveloped.
+CREATE TABLE IF NOT EXISTS envelope_state (
+  to_session  TEXT NOT NULL,
+  message_id  TEXT NOT NULL,
+  delivered_at TEXT,
+  consumed_at TEXT,
+  PRIMARY KEY (to_session, message_id)
+);
+
 CREATE TABLE IF NOT EXISTS routes (
   alias        TEXT PRIMARY KEY,
   session_id   TEXT NOT NULL,
@@ -84,6 +95,13 @@ const nowIso = () => new Date().toISOString()
 export function openMessageStore(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true })
   const db = new DatabaseSync(dbPath)
+  // Host DB stays in $DSH_HOME; WAL + NORMAL is the durability/latency default
+  // for the ephemeral host transport. checkpoint() is exposed for status/ops.
+  try {
+    db.exec('PRAGMA journal_mode = WAL;')
+    db.exec('PRAGMA synchronous = NORMAL;')
+    db.exec('PRAGMA busy_timeout = 5000;')
+  } catch { /* PRAGMA is best-effort on older SQLite builds */ }
   db.exec(SCHEMA)
 
   const stmtInsertMessage = db.prepare(`
@@ -186,6 +204,7 @@ export function openMessageStore(dbPath) {
     const existing = db.prepare('SELECT id FROM messages WHERE id = ?').get(id)
     if (existing === undefined || existing === null) return false
     db.prepare('DELETE FROM read_state WHERE message_id = ?').run(id)
+    db.prepare('DELETE FROM envelope_state WHERE message_id = ?').run(id)
     db.prepare('DELETE FROM deliveries WHERE message_id = ?').run(id)
     const result = db.prepare('DELETE FROM messages WHERE id = ?').run(id)
     return Number(result.changes) > 0
@@ -245,6 +264,7 @@ export function openMessageStore(dbPath) {
       const messages = db.prepare('DELETE FROM messages').run().changes
       db.prepare('DELETE FROM deliveries').run()
       db.prepare('DELETE FROM read_state').run()
+      db.prepare('DELETE FROM envelope_state').run()
       return { messages: Number(messages), all: true, before: null }
     }
     if (typeof before !== 'string' || before === '') return { messages: 0, all: false, before: null }
@@ -253,6 +273,7 @@ export function openMessageStore(dbPath) {
     chunkedDelete('DELETE FROM messages WHERE id IN (?)', ids)
     chunkedDelete('DELETE FROM deliveries WHERE message_id IN (?)', ids)
     chunkedDelete('DELETE FROM read_state WHERE message_id IN (?)', ids)
+    chunkedDelete('DELETE FROM envelope_state WHERE message_id IN (?)', ids)
     return { messages: ids.length, all: false, before }
   }
 
@@ -271,11 +292,63 @@ export function openMessageStore(dbPath) {
     }
   }
 
+  const envelopeCounts = () => {
+    const one = (sql) => {
+      const row = db.prepare(sql).get()
+      return row === undefined || row === null ? 0 : Number(Object.values(row)[0])
+    }
+    return {
+      envelopes: one('SELECT COUNT(*) AS n FROM envelope_state'),
+      consumedEnvelopes: one('SELECT COUNT(*) AS n FROM envelope_state WHERE consumed_at IS NOT NULL'),
+    }
+  }
+
+  const envelopeState = (toSession, messageId) => {
+    const row = db.prepare('SELECT * FROM envelope_state WHERE to_session = ? AND message_id = ?')
+      .get(String(toSession), String(messageId))
+    return row === undefined || row === null ? null : row
+  }
+  const markEnvelopeDelivered = (toSession, messageId) => {
+    const at = nowIso()
+    db.prepare(`INSERT INTO envelope_state (to_session, message_id, delivered_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(to_session, message_id) DO UPDATE SET delivered_at = COALESCE(envelope_state.delivered_at, excluded.delivered_at)`)
+      .run(String(toSession), String(messageId), at)
+    return envelopeState(toSession, messageId)
+  }
+  const markEnvelopeConsumed = (toSession, messageId) => {
+    const at = nowIso()
+    db.prepare(`INSERT INTO envelope_state (to_session, message_id, delivered_at, consumed_at)
+      VALUES (?, ?, NULL, ?)
+      ON CONFLICT(to_session, message_id) DO UPDATE SET consumed_at = COALESCE(envelope_state.consumed_at, excluded.consumed_at)`)
+      .run(String(toSession), String(messageId), at)
+    return envelopeState(toSession, messageId)
+  }
+
+  /** Host DB facts for message_bus_status: WAL/checkpoint state, no secrets. */
+  const databaseFacts = () => {
+    let journalMode = null
+    let pageCount = null
+    let wal = null
+    try { journalMode = String(db.prepare('PRAGMA journal_mode').get()?.journal_mode ?? '') } catch { /* ignore */ }
+    try { pageCount = Number(db.prepare('PRAGMA page_count').get()?.page_count ?? 0) } catch { /* ignore */ }
+    try {
+      const row = db.prepare('PRAGMA wal_checkpoint(PASSIVE)').get()
+      wal = row === undefined || row === null ? null : { ...row }
+    } catch { /* ignore */ }
+    return { dbPath, journalMode, ephemeral: dbPath === ':memory:', pageCount, wal, checkpoint: 'PRAGMA wal_checkpoint(TRUNCATE)' }
+  }
+  const checkpoint = () => {
+    try { return db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() ?? null } catch { return null }
+  }
+
   return {
     db, dbPath,
     insertMessage, insertDelivery, findDuplicate, getMessage, listMessages, countMessages,
     deleteMessage, listSuppressed,
     markRead, getReadAt, upsertRoute, resolveRoute, listRoutes, counts, purge,
+    envelopeState, markEnvelopeDelivered, markEnvelopeConsumed, envelopeCounts,
+    databaseFacts, checkpoint,
     close: () => { try { db.close() } catch { /* already closed */ } },
   }
 }

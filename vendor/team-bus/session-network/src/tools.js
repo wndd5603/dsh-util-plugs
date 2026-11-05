@@ -333,7 +333,7 @@ function readPitfalls(homeDir, query, limit = 10) {
 }
 
 export function registerTools(ctx, deps) {
-  const { config, profileDir, dataDir, modules = {}, audit, logger } = deps
+  const { config, profileDir, dataDir, modules = {}, audit, logger, directory = null } = deps
   const log = (...args) => safeCall(() => logger?.info?.(...args), () => {})
   const dbState = { handle: null }
   const dbWriteState = { handle: null }
@@ -397,6 +397,61 @@ export function registerTools(ctx, deps) {
       if (networkAvailable === true) {
         try { workspacePeersData = JSON.parse(readFileSync(workspacePeers, 'utf8')) } catch { workspacePeersData = undefined }
       }
+      // task-106: host-native joined aliases are the primary discovery source;
+      // PEERS remains an optional legacy reader only when no joined aliases exist.
+      const directoryJoined = directory === null ? [] : safeCall(() => directory.listJoined(), [])
+      if (directoryJoined.length > 0) {
+        const joined = directoryJoined
+        const live = safeCall(() => readLiveAgents(ctx), [])
+        const liveById = new Map()
+        for (const agent of Array.isArray(live) ? live : []) {
+          if (typeof agent?.session?.id === 'string') liveById.set(agent.session.id, agent)
+        }
+        const sessions = joined.map(entry => {
+          const agent = liveById.get(entry.sessionId)
+          return {
+            sessionId: entry.sessionId,
+            alias: entry.alias,
+            displayName: entry.displayName,
+            roleName: entry.roleName ?? null,
+            status: agent?.status === 'running' ? 'running' : 'active',
+            routable: agent !== undefined,
+            source: 'host-registry',
+          }
+        })
+        const hostResult = {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          section,
+          network: {
+            total: sessions.length,
+            active: sessions.filter(item => item.routable).length,
+            joinedCount: sessions.length,
+            source: 'host-registry',
+            transport: 'sqlite-directory',
+            dataDirConfigured: dataDir !== null,
+          },
+          sessions,
+          meetings: [],
+          pitfalls: [],
+        }
+        safeCall(() => audit?.({ action: 'network_info', section, source: 'host-registry', joinedCount: sessions.length, caller: resolveAuditCaller(exec) }), () => {})
+        return hostResult
+      }
+      if (networkAvailable !== true && directory !== null) {
+        const nullResult = {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          section,
+          network: null,
+          hint: 'no joined aliases in the host session directory; use alias_register to join',
+          sessions: [],
+          meetings: [],
+          pitfalls: [],
+        }
+        safeCall(() => audit?.({ action: 'network_info', section, source: 'host-registry', joinedCount: 0, caller: resolveAuditCaller(exec) }), () => {})
+        return nullResult
+      }
       const result = await safeCall(async () => {
         if (modules.networkInfo?.buildNetworkInfo) {
           return await modules.networkInfo.buildNetworkInfo({
@@ -408,6 +463,7 @@ export function registerTools(ctx, deps) {
             now: new Date(),
             workspaceDir,
             networkAvailable,
+            directory,
           })
         }
         return {
@@ -450,8 +506,8 @@ export function registerTools(ctx, deps) {
   ctx.tools.register({
     name: 'alias_register',
     description:
-      'Register (or propose) the pipe2 route alias for a session in the local SQLite registry. '
-      + 'Never writes PEERS.json (PEERS stays the routing authority); callers broadcast with pipe2 themselves. '
+      'Register (or propose) this session\'s own alias in the host-native sessionDirectory (host DB). '
+      + 'Only the caller session may register/rename itself; wildcards are rejected; no PEERS.json/ACL/workspace writes. '
       + 'Rename limit is 2 per session (the 3rd rename is rejected); old aliases stay resolvable as legacy. '
       + 'Human confirmation required: preview with dryRun and confirm before changing routing; see '
       + 'OPERATOR_ONLY_BOUNDARIES.md.',
@@ -470,11 +526,17 @@ export function registerTools(ctx, deps) {
         return { ok: false, code: 'NO_DB', message: 'db module or dataDir unavailable (alias_register needs a writable registry)' }
       }
       const currentSessionId = exec?.agent?.session?.id ?? exec?.agent?.sessionId ?? null
-      const workspaceDir = exec?.agent?.session?.header?.cwd ?? exec?.agent?.workspace?.cwd ?? null
+      const requestedSessionId = typeof args.sessionId === 'string' && args.sessionId.trim() !== ''
+        ? args.sessionId.trim() : null
+      if (requestedSessionId !== null && requestedSessionId !== currentSessionId) {
+        return { ok: false, code: 'ALIAS_FOREIGN_SESSION', message: 'a session may only register its own alias' }
+      }
+      // task-106: alias registration is host-native and must not read workspace
+      // files (PEERS/ROOT_NAME); derive candidates only from the session.
       const result = safeCall(() => aliasRegisterCore({
         db: modules.db,
         sessionId: currentSessionId,
-        workspaceDir,
+        workspaceDir: null,
         now: new Date(),
       }, args), error => ({ ok: false, code: error?.code ?? 'ALIAS_ERROR', message: String(error?.message ?? error) }))
       safeCall(() => audit?.({ action: 'alias_register', ok: result.ok === true, alias: result.alias ?? null, code: result.code ?? null, caller: resolveAuditCaller(exec) }), () => {})
@@ -764,9 +826,9 @@ export function aliasRegisterCore(deps = {}, args = {}) {
   } catch (error) {
     return { ok: false, code: error?.code ?? 'ALIAS_ERROR', message: String(error?.message ?? error) }
   }
-  const broadcastHint = '广播由调用方/skill 用 pipe2 发出（from=' + (displayName ?? '(unset)')
+  const broadcastHint = '广播可用 message_send({to:"<alias>"})，或对已加入的每个 alias 逐个发送（from=' + (displayName ?? '(unset)')
     + '，fromAlias=' + alias + '，自检加 test:true 并在正文头标 [SELFTEST]）；'
-    + '本工具不写 PEERS.json（PEERS 是路由唯一权威）；pipe2_session_post 可按 session id 直达。'
+    + '本工具只写宿主别名目录，不写工作区路由文件/工作区文件；message-bus 通过宿主 Agent Inbox 投递。'
   return {
     ...result,
     ok: true,

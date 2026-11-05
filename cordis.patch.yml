@@ -1,6 +1,6 @@
-# dsh-plugs — one bundle, seven switchable rows
+# dsh-plugs — one bundle, eight switchable rows
 #
-# Self-contained: all seven runtime modules live inside this package under
+# Self-contained: all eight runtime modules live inside this package under
 # plugins/ and vendor/. No unpublished npm package, workspace resolution or
 # network registry is required at install time.
 - insert:

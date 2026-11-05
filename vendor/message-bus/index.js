@@ -193,6 +193,28 @@ export function apply(ctx, config) {
     if (agents === undefined) return undefined
     return agents.get(sessionId)
   }
+  const directoryService = () => {
+    try { return ctx.get?.('sessionDirectory') } catch { return undefined }
+  }
+  const safeCtxGet = (context, name) => {
+    try { return context.get?.(name) } catch { return undefined }
+  }
+  const safeCall = (fn, fallback) => {
+    try { return fn() } catch { return fallback }
+  }
+  const codedError = (code, message) => {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
+  const requireLive = (sessionId) => {
+    const agent = resolveAgent(sessionId)
+    if (agent === undefined) throw codedError('SESSION_GONE', 'recipient session is not live: ' + sessionId)
+    if (agent.status !== undefined && agent.status !== 'idle' && agent.status !== 'running') {
+      throw codedError('SESSION_GONE', 'recipient session is not active: ' + sessionId)
+    }
+    return agent
+  }
   const resolveDisplayName = (sessionId, alias) => {
     if (typeof cfg.displayNamesBySession[sessionId] === 'string') return cfg.displayNamesBySession[sessionId]
     if (typeof alias === 'string' && typeof cfg.displayNames[alias] === 'string') return cfg.displayNames[alias]
@@ -204,24 +226,48 @@ export function apply(ctx, config) {
   }
   const resolveTarget = (to) => {
     const raw = String(to ?? '').trim()
-    if (SESSION_ID_RE.test(raw)) return { sessionId: raw.toLowerCase(), alias: null }
+    // 1) exact session id -> live Agent registry
+    if (SESSION_ID_RE.test(raw)) {
+      const sessionId = raw.toLowerCase()
+      const agent = requireLive(sessionId)
+      return { sessionId, agent, alias: null, displayName: resolveDisplayName(sessionId, null), source: 'agents' }
+    }
+    // 2) alias -> host-native sessionDirectory (only joined aliases)
+    const directory = directoryService()
+    let joined = null
+    try { joined = directory?.resolve?.(raw) ?? null } catch { joined = null }
+    if (joined !== null && typeof joined.sessionId === 'string') {
+      const agent = requireLive(joined.sessionId)
+      return {
+        sessionId: joined.sessionId,
+        agent,
+        alias: joined.alias ?? raw,
+        displayName: joined.displayName ?? resolveDisplayName(joined.sessionId, joined.alias ?? raw),
+        source: 'sessionDirectory',
+      }
+    }
+    // 3) legacy route table fallback (migration only; never PEERS)
     const route = store.resolveRoute(raw)
     if (route !== undefined && route !== null && typeof route.session_id === 'string') {
-      return { sessionId: route.session_id, alias: route.alias, displayName: route.display_name }
+      const agent = requireLive(route.session_id)
+      return { sessionId: route.session_id, agent, alias: route.alias, displayName: route.display_name, source: 'legacy-route' }
     }
+    // 4) live Agent header alias/displayName -> unique match only
     const agents = agentsService()
     const matches = agents === undefined ? [] : agents.list().filter(agent => {
       const header = agent?.session?.header ?? {}
       return header.displayName === raw || header.alias === raw
     })
-    if (matches.length === 1) return { sessionId: matches[0].session.id, alias: raw }
+    if (matches.length === 1) {
+      return { sessionId: matches[0].session.id, agent: matches[0], alias: raw, displayName: raw, source: 'agent-header' }
+    }
     // Recovery hint must match the effective config: message_route_register is
     // only registered when allowRouteRegister is true (alias-hijack guard).
     const aliasHint = cfg.allowRouteRegister
       ? 'or register an alias with message_route_register'
       : 'or let an operator set allowRouteRegister:true and register an alias with message_route_register'
-    throw new Error('unknown recipient: ' + JSON.stringify(raw)
-      + ' (use a session-<uuid> id, ' + aliasHint + ')')
+    throw codedError('RECIPIENT_NOT_FOUND', 'unknown recipient: ' + JSON.stringify(raw)
+      + ' (use a session-<uuid> id, or join with alias_register; ' + aliasHint + ')')
   }
 
   // ---- coalescing (never for priority messages) ----
@@ -284,7 +330,7 @@ export function apply(ctx, config) {
     const body = typeof args.body === 'string' ? args.body : ''
     if (body.trim().length === 0) throw new Error('body must not be empty')
     const target = resolveTarget(to)
-    const agent = resolveAgent(target.sessionId)
+    const agent = target.agent
     const caller = callerOf(exec)
     const explicitFrom = typeof args.from === 'string' && args.from.trim() !== '' ? args.from.trim() : null
     const fromDisplay = explicitFrom === null ? caller.displayName : explicitFrom
@@ -329,16 +375,7 @@ export function apply(ctx, config) {
       dedupeKey, nonce, forced: force, priority, test, projectScope,
     })
     if (agent === undefined) {
-      store.insertDelivery({
-        messageId, at, fromSession: caller.sessionId, fromDisplay, toSession: target.sessionId,
-        subject, bodyBytes: bytes, bodySha256: sha, lightweight, delivered: false,
-        dedupeKey, dedupeWindowMs, priority, forced: force, test,
-        error: 'recipient session is not live; message stored and queued',
-      })
-      return {
-        ok: false, queued: true, reason: 'recipient session is not live',
-        session: target.sessionId, messageId, bodySha256: sha, messageFile: null,
-      }
+      throw codedError('SESSION_GONE', 'recipient session is not live: ' + target.sessionId)
     }
     const shouldWake = !selfDelivery || wakeSelf
     store.insertDelivery({
@@ -347,14 +384,49 @@ export function apply(ctx, config) {
       dedupeKey, dedupeWindowMs, priority, forced: force, test,
       ...(shouldWake ? {} : { error: 'self-delivery stored without wake (pass wakeSelf:true to override)' }),
     })
+    let transport = 'none'
+    let transportError = null
     if (shouldWake) {
-      queueWake(target.sessionId, agent, {
-        id: messageId, at, from: fromDisplay, to: target.sessionId, subject, bytes, sha, priority,
-      })
+      store.markEnvelopeDelivered?.(target.sessionId, messageId)
+      // Same Team: prefer the Team service's inbox route, which preserves Team
+      // membership/admission semantics. Otherwise fall back to Agent.followup.
+      const callerAgent = exec?.agent
+      const teams = safeCtxGet(ctx, 'agentTeams')
+      let teamSent = false
+      if (callerAgent !== undefined && callerAgent !== null && teams !== undefined
+        && typeof teams.sendMessage === 'function' && callerAgent.session?.id !== agent.session?.id) {
+        try {
+          const members = typeof teams.listMembers === 'function' ? teams.listMembers(callerAgent) : []
+          const member = Array.isArray(members) ? members.find(item => item?.id === target.sessionId) : undefined
+          if (member !== undefined && typeof member.name === 'string' && member.name !== '') {
+            const pending = teams.sendMessage(callerAgent, {
+              target: member.name,
+              content: [{ type: 'text', text: '[message-bus] ' + envelopeLine({
+                id: messageId, at, from: fromDisplay, to: target.sessionId, subject, bytes, sha, priority,
+              }) }],
+              signal: AbortSignal.timeout(5000),
+            })
+            if (pending !== null && typeof pending === 'object' && typeof pending.catch === 'function') {
+              pending.catch(() => { /* Team rejection is observable via its own diagnostics. */ })
+            }
+            teamSent = true
+            transport = 'agentTeams'
+          }
+        } catch (error) {
+          transportError = String(error?.message ?? error)
+        }
+      }
+      if (!teamSent) {
+        queueWake(target.sessionId, agent, {
+          id: messageId, at, from: fromDisplay, to: target.sessionId, subject, bytes, sha, priority,
+        })
+        transport = 'agent-followup'
+      }
     }
     return {
-      ok: true, session: target.sessionId, messageId, subject, bodySha256: sha,
+      ok: true, session: target.sessionId, alias: target.alias ?? null, messageId, subject, bodySha256: sha,
       lightweight, priority, queued: shouldWake, selfDelivery, woke: shouldWake,
+      transport, ...(transportError === null ? {} : { transportError }),
     }
   }
 
@@ -466,7 +538,10 @@ export function apply(ctx, config) {
       const nextOffset = offset + chunk.length
       const sessionId = exec?.agent?.session?.id
       let readAt
-      if (typeof sessionId === 'string' && sessionId !== '') readAt = store.markRead(sessionId, messageId)
+      if (typeof sessionId === 'string' && sessionId !== '') {
+        readAt = store.markRead(sessionId, messageId)
+        store.markEnvelopeConsumed?.(sessionId, messageId)
+      }
       return {
         ok: true, id: row.id, at: row.at, from: row.from_display, fromSession: row.from_session, to: row.to_session,
         subject: row.subject, bytes: row.bytes, sha256: row.sha256,
@@ -496,7 +571,10 @@ export function apply(ctx, config) {
       if (typeof sessionId !== 'string' || sessionId === '') throw new Error('session is required')
       const ids = Array.isArray(args.ids) ? args.ids.filter(id => typeof id === 'string' && id !== '') : []
       const now = nowIso()
-      for (const id of ids) store.markRead(sessionId, id, now)
+      for (const id of ids) {
+        store.markRead(sessionId, id, now)
+        store.markEnvelopeConsumed?.(sessionId, id)
+      }
       return { ok: true, session: sessionId, count: ids.length, readAt: now }
     },
     presentCall: () => ({ card: 'generic', title: 'ACK bus messages', kind: 'write' }),
@@ -550,8 +628,9 @@ export function apply(ctx, config) {
     description:
       'Read-only health/status of the global session message bus: version, enabled flag, database path and '
       + 'sizes, row counts (messages/deliveries/read state/routes), delivery behaviour (lightweight envelope, '
-      + 'dedupe and coalesce windows), readAt support, and which optional tools are registered. Use it to '
-      + 'verify the bus before blaming delivery, and to see the effective config when a settings form is not available.',
+      + 'dedupe and coalesce windows), host transport/directory/joinedCount, readAt support, and which optional '
+      + 'tools are registered. Use it to verify the bus before blaming delivery, and to see the effective config '
+      + 'when a settings form is not available.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: jsonOutput,
     execute() {
@@ -563,6 +642,18 @@ export function apply(ctx, config) {
         dbError = String(error)
       }
       const facts = fileFacts(cfg.dbPath)
+      const directory = directoryService()
+      const directoryStatus = directory !== undefined && typeof directory.status === 'function'
+        ? safeCall(() => directory.status(), null)
+        : null
+      const teamService = safeCtxGet(ctx, 'agentTeams')
+      const transport = {
+        mode: teamService !== undefined ? 'agentTeams-first-followup-fallback' : 'agent-followup',
+        teamAvailable: teamService !== undefined,
+        directoryAvailable: directory !== undefined,
+      }
+      let hostDb = null
+      if (typeof store.databaseFacts === 'function') hostDb = safeCall(() => store.databaseFacts(), null)
       const tools = ['message_send', 'message_queue', 'message_read', 'message_ack', 'message_routes', 'message_bus_status']
       if (cfg.allowRouteRegister) tools.splice(5, 0, 'message_route_register')
       if (cfg.allowPurge) tools.push('message_purge')
@@ -573,7 +664,11 @@ export function apply(ctx, config) {
         version: PLUGIN_VERSION,
         enabled: cfg.enabled,
         dbPath: cfg.dbPath,
-        database: { ...facts, ...(dbError === null ? {} : { error: dbError }) },
+        database: { ...facts, ...(hostDb ?? {}), ...(dbError === null ? {} : { error: dbError }) },
+        transport,
+        directory: directoryStatus ?? { source: 'unavailable', joinedCount: 0 },
+        joinedCount: directoryStatus?.joinedCount ?? 0,
+        envelope: typeof store.envelopeCounts === 'function' ? safeCall(() => store.envelopeCounts(), null) : null,
         counts,
         delivery: {
           lightweight,

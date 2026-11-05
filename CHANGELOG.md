@@ -1,3 +1,21 @@
+﻿## 2026.11.5-4
+
+- Host-native session communication sync: message-bus target resolution via live agents + host
+  `sessionDirectory` (header alias/display name via agent list), `SESSION_GONE` for missing/inactive
+  targets instead of silent queueing, same-team delivery preference over follow-up; store opens with
+  WAL/`synchronous=NORMAL` + checkpoint and tracks `(sessionId,messageId)` envelope delivered/consumed
+  state so consumed messages produce no duplicate envelope. `message_bus_status` exposes transport,
+  directory/joined state and WAL/checkpoint facts.
+- team-bus: session-network exposes the host-native `sessionDirectory` service over the existing host DB
+  (resolve/listJoined/upsert/remove/status; only the caller may register/remove its own alias; wildcards
+  rejected; stale aliases filtered via live agents); `network_info` reads host-registry agents + joined
+  aliases with `source:'host-registry'` and no PEERS/ACL/workspace writes.
+- Vendored runtime sync: `vendor/message-bus/index.js` + `src/store.js`, `vendor/team-bus/session-network/`
+  `index.js`/`src/db.js`/`src/tools.js` and new `src/session-directory.js`; bundle still one install +
+  eight rows with zero npm dependencies. Docs: message-bus README host-native delivery bullet;
+  team-bootstrap capability references kept bundle-local.
+- Candidate verification: verify-scaffold / verify-client pass, npm pack dry-run clean, source-workspace
+  privacy gate 0/0. Not tagged, not pushed, not installed into a live profile.
 ## 2026.11.5-3
 
 - Public README wording cleanup (root + 8 plugin READMEs); remove internal planning terms; natural zh/en install/usage copy.
@@ -57,3 +75,4 @@
   one bundle + eight rows and zero duplicate ids; each row registers its tools.
 - MIT license, README, privacy/data notes, files whitelist and repository
   metadata prepared. Nothing pushed/published; no npm package is built yet.
+

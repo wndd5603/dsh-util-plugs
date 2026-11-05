@@ -611,6 +611,20 @@ export function listAliasesForSession(sessionId) {
 }
 
 /**
+ * Remove one alias owned by the given session (host-native directory remove).
+ * Returns true only when an alias row was deleted; a foreign/missing alias is
+ * left untouched (least privilege, no hijack).
+ */
+export function removeAlias({ alias, sessionId } = {}) {
+  const normalized = validateAlias(typeof alias === 'string' ? alias.trim().toLowerCase() : alias)
+  const sid = typeof sessionId === 'string' ? sessionId.trim() : ''
+  if (sid === '') return false
+  const db = openSharedRequired()
+  const result = run(db, 'DELETE FROM aliases WHERE alias = ? AND session_id = ?', [normalized, sid])
+  return Number(result.changes ?? 0) > 0
+}
+
+/**
  * Guarded alias registration for the `alias_register` tool (F22):
  * - idempotent when the same alias is already active for this session;
  * - rename limit `maxRenames` (default 2 => the 3rd rename is rejected);

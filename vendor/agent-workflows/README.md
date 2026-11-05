@@ -25,7 +25,7 @@ prompt_forge_status()              # current Prompt Studio stage/next step
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 ```
 
 The bundle adds eight plugins; enable `agent-workflows` for the runtime tools. The declarative presets ship with the source package; until npm is available, use the source package/checkout for full preset sessions. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-agent-workflows`.
@@ -83,7 +83,7 @@ prompt_forge_status()              # 当前 Prompt Studio 阶段/下一步
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 ```
 
 安装包会加入 8 个插件项；启用 `agent-workflows` 获得运行时工具。声明式预设随源码包提供；在 npm 发布前，完整预设会话请使用源码目录。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-agent-workflows`。

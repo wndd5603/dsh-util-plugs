@@ -4,7 +4,7 @@ A single install that adds eight independently switchable plugins to DeepSeek Ha
 
 一次安装，为 DeepSeek Harness 增加 8 个可独立启用的插件。
 
-> Version: 2026.11.5-3 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.5-4 · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -15,7 +15,7 @@ The `dsh-plugs` package gives DeepSeek Harness context awareness, cross-session 
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 ```
 
 The package is self-contained: the eight runtime plugins live under `vendor/`, and an install works without publishing them to npm. No npm package is published yet.
@@ -33,7 +33,7 @@ The package is self-contained: the eight runtime plugins live under `vendor/`, a
 | `host-relaunch` | Two-step safe restart, a Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | A unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin can be enabled, disabled and configured independently. The package version is 2026.11.5-3; individual plugins keep their own versions.
+Each plugin can be enabled, disabled and configured independently. The package version is 2026.11.5-4; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -77,7 +77,7 @@ MIT © 2026 wndd5603
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-4
 ```
 
 安装包自带全部运行代码（8 个插件位于 `vendor/`），无需先把它们发布到 npm。目前尚未发布 npm 包。
@@ -95,7 +95,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-3
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：插件卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.5-3，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.5-4，各插件保留自己的版本号。
 
 ### Web 界面
 

@@ -214,6 +214,7 @@ export async function apply(ctx, config = {}) {
     inject: await loadOptional('./src/inject.js'),
     networkInfo: await loadOptional('./src/network-info.js'),
     pitfalls: await loadOptional('./src/pitfalls.js'),
+    directory: await loadOptional('./src/session-directory.js'),
   }
 
   // Initialize state.json so the documented default (autoInject enabled) is the effective value,
@@ -231,7 +232,25 @@ export async function apply(ctx, config = {}) {
     log(ctx, 'state init failed (fail-open):', String(error3))
   }
 
-  registerTools(ctx, { config: cfg, profileDir, dataDir, source, modules, audit, logger: ctx.logger })
+  const directory = dataDir !== null && typeof modules.directory?.createSessionDirectory === 'function'
+    ? modules.directory.createSessionDirectory({
+      database: modules.db,
+      dataDir,
+      agents: () => ctx.get?.('agents'),
+      logger: ctx.logger,
+    })
+    : null
+  if (directory !== null) {
+    try {
+      if (typeof ctx.get?.('sessionDirectory') !== 'object' && typeof ctx.provide === 'function') {
+        ctx.provide('sessionDirectory', directory)
+      }
+    } catch (errorDirectory) {
+      log(ctx, 'sessionDirectory provide skipped:', String(errorDirectory))
+    }
+  }
+
+  registerTools(ctx, { config: cfg, profileDir, dataDir, source, modules, audit, logger: ctx.logger, directory })
 
   // Injector is best-effort: absence of a module or a hook API must not break the host.
   try {
