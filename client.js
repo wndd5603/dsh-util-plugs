@@ -1512,6 +1512,10 @@ function namespaceOf(namespaces, entryId, rowId) {
   const candidates = []
   if (typeof entryId === 'string' && entryId !== '') candidates.push(entryId, entryId.replace(/^include:/, ''))
   if (typeof rowId === 'string' && rowId !== '') candidates.push(rowId)
+  for (const candidate of [...candidates]) {
+    const leaf = candidate.split('/').pop()
+    if (leaf !== undefined && leaf !== '' && !candidates.includes(leaf)) candidates.push(leaf)
+  }
   if (candidates.length === 0) return undefined
   return namespaces.find(view => candidates.some(candidate => view.ns === candidate || view.ns.endsWith(`:${candidate}`) || candidate.endsWith(`:${view.ns}`)))
 }

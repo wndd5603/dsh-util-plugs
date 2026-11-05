@@ -61,6 +61,7 @@ export const Config = objectSchema({
   }),
   strictMode: boolean(true, {
     description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval; set false to allow direct ids. Alias/join is always unaffected.',
+    volatile: true,
   }),
   delivery: nested(objectSchema({
     lightweight: boolean(true, { description: 'Wake envelopes carry only metadata, never the body.' }),

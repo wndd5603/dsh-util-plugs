@@ -171,6 +171,7 @@ function nativeMeta(field) {
   if (field.default !== undefined) meta.default = clone(field.default)
   if (field.required === true) meta.required = true
   if (typeof field.description === 'string') meta.description = field.description
+  if (field.volatile === true) meta.volatile = true
   if (typeof field.min === 'number') meta.min = field.min
   if (typeof field.max === 'number') meta.max = field.max
   if (field.int === true) meta.step = 1
@@ -186,6 +187,46 @@ function nativeMeta(field) {
  * `packages/boot/app-boot/src/config-schema/types.ts` (NativeConfigSchema).
  */
 function nativeNode(field) {
+  return finalizeNode(buildNativeNode(field))
+}
+
+/** One node with children left as live nodes so JSON invokes their serializer. */
+function shallowRecord(node) {
+  const out = { type: typeof node.type === 'string' ? node.type : 'any', meta: clone(node.meta ?? {}) }
+  if (node.value !== undefined) out.value = clone(node.value)
+  if (Array.isArray(node.list)) out.list = [...node.list]
+  if (node.inner !== undefined && node.inner !== null) out.inner = node.inner
+  if (node.dict !== undefined && node.dict !== null) out.dict = { ...node.dict }
+  return out
+}
+
+/**
+ * Serialize one native node in Schemastery's compact `{uid,refs}` envelope.
+ * The host rehydrates this with `new Schema(json)` for the volatile-field form.
+ */
+function nativeToJSON(node) {
+  const refs = globalThis.__schemastery_refs__
+  if (refs !== undefined) {
+    refs[node.uid] ??= JSON.parse(JSON.stringify(shallowRecord(node)))
+    return node.uid
+  }
+  globalThis.__schemastery_refs__ = {}
+  const record = JSON.parse(JSON.stringify(shallowRecord(node)))
+  globalThis.__schemastery_refs__[node.uid] = record
+  const result = { uid: node.uid, refs: globalThis.__schemastery_refs__ }
+  globalThis.__schemastery_refs__ = undefined
+  return result
+}
+
+let NATIVE_UID = 1
+/** Give one native node identity + Schemastery-compatible serialization. */
+function finalizeNode(node) {
+  node.uid = NATIVE_UID++
+  node.toJSON = () => nativeToJSON(node)
+  return node
+}
+
+function buildNativeNode(field) {
   const node = { [NATIVE_MARKER]: true, meta: nativeMeta(field) }
   switch (field.kind) {
     case 'boolean':
@@ -306,7 +347,7 @@ export function objectSchema(shape, options = {}) {
       },
     },
   }
-  return schema
+  return finalizeNode(schema)
 }
 
 /* ------------------------------------------------------------------ derived */

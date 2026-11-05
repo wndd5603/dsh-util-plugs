@@ -1,3 +1,9 @@
+## 2026.11.5-6
+
+- **Plugin console settings exposure**: message-bus `strictMode` is marked as a live (volatile) config field; the zero-dependency schema now emits Schemastery-compatible `{uid,refs}` JSON so the host can render the volatile form.
+- **Console namespace mapping**: bundle rows whose entry id contains a package subpath now also match a settings namespace by its leaf id, so message-bus appears in the plugin-console Config tab.
+- **Bundle patch**: message-bus row declares an explicit `strictMode: true` config entry for the settings form.
+- Verified: plugin console shows `message-bus` under Config with `严格模式/Strict mode`; message-bus 29/29 and console tests PASS; bundle 8 rows / 3 client halves.
 ## 2026.11.5-5
 
 - Package rename: bundle package name `dsh-plugs` → **`dsh-util-plugs`** (matches the repository name);
