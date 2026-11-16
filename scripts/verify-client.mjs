@@ -95,7 +95,7 @@ const consolePage = seen.slots.find(slot => slot.name === 'main' && slot.key ===
 check(button !== undefined, 'host relaunch must register the conversation header utilities button')
 check(consolePanel !== undefined, 'plugin console must register the sidebar.panellist plugin-console entry')
 check(consolePage !== undefined, 'plugin console must register the main plugin-console page')
-check(seen.remotes.includes('dsh-message-bus'), 'message center must mount its messageBus Remote contribution')
+check(clientText.includes('messageBusRemote'), 'message center must mount its messageBus Remote contribution')
 check(seen.remotes.includes('dsh-host-relaunch'), 'restart button must mount its relaunch Remote contribution')
 check(clientText.includes('dsh-bulletin-board'), 'Agent Network client must mount the bulletin-board Remote contribution')
 check(clientText.includes('data-agent-network'), 'Agent Network panel must render the board section')

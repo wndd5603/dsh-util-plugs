@@ -644,6 +644,23 @@ function MessageCenterPage(props) {
   }
   React.useEffect(() => () => { if (showToast.timer !== undefined) clearTimeout(showToast.timer) }, [])
 
+  const loadAux = React.useCallback(async (attempt = 0) => {
+    let missing = false
+    try {
+      const overview = await api.overview?.()
+      if (overview !== undefined && overview !== null) setNetwork(overview)
+      else missing = true
+    } catch { missing = true }
+    try {
+      const status = await api.apartmentStatus?.()
+      if (status !== undefined && status !== null) {
+        setApartment(status)
+        setRootInput(current => current === '' ? (status.root ?? '') : current)
+      } else missing = true
+    } catch { missing = true }
+    if (missing && attempt < 6) setTimeout(() => { void loadAux(attempt + 1) }, 300)
+  }, [api])
+
   const load = React.useCallback(async (options = {}) => {
     const nextOffset = options.offset ?? offset
     const nextKeyword = options.keyword ?? keyword
@@ -664,24 +681,14 @@ function MessageCenterPage(props) {
         setAllowSend(normalized.allowSend)
         setStrictMode(normalized.strictMode)
         setCounts(normalized.counts)
-        try {
-          const overview = await api.overview?.()
-          if (overview !== undefined && overview !== null) setNetwork(overview)
-        } catch { /* bulletin board row may be absent */ }
-        try {
-          const status = await api.apartmentStatus?.()
-          if (status !== undefined && status !== null) {
-            setApartment(status)
-            setRootInput(current => current === '' ? (status.root ?? '') : current)
-          }
-        } catch { /* apartment row may be absent */ }
+        void loadAux()
       }
     } catch (caught) {
       setError(errorTextOf(caught))
     } finally {
       setLoading(false)
     }
-  }, [api, keyword, limit, offset, readBy])
+  }, [api, keyword, limit, offset, readBy, loadAux])
 
   React.useEffect(() => { void load({ offset: 0 }) }, []) // initial load
 
@@ -922,9 +929,11 @@ function apply(ctx) {
     return () => styleElement.remove()
   }, 'message-bus client: styles')
   ctx.plugin(async function mountMessageBusRemote(owner) {
-    await owner.remote.$mount(createRemoteContribution())
+    // Mount the auxiliary Agent Network remotes first; the messageBus Remote
+    // access gate below then guarantees the board/apartment data is reachable.
     try { await owner.remote.$mount(createBoardRemoteContribution()) } catch { /* bulletin-board row may be absent */ }
     try { await owner.remote.$mount(createApartmentRemoteContribution()) } catch { /* apartment row may be absent */ }
+    await owner.remote.$mount(createRemoteContribution())
   })
   ctx.inject(['remote.messageBus'], scope => {
     scope.remoteAccess.whenAccess('messageBus/list', function* () {
