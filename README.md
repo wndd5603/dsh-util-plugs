@@ -80,6 +80,10 @@ All surfaces are UI-only for the model: agents read or request the same informat
 - DeepSeek Harness `>=0.2.0 <0.3.0`; Node.js `>=24`; host restart is Windows-first.
 - Remove the package from the profile or use the plugin manager. Data under `$DSH_HOME` is not deleted automatically.
 
+### Release workflow
+
+See [`docs/RELEASING.md`](docs/RELEASING.md): `dev` → `master` → tag → GitHub Release + `.tgz` asset via `node scripts/release.mjs`.
+
 ### Verify
 
 ```sh
