@@ -1,6 +1,7 @@
 ## 2026.11.16-3 (dev)
 
-- **Local-worker DSH provider mode**: `mode: dsh-provider` routes `local_*` proposals through `ctx.llm` + `agentDefaultModel.currentSelection()` (streaming), instead of the fixed Ollama endpoint; `local-endpoint` remains the default/fallback.
+- **Panel naming**: the former Agent Network entry is now **协作网络 / Agent Hub** with page title **智能体协作网络 / Agent Collaboration Network**, covering boards/tasks, apartment storage and messages; technical row ids remain stable.
+- **Local-worker DSH provider mode**: `mode: dsh-provider` routes `local_*` proposals through `ctx.llm` + `agentDefaultModel.currentSelection()` (streaming), instead of the fixed Ollama endpoint; `local-endpoint` remains the explicit fallback.
 - **Agent Memory (new row `agent-memory`)**: persistent SQLite memory (`$DSH_HOME/memory/memory.sqlite`) with `memory_remember/search/list/forget/status`, scope/key upsert, tags and source session.
 - **Bulletin board interaction**: board selection, per-board status filters, task list with assignee/priority/dependency/blocked state and expandable task detail; message-list snapshots now carry full task fields.
 
