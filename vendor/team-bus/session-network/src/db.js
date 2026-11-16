@@ -1119,6 +1119,20 @@ export function listMeetingMessages(meetingId) {
   return all(openSharedRequired(), 'SELECT * FROM messages WHERE meeting_id = ? ORDER BY at ASC, msg_id ASC', [String(meetingId)])
 }
 
+/**
+ * P2-1 (CR3 final): compensates a DB message insert when the matching sidecar
+ * append fails. Scoped to the exact meeting+msgId so a concurrent writer's row
+ * can never be removed.
+ */
+export function deleteMeetingMessage({ meetingId, msgId } = {}) {
+  if (typeof meetingId !== 'string' || typeof msgId !== 'string') {
+    throw new DbError('MESSAGE_INVALID', 'deleteMeetingMessage requires meetingId and msgId')
+  }
+  const db = openSharedRequired()
+  const result = run(db, 'DELETE FROM messages WHERE meeting_id = ? AND msg_id = ?', [meetingId, msgId])
+  return { deleted: Number(result.changes) > 0, meetingId, msgId }
+}
+
 export function getMeeting(meetingId) {
   return get(openSharedRequired(), 'SELECT * FROM meetings WHERE meeting_id = ?', [String(meetingId)])
 }

@@ -7,6 +7,12 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
 export const STATUSES = ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated']
+// P2-1: completed is reachable only from an active state. `terminated` (and an
+// already-`completed` task) cannot be completed again.
+export const COMPLETABLE_STATUSES = ['pending', 'in_progress', 'blocked', 'suspended']
+// P2-3: terminated is a terminal write too; only an active task may be
+// terminated (never a completed or already-terminated one).
+export const TERMINABLE_STATUSES = ['pending', 'in_progress', 'blocked', 'suspended']
 const now = () => new Date().toISOString()
 const dshHome = () => process.env.DSH_HOME || join(homedir(), '.dsh')
 const dbPathDefault = () => join(dshHome(), 'bulletin-board', 'board.sqlite')
@@ -74,7 +80,7 @@ function rowTask(row) {
 function assertStatus(status) {
   if (status !== undefined && !STATUSES.includes(status)) throw new Error('invalid status: ' + status)
 }
-export function createStore(dbPath) {
+export function createStore(dbPath, options = {}) {
   const db = open(dbPath)
   const actorOf = (exec) => {
     const s = exec?.agent?.session
@@ -84,21 +90,37 @@ export function createStore(dbPath) {
     const header = exec?.agent?.session?.header ?? {}
     return header.alias ?? exec?.agent?.alias ?? null
   }
-  // P1-1: updateTask must enforce the same owner boundary as completeTask.
-  // A normal caller may only mutate a task it owns (assignee, or legacy
-  // alias-assignee) or created; danger-full-access operators may override.
-  const isTaskOwner = (existing, exec) => {
+  // P2-2: an alias is a route key, not proof of ownership. `resolveAlias` is
+  // wired to the host sessionDirectory; without a resolvable route an
+  // alias-only assignment grants no authority (only an operator can act).
+  const aliasRouteSession = (alias) => {
+    if (typeof options.resolveAlias !== 'function' || typeof alias !== 'string' || alias === '') return null
+    let route
+    try { route = options.resolveAlias(alias) } catch { return null }
+    if (route === null || route === undefined) return null
+    const sessionId = typeof route.sessionId === 'string' ? route.sessionId
+      : typeof route.session_id === 'string' ? route.session_id : null
+    return sessionId === '' ? null : sessionId
+  }
+  // P1-1: the assignee boundary is shared by completeTask and
+  // updateTask(status=completed); creator ownership is deliberately excluded.
+  const isAssignee = (existing, exec) => {
     const caller = actorOf(exec)
     const callerAlias = actorAliasOf(exec)
     const assigneeSession = typeof existing.assignee_session === 'string' && existing.assignee_session !== ''
       ? existing.assignee_session : null
-    if (assigneeSession !== null) {
-      if (caller !== null && caller === assigneeSession) return true
-    } else {
-      const assigneeAlias = typeof existing.assignee_alias === 'string' && existing.assignee_alias !== ''
-        ? existing.assignee_alias : null
-      if (assigneeAlias !== null && callerAlias !== null && callerAlias === assigneeAlias) return true
-    }
+    if (assigneeSession !== null) return caller !== null && caller === assigneeSession
+    const assigneeAlias = typeof existing.assignee_alias === 'string' && existing.assignee_alias !== ''
+      ? existing.assignee_alias : null
+    if (assigneeAlias === null || callerAlias === null || callerAlias !== assigneeAlias) return false
+    return caller !== null && aliasRouteSession(assigneeAlias) === caller
+  }
+  // P1-1: updateTask must enforce the same owner boundary as completeTask.
+  // A normal caller may only mutate a task it owns (assignee, or a
+  // route-verified legacy alias-assignee) or created; operators may override.
+  const isTaskOwner = (existing, exec) => {
+    if (isAssignee(existing, exec)) return true
+    const caller = actorOf(exec)
     const createdBy = typeof existing.created_by === 'string' && existing.created_by !== '' ? existing.created_by : null
     return createdBy !== null && caller !== null && caller === createdBy
   }
@@ -226,10 +248,41 @@ export function createStore(dbPath) {
     updateTask(id, patch = {}, exec, options = {}) {
       const existing = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
       if (existing === undefined) throw codedError('NOT_FOUND', 'task not found: ' + id)
-      if (options.operator !== true && !isTaskOwner(existing, exec)) {
+      const operator = options.operator === true
+      if (!operator && !isTaskOwner(existing, exec)) {
         throw codedError('FORBIDDEN', 'updateTask: only the assignee, creator, or an operator may update this task')
       }
       assertStatus(patch.status)
+      // P1-1: creator ownership is not a completion bypass. `status=completed`
+      // follows the same assignee-only boundary as completeTask.
+      if (patch.status === 'completed' && !operator && !isAssignee(existing, exec)) {
+        throw codedError('FORBIDDEN', 'updateTask: status=completed is assignee-only; claim the task first or ask an operator to override')
+      }
+      // P1-1: reassignment is an explicit operator action, so a creator cannot
+      // hand a task to another session as a completion shortcut.
+      if (!operator && (patch.assigneeSession !== undefined || patch.assigneeAlias !== undefined)) {
+        throw codedError('FORBIDDEN', 'updateTask: assignee changes require a danger-full-access operator')
+      }
+      // P2-3 (CR3 final): a creator may not terminate an assignee's claimed
+      // task (task-board DoS). Terminal writes on an assigned task follow the
+      // same assignee boundary as completion; an operator can still override.
+      const assigned = (typeof existing.assignee_session === 'string' && existing.assignee_session !== '')
+        || (typeof existing.assignee_alias === 'string' && existing.assignee_alias !== '')
+      if (patch.status === 'terminated' && !operator && assigned && !isAssignee(existing, exec)) {
+        throw codedError('FORBIDDEN', 'updateTask: status=terminated on an assigned task is assignee-only; ask an operator to override')
+      }
+      // P2-3: minimal state matrix for the other terminal state.
+      if (patch.status === 'terminated' && !TERMINABLE_STATUSES.includes(existing.status)) {
+        throw codedError('CONFLICT', 'invalid status transition: ' + existing.status + ' -> terminated', {
+          taskCode: 'CONFLICT', currentStatus: existing.status, currentTask: rowTask(existing),
+        })
+      }
+      // P2-1: completed is only reachable from an active state.
+      if (patch.status === 'completed' && !COMPLETABLE_STATUSES.includes(existing.status)) {
+        throw codedError('CONFLICT', 'invalid status transition: ' + existing.status + ' -> completed', {
+          taskCode: 'CONFLICT', currentStatus: existing.status, currentTask: rowTask(existing),
+        })
+      }
       // Q3-A optimistic concurrency: expectedRevision is optional, but every
       // update is still a CAS on the revision read above. The legacy client
       // therefore cannot silently overwrite a newer write either.
@@ -289,10 +342,44 @@ export function createStore(dbPath) {
           throw codedError('FORBIDDEN', 'claimTask: a session may only claim a task under its own alias')
         }
       }
+      const existing = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
+      if (existing === undefined) throw codedError('NOT_FOUND', 'task not found: ' + id)
+      if (existing.status !== 'pending') {
+        throw codedError('CONFLICT', 'task is not claimable (not pending or already assigned)', { taskCode: 'CONFLICT' })
+      }
+      const assignedSession = typeof existing.assignee_session === 'string' && existing.assignee_session !== ''
+        ? existing.assignee_session : null
+      const assignedAlias = typeof existing.assignee_alias === 'string' && existing.assignee_alias !== ''
+        ? existing.assignee_alias : null
+      if (assignedSession !== null) {
+        throw codedError('CONFLICT', 'task is not claimable (already assigned to a session)', { taskCode: 'CONFLICT' })
+      }
+      // P2-2 (CR3 final): an alias pre-assignment is a reservation, not a free
+      // task. A normal caller may claim it only when its own alias is that
+      // alias AND the host route still resolves that alias to this session;
+      // otherwise arbitrary sessions could steal alias-assigned work.
+      if (!operator && assignedAlias !== null) {
+        if (callerAlias === null || callerAlias !== assignedAlias) {
+          throw codedError('FORBIDDEN', 'claimTask: task is pre-assigned to another alias', { taskCode: 'FORBIDDEN' })
+        }
+        if (caller === null || aliasRouteSession(assignedAlias) !== caller) {
+          throw codedError('FORBIDDEN', 'claimTask: alias route does not resolve to the caller', { taskCode: 'FORBIDDEN' })
+        }
+      }
+      // The WHERE still guards every mutable precondition and pins the revision,
+      // so an update/claim cannot slip between the checks above and this write.
+      const aliasGuard = operator
+        ? ''
+        : " AND (assignee_alias IS NULL OR assignee_alias='' OR assignee_alias=?)"
+      const params = [
+        calledSession(operator, requestedSession, caller),
+        calledAlias(operator, requestedAlias, callerAlias),
+        now(), id, existing.revision,
+      ]
+      if (!operator) params.push(requestedAlias ?? callerAlias ?? '')
       const result = db.prepare(`UPDATE tasks SET status='in_progress', assignee_session=?, assignee_alias=?, updated_at=?, revision=revision+1
-        WHERE id=? AND status='pending' AND (assignee_session IS NULL OR assignee_session='')`).run(
-        calledSession(operator, requestedSession, caller), calledAlias(operator, requestedAlias, callerAlias), now(), id,
-      )
+        WHERE id=? AND revision=? AND status='pending'
+          AND (assignee_session IS NULL OR assignee_session='')${aliasGuard}`).run(...params)
       if (result.changes === 0) {
         throw codedError('CONFLICT', 'task is not claimable (not pending or already assigned)', { taskCode: 'CONFLICT' })
       }
@@ -310,8 +397,11 @@ export function createStore(dbPath) {
             throw codedError('FORBIDDEN', 'completeTask: only the assignee may complete this task')
           }
         } else if (typeof existing.assignee_alias === 'string' && existing.assignee_alias !== '') {
-          if (callerAlias === null || existing.assignee_alias !== callerAlias) {
-            throw codedError('FORBIDDEN', 'completeTask: only the assignee may complete this task')
+          // P2-2: the alias must resolve to this caller through the host route.
+          const routeSession = aliasRouteSession(existing.assignee_alias)
+          if (callerAlias === null || existing.assignee_alias !== callerAlias
+            || caller === null || routeSession !== caller) {
+            throw codedError('FORBIDDEN', 'completeTask: only the route-verified assignee may complete this task')
           }
         } else if (typeof existing.created_by === 'string' && existing.created_by !== '') {
           if (caller === null || existing.created_by !== caller) {
@@ -321,8 +411,14 @@ export function createStore(dbPath) {
           throw codedError('FORBIDDEN', 'completeTask: task has no owner; an operator must complete it')
         }
       }
+      // P2-1: terminated/completed tasks cannot transition to completed again.
+      if (!COMPLETABLE_STATUSES.includes(existing.status)) {
+        throw codedError('CONFLICT', 'invalid status transition: ' + existing.status + ' -> completed', {
+          taskCode: 'CONFLICT', currentStatus: existing.status, currentTask: rowTask(existing),
+        })
+      }
       const result = db.prepare(`UPDATE tasks SET status='completed', updated_at=?, revision=revision+1
-        WHERE id=? AND revision=?`).run(now(), id, existing.revision)
+        WHERE id=? AND revision=? AND status IN (?,?,?,?)`).run(now(), id, existing.revision, ...COMPLETABLE_STATUSES)
       if (result.changes === 0) {
         const current = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
         throw codedError('CONFLICT', 'revision changed concurrently', {

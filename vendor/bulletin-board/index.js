@@ -61,7 +61,13 @@ const classifyProgress = ({ progress, live, now, staleMs }) => {
 }
 
 export function apply(ctx) {
-  const store = createStore(process.env.DSH_BULLETIN_DB || undefined)
+  // P2-2: alias ownership follows the host alias route (sessionDirectory), not
+  // a bare header string. When the host exposes no directory the store denies
+  // alias-only authority; operators can still override.
+  const resolveAlias = alias => {
+    try { return ctx.get?.('sessionDirectory')?.resolve?.(alias) ?? null } catch { return null }
+  }
+  const store = createStore(process.env.DSH_BULLETIN_DB || undefined, { resolveAlias })
   ctx.effect(() => () => store.close())
 
   const isOperator = exec => {
@@ -123,7 +129,10 @@ export function apply(ctx) {
   })
 
   register(describe('bulletin_task_update', 'Update a task; only the assignee, creator, or a danger-full-access operator '
-    + 'may update it (others get FORBIDDEN). status transitions are validated. expectedRevision enables '
+    + 'may update it (others get FORBIDDEN). status=completed is assignee-only (the creator cannot bypass '
+    + 'bulletin_task_complete) and completed is only reachable from pending/in_progress/blocked/suspended; '
+    + 'status=terminated on an assigned task is assignee-only and terminated is only reachable from an active state; '
+    + 'assignee changes require a danger-full-access operator. expectedRevision enables '
     + 'optimistic concurrency: a stale or mismatched revision returns CONFLICT with currentRevision.', {
     taskId: str('Task id.'), title: str('Title.'), description: str('Description.'), status: statusProp,
     assigneeSession: str('Assigned session id.'), assigneeAlias: str('Assigned alias.'), workspace: str('Workspace.'),
@@ -140,7 +149,8 @@ export function apply(ctx) {
   }), async args => store.listTasksPage(args))
 
   register(describe('bulletin_task_claim', 'Atomically claim a pending task for the caller. A normal caller may not '
-    + 'claim on behalf of another session/alias (FORBIDDEN); an operator may delegate.', {
+    + 'claim on behalf of another session/alias (FORBIDDEN); an alias pre-assigned task may only be claimed by the '
+    + 'session its host alias route points at; an operator may delegate.', {
     taskId: str('Task id.'), assigneeSession: str('Optional explicit session id (operator only; a non-self value is rejected).'),
     assigneeAlias: str('Optional alias (operator only; a non-self value is rejected).'),
   }, ['taskId']), async (args, exec) => {

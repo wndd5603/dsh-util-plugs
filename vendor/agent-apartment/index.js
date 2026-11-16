@@ -185,7 +185,12 @@ export function apply(ctx, config) {
   }, ['from']), async (args, exec) => {
     assertOperator(exec)
     assertWritable('apartment_restore')
-    return apartment.restoreFrom(args.from, { allowCrossRoot: args.allowCrossRoot === true })
+    const result = apartment.restoreFrom(args.from, { allowCrossRoot: args.allowCrossRoot === true })
+    // P2-3: the restored DB only becomes live on the next host start (the
+    // pending DB replaces apartment.sqlite there). Until then the old DB is
+    // still writable, so gate writes exactly like a migration.
+    markMigrationPending(apartment.root)
+    return { ...result, restartRequired: true, migrationPending: true, pendingRoot: apartment.root }
   })
   register(desc('apartment_verify', 'Verify agent homes and AGENTS.md.'), async () => apartment.verify())
   register(desc('apartment_set_root', 'Switch apartment root pointer (empty/new root); migration should be used to copy data.', { root: str('New absolute root.') }, ['root']), async (args, exec) => {
@@ -219,7 +224,10 @@ export function apply(ctx, config) {
       const args = from !== null && typeof from === 'object' ? from : null
       const source = args === null ? from : args.from
       const allowCrossRoot = (args === null ? options?.allowCrossRoot : args.allowCrossRoot) === true
-      return apartment.restoreFrom(source, { allowCrossRoot })
+      // P2-3: same restart gate as the tool path.
+      const result = apartment.restoreFrom(source, { allowCrossRoot })
+      markMigrationPending(apartment.root)
+      return { ...result, restartRequired: true, migrationPending: true, pendingRoot: apartment.root }
     }
     verify() { return apartment.verify() }
     data(query) {

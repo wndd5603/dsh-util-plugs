@@ -1,6 +1,7 @@
 /** Tool registration for dsh-session-network (P0/P1 skeleton; modules are injected lazily). */
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 export const AGENTS_AUTO_MARKER = '<!-- session-network:auto:v1 -->'
@@ -610,14 +611,132 @@ export function registerTools(ctx, deps) {
     return file
   }
 
-  // P1-4: the sidecar is read-modify-write. An in-process per-meeting lock
-  // serializes every writer so two participants posting concurrently cannot
-  // overwrite each other's append (the rename above keeps each write atomic).
+  // P1-1 (CR3 final): the sidecar is read-modify-write. An in-process queue
+  // alone cannot protect callers in another Node process sharing this dataDir,
+  // so every writer also takes an adjacent `<file>.lock` created with O_EXCL.
+  // A crashed holder is detected (dead pid on this host, or age past the stale
+  // threshold) and its lock is quarantined before the waiter retries.
+  const MEETING_LOCK_TIMEOUT_MS = Math.max(1000, Number(process.env.DSH_MEETING_LOCK_TIMEOUT_MS) || 20000)
+  const MEETING_LOCK_STALE_MS = Math.max(2000, Number(process.env.DSH_MEETING_LOCK_STALE_MS) || 60000)
+  const MEETING_LOCK_RETRY_MS = 10
   const meetingStoreLocks = new Map()
+
+  const meetingLockInfo = lockPath => {
+    try {
+      const parsed = JSON.parse(readFileSync(lockPath, 'utf8'))
+      const stats = statSync(lockPath)
+      return { parsed: parsed !== null && typeof parsed === 'object' ? parsed : {}, mtimeMs: stats.mtimeMs }
+    } catch {
+      return null
+    }
+  }
+
+  const meetingLockAgeMs = observed => {
+    const created = Number(observed?.parsed?.createdAt)
+    const baseline = Number.isFinite(created) && created > 0
+      ? Math.min(observed.mtimeMs, created)
+      : observed.mtimeMs
+    return Date.now() - baseline
+  }
+
+  const pidAlive = pid => {
+    if (!Number.isInteger(pid) || pid <= 0) return null
+    if (pid === process.pid) return true
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (error) {
+      return error?.code === 'ESRCH' ? false : null
+    }
+  }
+
+  const meetingLockIsStale = lockPath => {
+    const observed = meetingLockInfo(lockPath)
+    if (observed === null) {
+      // The lock may have been created a microsecond ago and not yet written;
+      // an unreadable lock only becomes stale after the age threshold.
+      try { return Date.now() - statSync(lockPath).mtimeMs > MEETING_LOCK_STALE_MS } catch { return false }
+    }
+    if (meetingLockAgeMs(observed) > MEETING_LOCK_STALE_MS) return true
+    const ownerHost = observed.parsed?.host
+    if (ownerHost !== hostname()) return false
+    return pidAlive(Number(observed.parsed?.pid)) === false
+  }
+
+  const removeStaleMeetingLock = lockPath => {
+    if (!meetingLockIsStale(lockPath)) return false
+    // Rename is atomic: exactly one of several waiters wins the quarantine and
+    // a freshly-created lock can never be unlinked by a stale breaker.
+    const quarantine = `${lockPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`
+    try {
+      renameSync(lockPath, quarantine)
+    } catch {
+      return false
+    }
+    try { unlinkSync(quarantine) } catch { /* best effort */ }
+    return true
+  }
+
+  const acquireMeetingStoreFileLock = async file => {
+    const lockPath = `${file}.lock`
+    const token = randomUUID()
+    const body = JSON.stringify({ pid: process.pid, host: hostname(), token, createdAt: Date.now() })
+    const startedAt = Date.now()
+    let delay = MEETING_LOCK_RETRY_MS
+    while (true) {
+      try {
+        const fd = openSync(lockPath, 'wx', 0o600)
+        try { writeFileSync(fd, body, 'utf8') } finally { closeSync(fd) }
+        return { lockPath, token }
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error
+        if (removeStaleMeetingLock(lockPath)) { delay = MEETING_LOCK_RETRY_MS; continue }
+        if (Date.now() - startedAt >= MEETING_LOCK_TIMEOUT_MS) {
+          const timeout = new Error(`timed out after ${MEETING_LOCK_TIMEOUT_MS}ms waiting for ${lockPath}`)
+          timeout.code = 'MEETING_STORE_LOCK_TIMEOUT'
+          throw timeout
+        }
+        await new Promise(resolveDelay => setTimeout(resolveDelay, delay + Math.floor(Math.random() * delay)))
+        delay = Math.min(delay * 2, 200)
+      }
+    }
+  }
+
+  const releaseMeetingStoreFileLock = lock => {
+    if (lock === null) return
+    try {
+      const parsed = JSON.parse(readFileSync(lock.lockPath, 'utf8'))
+      if (parsed?.token !== lock.token) return // a stale-breaker already owns it
+    } catch {
+      return // gone or unreadable: never unlink another writer's lock
+    }
+    try { unlinkSync(lock.lockPath) } catch { /* best effort */ }
+  }
+
+  async function withMeetingStoreFileLock(meetingId, fn) {
+    const file = meetingStorePath(meetingId)
+    let lock = null
+    if (file !== null) {
+      mkdirSync(MEETING_STORE_DIR, { recursive: true })
+      lock = await acquireMeetingStoreFileLock(file)
+    }
+    try {
+      return await fn()
+    } finally {
+      releaseMeetingStoreFileLock(lock)
+    }
+  }
+
+  // P1-1: per-meeting in-process queue + cross-process file lock. Callers in
+  // this process must never contend on the file (and lose FIFO ordering), so
+  // the file lock is acquired inside the queued task.
   function withMeetingStoreLock(meetingId, fn) {
     const key = String(meetingId)
     const previous = meetingStoreLocks.get(key) ?? Promise.resolve()
-    const run = previous.then(fn, fn)
+    const run = previous.then(
+      () => withMeetingStoreFileLock(key, fn),
+      () => withMeetingStoreFileLock(key, fn),
+    )
     const tail = run.then(() => {}, () => {})
     meetingStoreLocks.set(key, tail)
     tail.then(() => {
@@ -783,8 +902,12 @@ export function registerTools(ctx, deps) {
     }
   }
 
-  /** Bind a legacy meeting's alias convener to the caller's session id. */
-  function claimLegacyMeetingForConvener(state, exec) {
+  /**
+   * Bind a legacy meeting's alias convener to the caller's session id.
+   * The caller must already hold the meeting sidecar lock (the read-modify-write
+   * below would otherwise race a concurrent post from another process).
+   */
+  function claimLegacyMeetingForConvenerLocked(state, exec) {
     if (state === null || typeof state !== 'object') return false
     if (state.store === null || typeof state.store !== 'object') return false
     if (meetingConvenerSessionOf(state) !== null) return false
@@ -807,6 +930,18 @@ export function registerTools(ctx, deps) {
     writeMeetingStore(latest)
     state.store = latest
     return true
+  }
+
+  async function claimLegacyMeetingForConvener(state, exec) {
+    if (state === null || typeof state !== 'object') return false
+    if (state.store === null || typeof state.store !== 'object') return false
+    const meetingId = state.store.meetingId
+    if (meetingId === undefined || meetingId === null) return false
+    let claimed = false
+    await withMeetingStoreLock(meetingId, () => {
+      claimed = claimLegacyMeetingForConvenerLocked(state, exec)
+    })
+    return claimed
   }
 
   function resolveMeetingWorkspace(exec) {
@@ -1262,7 +1397,7 @@ export function registerTools(ctx, deps) {
             const access = meetingAccess(duplicateState, exec, { write: false })
             if (!access.allowed) return meetingAccessError(access, duplicateStore.meetingId)
             let claimed = false
-            try { claimed = claimLegacyMeetingForConvener(duplicateState, exec) } catch (error) { return meetingError(error) }
+            try { claimed = await claimLegacyMeetingForConvener(duplicateState, exec) } catch (error) { return meetingError(error) }
             const participants = duplicateState.participants.map(participantView)
             const messages = mergeMeetingMessages(duplicateState.store, duplicateState.messages)
             return {
@@ -1297,11 +1432,15 @@ export function registerTools(ctx, deps) {
         // Authorize before writing a reconstructed sidecar or claiming.
         const access = meetingAccess(existingState, exec, { write: false })
         if (!access.allowed) return meetingAccessError(access, meetingId)
-        if (readMeetingStore(meetingId) === null) {
-          try { writeMeetingStore(existingState.store) } catch (error) { return meetingError(error) }
-        }
         let claimed = false
-        try { claimed = claimLegacyMeetingForConvener(existingState, exec) } catch (error) { return meetingError(error) }
+        try {
+          // The reconstruction and the legacy claim are one read-modify-write:
+          // hold the cross-process lock for both.
+          claimed = await withMeetingStoreLock(meetingId, () => {
+            if (readMeetingStore(meetingId) === null) writeMeetingStore(existingState.store)
+            return claimLegacyMeetingForConvenerLocked(existingState, exec)
+          })
+        } catch (error) { return meetingError(error) }
         const existingParticipants = existingState.participants.map(participantView)
         const existingMessages = mergeMeetingMessages(existingState.store, existingState.messages)
         return {
@@ -1451,112 +1590,130 @@ export function registerTools(ctx, deps) {
         dedupeKey,
         at: atIso,
       }
-      const write = withWriteDb(() => {
-        let insert = null
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          if (attempt > 0) entry.msgId = generateMeetingMsgId(meetingId, round, author)
-          insert = modules.db.addMeetingMessage({
-            meetingId,
-            msgId: entry.msgId,
-            fromAlias: entry.from,
-            toAlias: entry.to,
-            at: atMs,
-            bodySha256: entry.bodySha256,
-            bodyLen: entry.bodyLen,
-            dedupeKey: entry.dedupeKey,
+      let locked
+      try {
+        locked = await withMeetingStoreLock(meetingId, () => {
+          // Re-read inside the lock: another participant (or another process)
+          // may have appended since this call loaded `state`, and that post
+          // must not be lost.
+          const latest = readMeetingStore(meetingId) ?? state.store
+          if (normalizeMeetingStatus(latest.status) === 'finalized' || Boolean(latest.finalizedAt)) {
+            return { store: latest, duplicate: null, finalized: true, recovered: false }
+          }
+          const duplicate = dedupeKey === null
+            ? null
+            : (latest.posts ?? []).find(post => post?.dedupeKey === dedupeKey) ?? null
+          if (duplicate !== null) return { store: latest, duplicate, finalized: false, recovered: false }
+
+          // P2-1 (CR3 final): insert the DB row only after the finalized and
+          // dedupe checks above, while holding the sidecar lock. A rejected
+          // post therefore never leaves a DB-only "ghost" message behind.
+          const write = withWriteDb(() => {
+            let insert = null
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              if (attempt > 0) entry.msgId = generateMeetingMsgId(meetingId, round, author)
+              insert = modules.db.addMeetingMessage({
+                meetingId,
+                msgId: entry.msgId,
+                fromAlias: entry.from,
+                toAlias: entry.to,
+                at: atMs,
+                bodySha256: entry.bodySha256,
+                bodyLen: entry.bodyLen,
+                dedupeKey: entry.dedupeKey,
+              })
+              if (insert.inserted === true || insert.deduped === true) break
+            }
+            if (insert === null || (insert.inserted !== true && insert.deduped !== true)) {
+              const error = new Error('could not allocate a unique msgId')
+              error.code = 'MEETING_MESSAGE_ID_CONFLICT'
+              throw error
+            }
+            if (insert.deduped === true) return { deduped: true, msgId: insert.msgId, meetingId: insert.meetingId }
+            const current = modules.db.getMeeting(meetingId)
+            const desired = round === 'R1' ? 'r1' : (round === 'R2' || round === 'R3') ? 'r2' : null
+            const ranks = { open: 0, r1: 1, r2: 2 }
+            if (desired !== null && current !== undefined && !['final', 'cancelled'].includes(current.status)
+              && (ranks[desired] ?? 0) > (ranks[current.status] ?? 0)) {
+              modules.db.setMeetingStatus(meetingId, desired)
+            }
+            return {
+              deduped: false,
+              meeting: modules.db.getMeeting(meetingId),
+              participants: modules.db.listMeetingParticipants(meetingId),
+              messages: modules.db.listMeetingMessages(meetingId),
+            }
           })
-          if (insert.inserted === true || insert.deduped === true) break
-        }
-        if (insert === null) {
-          const error = new Error('could not allocate a unique msgId')
-          error.code = 'MEETING_MESSAGE_ID_CONFLICT'
-          throw error
-        }
-        if (insert.deduped === true) return { deduped: true, msgId: insert.msgId, meetingId: insert.meetingId }
-        const current = modules.db.getMeeting(meetingId)
-        const desired = round === 'R1' ? 'r1' : (round === 'R2' || round === 'R3') ? 'r2' : null
-        const ranks = { open: 0, r1: 1, r2: 2 }
-        if (desired !== null && current !== undefined && !['final', 'cancelled'].includes(current.status)
-          && (ranks[desired] ?? 0) > (ranks[current.status] ?? 0)) {
-          modules.db.setMeetingStatus(meetingId, desired)
-        }
-        return {
-          deduped: false,
-          meeting: modules.db.getMeeting(meetingId),
-          participants: modules.db.listMeetingParticipants(meetingId),
-          messages: modules.db.listMeetingMessages(meetingId),
-        }
-      })
-      if (!write.ok) return meetingError(write.error)
-      if (write.value.deduped === true) {
-        const duplicateMeetingId = write.value.meetingId
-        if (duplicateMeetingId !== meetingId) {
-          return meetingInvalid(`dedupeKey already belongs to meeting ${duplicateMeetingId}`, 'MEETING_DUPLICATE')
-        }
-        const recovered = (state.store.posts ?? []).find(post => post?.msgId === write.value.msgId || post?.dedupeKey === dedupeKey) ?? null
-        if (recovered !== null) return duplicatePostResponse(state, recovered)
-        // DB row exists but the sidecar write was lost: heal it from this retry.
-        entry.msgId = write.value.msgId
-        let healed
-        try {
-          healed = await withMeetingStoreLock(meetingId, () => {
-            const latest = readMeetingStore(meetingId) ?? state.store
+          if (!write.ok) throw write.error
+          if (write.value.deduped === true) {
+            if (write.value.meetingId !== meetingId) {
+              return {
+                store: latest, duplicate: null, finalized: false, recovered: false,
+                foreignMeetingId: write.value.meetingId,
+              }
+            }
+            entry.msgId = write.value.msgId
             const present = (latest.posts ?? []).some(post => post?.msgId === entry.msgId
               || (dedupeKey !== null && post?.dedupeKey === dedupeKey))
             if (!present) {
+              // The DB row survived a crashed sidecar write: heal it now that
+              // the body is available again.
               latest.posts = [...(latest.posts ?? []), entry]
               latest.updatedAt = atIso
               writeMeetingStore(latest)
             }
-            return latest
-          })
-        } catch (error) {
-          return meetingError(error)
-        }
-        const messages = mergeMeetingMessages(healed, state.messages)
-        const participants = state.participants.map(participantView)
+            return { store: latest, duplicate: null, finalized: false, recovered: !present }
+          }
+          latest.posts = [...(latest.posts ?? []), entry]
+          latest.status = normalizeMeetingStatus(write.value.meeting?.status ?? latest.status) ?? latest.status
+          latest.updatedAt = atIso
+          try {
+            writeMeetingStore(latest)
+          } catch (error) {
+            // Keep DB and sidecar consistent: the sidecar append failed, so
+            // remove the DB row inserted above. Only an inserted (not deduped)
+            // row belongs to this call.
+            const rollback = withWriteDb(() => modules.db.deleteMeetingMessage({ meetingId, msgId: entry.msgId }))
+            if (!rollback.ok) log('meeting_post: failed to roll back DB row after sidecar write error', rollback.error)
+            error.rollback = rollback.ok ? rollback.value : false
+            throw error
+          }
+          return {
+            store: latest, duplicate: null, finalized: false, recovered: false,
+            meeting: write.value.meeting,
+            participants: write.value.participants,
+            messages: write.value.messages,
+          }
+        })
+      } catch (error) {
+        return meetingError(error)
+      }
+      if (locked.finalized === true) {
+        return meetingInvalid(`meeting is finalized: ${meetingId}`, 'MEETING_FINALIZED')
+      }
+      if (locked.duplicate !== null) {
+        return duplicatePostResponse({ ...state, store: locked.store }, locked.duplicate)
+      }
+      if (locked.foreignMeetingId !== undefined && locked.foreignMeetingId !== meetingId) {
+        return meetingInvalid(`dedupeKey already belongs to meeting ${locked.foreignMeetingId}`, 'MEETING_DUPLICATE')
+      }
+      if (locked.recovered === true) {
+        const messages = mergeMeetingMessages(locked.store, state.messages)
+        const recoveredParticipants = state.participants.map(participantView)
         return {
           ok: true,
           duplicate: true,
           recovered: true,
           existingMsgId: entry.msgId,
-          meeting: meetingView(state.meeting, healed, participants, messages),
+          meeting: meetingView(state.meeting, locked.store, recoveredParticipants, messages),
           message: messageView(entry),
-          participants,
-          participantIds: participants.map(participant => participant.sessionId),
+          participants: recoveredParticipants,
+          participantIds: recoveredParticipants.map(participant => participant.sessionId),
         }
       }
-      let stored
-      try {
-        stored = await withMeetingStoreLock(meetingId, () => {
-          // Re-read inside the lock: another participant may have appended since
-          // this call loaded `state`, and that post must not be lost.
-          const latest = readMeetingStore(meetingId) ?? state.store
-          if (normalizeMeetingStatus(latest.status) === 'finalized' || Boolean(latest.finalizedAt)) {
-            return { store: latest, duplicate: null, finalized: true }
-          }
-          const duplicate = dedupeKey === null
-            ? null
-            : (latest.posts ?? []).find(post => post?.dedupeKey === dedupeKey) ?? null
-          if (duplicate !== null) return { store: latest, duplicate, finalized: false }
-          latest.posts = [...(latest.posts ?? []), entry]
-          latest.status = normalizeMeetingStatus(write.value.meeting?.status ?? latest.status) ?? latest.status
-          latest.updatedAt = atIso
-          writeMeetingStore(latest)
-          return { store: latest, duplicate: null, finalized: false }
-        })
-      } catch (error) {
-        return meetingError(error)
-      }
-      if (stored.finalized === true) {
-        return meetingInvalid(`meeting is finalized: ${meetingId}`, 'MEETING_FINALIZED')
-      }
-      if (stored.duplicate !== null) {
-        return duplicatePostResponse({ ...state, store: stored.store }, stored.duplicate)
-      }
-      const participants = (write.value.participants ?? []).map(participantView)
-      const messages = mergeMeetingMessages(stored.store, write.value.messages)
-      const meeting = meetingView(write.value.meeting, stored.store, participants, messages)
+      const participants = (locked.participants ?? []).map(participantView)
+      const messages = mergeMeetingMessages(locked.store, locked.messages)
+      const meeting = meetingView(locked.meeting, locked.store, participants, messages)
       safeCall(() => audit?.({ action: 'meeting_post', meetingId, round, ok: true, messages: messages.length, caller: resolveAuditCaller(exec) }), () => {})
       return { ok: true, duplicate: false, meeting, message: messageView(entry), participants, participantIds: participants.map(participant => participant.sessionId) }
     },
