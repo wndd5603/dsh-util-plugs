@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { openMessageStore } from './src/store.js'
 import {
   boolean, number, string, record, nested, objectSchema,
@@ -131,6 +132,62 @@ const truncate = (value, max) => {
 export function isPriorityMessage(subject, body) {
   return PRIORITY_RE.test(String(subject ?? ''))
     || PRIORITY_BODY_RE.test(String(body ?? '').slice(0, 240))
+}
+
+function dshHomeDir() {
+  return process.env.DSH_HOME && process.env.DSH_HOME.length > 0 ? process.env.DSH_HOME : join(homedir(), '.dsh')
+}
+
+/** Read-only Agent Network snapshots so the panel works even if auxiliary Remotes mount late. */
+function readAgentNetworkSnapshot() {
+  const dbPath = join(dshHomeDir(), 'bulletin-board', 'board.sqlite')
+  if (!existsSync(dbPath)) return undefined
+  let db
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+    const boards = db.prepare('SELECT * FROM boards ORDER BY updated_at DESC').all().map(row => ({
+      id: row.id, title: row.title, workspace: row.workspace, status: row.status,
+      priority: row.priority, updatedAt: row.updated_at,
+    }))
+    const tasks = db.prepare('SELECT id, board_id, title, status, assignee_alias, workspace, priority FROM tasks ORDER BY updated_at DESC').all()
+    const counts = {}
+    for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1
+    return { boards, tasks, counts }
+  } catch {
+    return undefined
+  } finally {
+    try { db?.close() } catch { /* ignore */ }
+  }
+}
+
+function readApartmentSnapshot() {
+  const home = dshHomeDir()
+  let root = join(home, 'apartment')
+  try {
+    const pointer = JSON.parse(readFileSync(join(home, 'apartment-root.json'), 'utf8'))
+    if (typeof pointer.root === 'string' && pointer.root !== '') root = pointer.root
+  } catch { /* default root */ }
+  const dbPath = join(root, 'apartment.sqlite')
+  if (!existsSync(dbPath)) return { root, agents: 0, teams: 0, leases: 0, taskRoles: 0, experiences: 0 }
+  let db
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+    const count = table => {
+      try { return db.prepare('SELECT COUNT(*) AS n FROM ' + table).get().n } catch { return 0 }
+    }
+    return {
+      root,
+      agents: count('agents'),
+      teams: count('teams'),
+      leases: count("leases WHERE state='active'"),
+      taskRoles: count('task_roles'),
+      experiences: count('experiences'),
+    }
+  } catch {
+    return { root, agents: 0, teams: 0, leases: 0, taskRoles: 0, experiences: 0 }
+  } finally {
+    try { db?.close() } catch { /* ignore */ }
+  }
 }
 
 function normalizeConfig(config) {
@@ -1154,6 +1211,8 @@ export function apply(ctx, config) {
         offset,
         readBy,
         counts: store.counts(),
+        network: readAgentNetworkSnapshot(),
+        apartment: readApartmentSnapshot(),
         capabilities: { send: cfg.webUi.allowSend, audit: cfg.webUi.audit, strictMode: cfg.strictMode, autoResume: cfg.autoResume },
         remote: { service: WEB_REMOTE_SERVICE_KEY, namespace: WEB_REMOTE_NAMESPACE, actor: 'ui' },
       }
