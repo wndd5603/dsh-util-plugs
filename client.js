@@ -21,6 +21,8 @@ const REMOTE_NAMESPACE = 'messageBus'
 const REMOTE_SERVICE = 'messageBusRemote'
 const PAGE_SIZES = [10, 20, 50]
 const DEFAULT_PAGE_SIZE = 20
+/** CR1/F3: meeting-detail pages are bounded, but the dialog can append pages. */
+const MEETING_DETAIL_PAGE_SIZE = 50
 const DELETE_CONFIRM_WORD = 'DELETE'
 
 /** One strict identity codec: the Host revalidates with its own descriptor. */
@@ -169,6 +171,25 @@ function remoteErrorText(result) {
   if (typeof error.message === 'string' && error.message !== '') return error.message
   if (typeof error.code === 'string' && error.code !== '') return error.code
   return 'unknown error'
+}
+
+/**
+ * CR1/F3: append the next meetingDetail page to the already rendered dialog.
+ * Rows are de-duplicated by msgId so an offset shifted by a concurrent post
+ * cannot render the same speech twice. A different meeting replaces the page.
+ */
+function mergeMeetingDetailPage(previous, page, append = true) {
+  if (page === null || typeof page !== 'object') return page
+  if (append !== true || previous === null || typeof previous !== 'object') return page
+  const previousId = previous.meeting?.meetingId
+  const nextId = page.meeting?.meetingId
+  if (typeof previousId === 'string' && typeof nextId === 'string' && previousId !== nextId) return page
+  const existing = Array.isArray(previous.messages) ? previous.messages : []
+  const seen = new Set(existing.map(message => message?.msgId))
+  const incoming = Array.isArray(page.messages)
+    ? page.messages.filter(message => message !== null && typeof message === 'object' && !seen.has(message.msgId))
+    : []
+  return { ...page, messages: [...existing, ...incoming] }
 }
 
 /** Normalize one list/search RemoteResult into the page model. */
@@ -369,6 +390,11 @@ const zh = {
   meetingParticipants: '参与者',
   meetingMessages: '消息',
   meetingStatus: '状态',
+  meetingDetailCount: '已显示 {shown} / 共 {total} 条消息',
+  meetingLoadMore: '加载更多',
+  meetingLoadingMore: '正在加载…',
+  meetingAllLoaded: '已全部加载（共 {total} 条）',
+  webReadOnly: 'Web 端只读：不显示或修改已读回执。',
   working: '处理中…',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
@@ -500,6 +526,11 @@ const en = {
   meetingParticipants: 'Participants',
   meetingMessages: 'Messages',
   meetingStatus: 'Status',
+  meetingDetailCount: '{shown} of {total} messages shown',
+  meetingLoadMore: 'Load more',
+  meetingLoadingMore: 'Loading…',
+  meetingAllLoaded: 'All {total} messages loaded',
+  webReadOnly: 'Web view is read-only: read receipts are neither shown nor modified here.',
   working: 'Working…',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',
@@ -844,7 +875,7 @@ function AuditList(props) {
 }
 
 function MessageDetail(props) {
-  const { t, api, item, readBy, onClose, onDelete, onCopyBody, onCopyQuote } = props
+  const { t, api, item, onClose, onDelete, onCopyBody, onCopyQuote } = props
   const auditPageSize = 20
   const [auditOpen, setAuditOpen] = React.useState(false)
   const [auditPage, setAuditPage] = React.useState(0)
@@ -940,7 +971,7 @@ function MessageDetail(props) {
     detailRow(t('from'), messageText(item)),
     detailRow(t('to'), item.to),
     detailRow(t('subject'), item.subject || t('noSubject')),
-    detailRow(t('readAt', { time: item.readAt ?? '—' }), readBy === '' ? t('unread') : (item.readAt ?? '—')),
+    panel('p', { className: 'mb-muted', 'data-message-readonly': '' }, t('webReadOnly')),
     panel('p', { style: style.detailBody, 'data-message-detail-body': '' }, item.body),
     panel('div', { className: 'mb-actions', style: { justifyContent: 'flex-start' } },
       panel('button', { type: 'button', className: 'mb-button', onClick: onCopyBody, 'data-message-copy': '' }, t('copyBody')),
@@ -1494,7 +1525,12 @@ function MemorySection(props) {
 }
 
 function MeetingDetailDialog(props) {
-  const { t, detail, busy, onClose } = props
+  const { t, detail, busy, loadingMore, onLoadMore, onClose } = props
+  const messages = Array.isArray(detail?.messages) ? detail.messages : []
+  const total = typeof detail?.messageTotal === 'number'
+    ? detail.messageTotal
+    : (typeof detail?.total === 'number' ? detail.total : messages.length)
+  const hasMore = detail?.hasMore === true
   return panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) onClose() } },
     panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': '会议详情', 'data-meeting-detail': '' },
       panel('div', { className: 'mb-actionRow', style: { justifyContent: 'space-between' } },
@@ -1509,11 +1545,26 @@ function MeetingDetailDialog(props) {
         detail.meeting.updatedAt ? panel('span', null, detail.meeting.updatedAt) : null) : null,
       detail?.summaryText ? panel('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, detail.summaryText) : null,
       Array.isArray(detail?.participants) && detail.participants.length > 0 ? panel('p', { className: 'mb-muted' }, 'Participants: ' + detail.participants.map(p => p.sessionId).join(', ')) : null,
-      Array.isArray(detail?.messages) ? panel('div', { className: 'mb-taskList' }, detail.messages.map(message => panel('article', { key: message.msgId, className: 'mb-task' },
+      Array.isArray(detail?.messages) ? panel('div', { className: 'mb-taskList' }, messages.map(message => panel('article', { key: message.msgId, className: 'mb-task', 'data-meeting-message': message.msgId },
         panel('div', { className: 'mb-taskTitle' },
           panel('span', null, message.round ?? 'note'),
           panel('span', { className: 'mb-pill' }, message.from ?? '')),
         panel('p', { style: { margin: '6px 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '36vh', overflow: 'auto' } }, message.body ?? '(body unavailable)')))) : null,
+      detail?.meeting ? panel('div', { className: 'mb-actionRow', 'data-meeting-pagination': '' },
+        panel('span', {
+          className: 'mb-muted',
+          'data-meeting-message-count': '',
+          'data-meeting-message-total': String(total),
+        }, hasMore
+          ? t('meetingDetailCount', { shown: String(messages.length), total: String(total) })
+          : t('meetingAllLoaded', { total: String(total) })),
+        hasMore ? panel('button', {
+          type: 'button',
+          className: 'mb-chipButton',
+          disabled: loadingMore === true,
+          onClick: onLoadMore,
+          'data-meeting-load-more': '',
+        }, loadingMore === true ? t('meetingLoadingMore') : t('meetingLoadMore')) : null) : null,
       Array.isArray(detail?.decisions) && detail.decisions.length > 0 ? panel('div', null,
         panel('h4', null, 'Decisions'),
         panel('ul', null, detail.decisions.map((decision, index) => panel('li', { key: decision.id ?? index }, decision.text ?? JSON.stringify(decision))))) : null,
@@ -1574,8 +1625,6 @@ function MessageCenterPage(props) {
   const [limit, setLimit] = React.useState(DEFAULT_PAGE_SIZE)
   const [keyword, setKeyword] = React.useState('')
   const [queryInput, setQueryInput] = React.useState('')
-  const [readByInput, setReadByInput] = React.useState('')
-  const [readBy, setReadBy] = React.useState('')
   const [allowSend, setAllowSend] = React.useState(false)
   const [strictMode, setStrictMode] = React.useState(true)
   const [counts, setCounts] = React.useState({})
@@ -1596,7 +1645,9 @@ function MessageCenterPage(props) {
   const [meetingBusy, setMeetingBusy] = React.useState(false)
   const [meetingMessage, setMeetingMessage] = React.useState(undefined)
   const [meetingDetail, setMeetingDetail] = React.useState(undefined)
+  const [meetingDetailId, setMeetingDetailId] = React.useState(undefined)
   const [meetingDetailBusy, setMeetingDetailBusy] = React.useState(false)
+  const [meetingDetailMoreBusy, setMeetingDetailMoreBusy] = React.useState(false)
   const [apartmentBusy, setApartmentBusy] = React.useState(false)
   const [apartmentMessage, setApartmentMessage] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
@@ -1674,28 +1725,57 @@ function MessageCenterPage(props) {
     }
   }, [api, meetingBusy, meetingPage, meetingQuery, meetingStatus, t])
 
+  const fetchMeetingDetailPage = async (meetingId, pageOffset) => {
+    const raw = await api.meetingDetail({
+      meetingId,
+      limit: MEETING_DETAIL_PAGE_SIZE,
+      offset: pageOffset,
+    })
+    const value = unwrapRemote(raw)
+    if (value === null || typeof value !== 'object') throw new Error('meeting detail unavailable')
+    if (value.ok === false) throw new Error(typeof value.error === 'string' ? value.error : 'meeting detail failed')
+    return value
+  }
+
   const openMeetingDetail = async meetingId => {
     if (meetingDetailBusy || typeof api.meetingDetail !== 'function') return
     setMeetingDetailBusy(true)
+    setMeetingDetailId(meetingId)
     setMeetingDetail({})
     try {
-      const raw = await api.meetingDetail({ meetingId })
-      setMeetingDetail(unwrapRemote(raw))
+      const page = await fetchMeetingDetailPage(meetingId, 0)
+      setMeetingDetail(previous => previous === undefined ? previous : page)
     } catch (caught) {
-      setMeetingDetail({ error: errorTextOf(caught) })
+      setMeetingDetail(previous => previous === undefined ? previous : { error: errorTextOf(caught) })
     } finally { setMeetingDetailBusy(false) }
+  }
+
+  const loadMoreMeetingDetail = async () => {
+    if (meetingDetailMoreBusy || meetingDetailBusy || typeof api.meetingDetail !== 'function') return
+    const meetingId = meetingDetailId
+    const current = meetingDetail
+    if (typeof meetingId !== 'string' || current === null || typeof current !== 'object' || current.hasMore !== true) return
+    const nextOffset = typeof current.nextOffset === 'number'
+      ? current.nextOffset
+      : (typeof current.offset === 'number' ? current.offset : 0) + (Array.isArray(current.messages) ? current.messages.length : 0)
+    setMeetingDetailMoreBusy(true)
+    try {
+      const page = await fetchMeetingDetailPage(meetingId, nextOffset)
+      setMeetingDetail(previous => previous === undefined ? previous : mergeMeetingDetailPage(previous, page, true))
+    } catch (caught) {
+      setMeetingDetail(previous => previous === undefined ? previous : { ...previous, error: errorTextOf(caught) })
+    } finally { setMeetingDetailMoreBusy(false) }
   }
 
   const load = React.useCallback(async (options = {}) => {
     const nextOffset = options.offset ?? offset
     const nextKeyword = options.keyword ?? keyword
-    const nextReadBy = options.readBy ?? readBy
     setLoading(true)
     setError(undefined)
     try {
       const result = nextKeyword.trim() === ''
-        ? await api.list('', limit, nextOffset, nextReadBy)
-        : await api.search(nextKeyword.trim(), limit, nextOffset, nextReadBy)
+        ? await api.list('', limit, nextOffset)
+        : await api.search(nextKeyword.trim(), limit, nextOffset)
       const normalized = normalizeListResult(result)
       if (!normalized.ok) setError(normalized.error)
       else {
@@ -1718,7 +1798,7 @@ function MessageCenterPage(props) {
     } finally {
       setLoading(false)
     }
-  }, [api, keyword, limit, offset, readBy, loadAux])
+  }, [api, keyword, limit, offset, loadAux])
 
   React.useEffect(() => { void load({ offset: 0 }) }, []) // initial load
   React.useEffect(() => { void loadMemory({ page: 0 }); void loadMeetings({ page: 0 }) }, [])
@@ -1784,16 +1864,11 @@ function MessageCenterPage(props) {
     setDetail(undefined)
     void load({ offset: 0, keyword: '' })
   }
-  const applyReadBy = () => {
-    const next = readByInput.trim()
-    setReadBy(next)
-    void load({ offset: 0, readBy: next })
-  }
   const openDetail = async item => {
     setSelected(item)
     setDetail(undefined)
     try {
-      const normalized = normalizeGetResult(await api.get(item.id, readBy, readBy !== ''))
+      const normalized = normalizeGetResult(await api.get(item.id))
       if (!normalized.ok) {
         if (normalized.gone) showToast(t('loadFailed', { error: 'gone' }), 'danger')
         else showToast(t('loadFailed', { error: normalized.error }), 'danger')
@@ -1921,21 +1996,11 @@ function MessageCenterPage(props) {
         onChange: event => setQueryInput(event.target.value),
       }),
       panel('button', { type: 'submit', style: style.primary, 'data-message-search-submit': '' }, t('search')),
-      panel('button', { type: 'button', style: style.button, onClick: clearSearch }, t('clear')),
-      panel('input', {
-        type: 'text',
-        value: readByInput,
-        placeholder: t('readByPlaceholder'),
-        style: { ...style.input, ...style.narrow },
-        'aria-label': t('readByLabel'),
-        'data-message-readby': '',
-        onChange: event => setReadByInput(event.target.value),
-        onBlur: applyReadBy,
-      })),
+      panel('button', { type: 'button', style: style.button, onClick: clearSearch }, t('clear'))),
     panel('div', { style: style.meta },
       panel('span', null, t('stats', { total: String(total), shown: String(items.length) })),
       typeof counts.messages === 'number' ? panel('span', null, 'DB messages: ' + String(counts.messages)) : null,
-      readBy === '' ? null : panel('span', null, t('readByLabel') + ': ' + readBy)),
+      panel('span', { className: 'mb-muted', 'data-message-readonly': '' }, t('webReadOnly'))),
     error === undefined ? null : panel('div', { style: style.errorBox }, t('loadFailed', { error })),
     panel(Toast, { text: toast?.text, tone: toast?.tone }),
     loading ? panel('p', { style: style.empty }, t('loading')) : null,
@@ -1967,7 +2032,9 @@ function MessageCenterPage(props) {
       t,
       detail: meetingDetail,
       busy: meetingDetailBusy,
-      onClose: () => setMeetingDetail(undefined),
+      loadingMore: meetingDetailMoreBusy,
+      onLoadMore: () => { void loadMoreMeetingDetail() },
+      onClose: () => { setMeetingDetail(undefined); setMeetingDetailId(undefined) },
     }),
     detail === undefined ? null : panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) { setSelected(undefined); setDetail(undefined) } } },      panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('detailTitle'), 'data-message-detail': '' },
         panel(MessageDetail, {
@@ -1975,7 +2042,6 @@ function MessageCenterPage(props) {
           t,
           api,
           item: detail,
-          readBy,
           onClose: () => { setSelected(undefined); setDetail(undefined) },
           onDelete: () => { setDeleteTyped(''); setDeleteOpen(true) },
           onCopyBody: () => { void copyText(detail.body) },
@@ -2029,9 +2095,11 @@ function apply(ctx) {
     const apartmentRemote = () => scope.get('remote.agentApartment')
     const t = scope.locale.bind(LOCALE_NS)
     const api = {
-      list: (keyword, limit, offset, readBy) => scope.remote.messageBus.list(keyword, limit, offset, readBy),
-      search: (keyword, limit, offset, readBy) => scope.remote.messageBus.search(keyword, limit, offset, readBy),
-      get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
+      // CR2-02: the Web Remote has no caller identity (host ignores readBy and
+      // never marks read), so the UI must not pretend to collect one.
+      list: (keyword, limit, offset) => scope.remote.messageBus.list(keyword, limit, offset, null),
+      search: (keyword, limit, offset) => scope.remote.messageBus.search(keyword, limit, offset, null),
+      get: messageId => scope.remote.messageBus.get(messageId, null, false),
       delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
       send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
       apartmentStatus: () => apartmentRemote()?.status?.(),

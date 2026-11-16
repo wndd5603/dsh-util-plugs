@@ -15,6 +15,13 @@ const parse = text => {
   try { return JSON.parse(text) } catch { return null }
 }
 const newId = prefix => prefix + '-' + Date.now().toString(36) + '-' + randomUUID().slice(0, 8)
+/** Coded error so tools can return a stable CONFLICT/FORBIDDEN/INVALID_ARGUMENT contract. */
+const codedError = (code, message, extra = {}) => {
+  const error = new Error(message)
+  error.code = code
+  Object.assign(error, extra)
+  return error
+}
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -73,6 +80,72 @@ export function createStore(dbPath) {
     const s = exec?.agent?.session
     return s?.id ?? null
   }
+  const actorAliasOf = (exec) => {
+    const header = exec?.agent?.session?.header ?? {}
+    return header.alias ?? exec?.agent?.alias ?? null
+  }
+  // P1-1: updateTask must enforce the same owner boundary as completeTask.
+  // A normal caller may only mutate a task it owns (assignee, or legacy
+  // alias-assignee) or created; danger-full-access operators may override.
+  const isTaskOwner = (existing, exec) => {
+    const caller = actorOf(exec)
+    const callerAlias = actorAliasOf(exec)
+    const assigneeSession = typeof existing.assignee_session === 'string' && existing.assignee_session !== ''
+      ? existing.assignee_session : null
+    if (assigneeSession !== null) {
+      if (caller !== null && caller === assigneeSession) return true
+    } else {
+      const assigneeAlias = typeof existing.assignee_alias === 'string' && existing.assignee_alias !== ''
+        ? existing.assignee_alias : null
+      if (assigneeAlias !== null && callerAlias !== null && callerAlias === assigneeAlias) return true
+    }
+    const createdBy = typeof existing.created_by === 'string' && existing.created_by !== '' ? existing.created_by : null
+    return createdBy !== null && caller !== null && caller === createdBy
+  }
+  // Operator delegation is explicit; a normal caller always claims as itself.
+  const calledSession = (operator, requested, caller) => (operator && requested !== null ? requested : caller)
+  const calledAlias = (operator, requested, callerAlias) => (operator && requested !== null ? requested : callerAlias)
+  const clampInt = (value, fallback, min, max) => {
+    const number = Number(value)
+    return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.trunc(number))) : fallback
+  }
+  const offsetOf = value => {
+    const number = Number(value)
+    return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : 0
+  }
+  const textOf = value => (typeof value === 'string' ? value.trim().slice(0, 200) : '')
+  const likeOf = text => '%' + String(text).replace(/[\\%_]/g, character => '\\' + character) + '%'
+  const boardFilterOf = (query = {}) => {
+    const where = []
+    const values = []
+    if (query.status !== undefined) { where.push('status = ?'); values.push(query.status) }
+    if (query.workspace !== undefined) { where.push('workspace = ?'); values.push(query.workspace) }
+    const keyword = textOf(query.query)
+    if (keyword !== '') {
+      const like = likeOf(keyword)
+      where.push("(id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR workspace LIKE ? ESCAPE '\\')")
+      values.push(like, like, like, like)
+    }
+    return { clause: where.length === 0 ? '' : ' WHERE ' + where.join(' AND '), values }
+  }
+  const taskFilterOf = (query = {}) => {
+    const where = []
+    const values = []
+    for (const [col, key] of [['board_id', 'boardId'], ['status', 'status'], ['workspace', 'workspace'], ['assignee_session', 'assigneeSession'], ['assignee_alias', 'assigneeAlias']]) {
+      if (query[key] !== undefined) { where.push(col + ' = ?'); values.push(query[key]) }
+    }
+    const keyword = textOf(query.query)
+    if (keyword !== '') {
+      const like = likeOf(keyword)
+      where.push("(id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'"
+        + " OR blocked_reason LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\'"
+        + " OR assignee_alias LIKE ? ESCAPE '\\' OR assignee_session LIKE ? ESCAPE '\\'"
+        + " OR workspace LIKE ? ESCAPE '\\' OR depends_on LIKE ? ESCAPE '\\'"
+        + " OR related_tasks LIKE ? ESCAPE '\\' OR created_by LIKE ? ESCAPE '\\')")
+      values.push(like, like, like, like, like, like, like, like, like, like, like)
+    }
+    return { clause: where.length === 0 ? '' : ' WHERE ' + where.join(' AND '), values }
+  }
   const event = (actor, action, entity, entityId, detail) => db.prepare(
     'INSERT INTO events (at, actor, action, entity, entity_id, detail) VALUES (?,?,?,?,?,?)',
   ).run(now(), actor, action, entity, entityId, detail === undefined ? null : json(detail))
@@ -94,13 +167,22 @@ export function createStore(dbPath) {
       return rowBoard(db.prepare('SELECT * FROM boards WHERE id=?').get(id))
     },
     listBoards(query = {}) {
-      const where = []
-      const values = []
-      if (query.status !== undefined) { where.push('status = ?'); values.push(query.status) }
-      if (query.workspace !== undefined) { where.push('workspace = ?'); values.push(query.workspace) }
-      const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 200)
-      const rows = db.prepare('SELECT * FROM boards' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY updated_at DESC LIMIT ?').all(...values, limit)
+      const { clause, values } = boardFilterOf(query)
+      const limit = clampInt(query.limit, 50, 1, 200)
+      const offset = offsetOf(query.offset)
+      const rows = db.prepare('SELECT * FROM boards' + clause
+        + ' ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?').all(...values, limit, offset)
       return rows.map(rowBoard)
+    },
+    /** Paginated board read; listBoards(query) keeps the legacy array shape. */
+    listBoardsPage(query = {}) {
+      const { clause, values } = boardFilterOf(query)
+      const limit = clampInt(query.limit, 50, 1, 200)
+      const offset = offsetOf(query.offset)
+      const total = Number(db.prepare('SELECT COUNT(*) AS n FROM boards' + clause).get(...values)?.n ?? 0)
+      const rows = db.prepare('SELECT * FROM boards' + clause
+        + ' ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?').all(...values, limit, offset)
+      return { boards: rows.map(rowBoard), total, limit, offset, hasMore: offset + rows.length < total }
     },
     getBoard(id) {
       return rowBoard(db.prepare('SELECT * FROM boards WHERE id=?').get(id))
@@ -124,19 +206,46 @@ export function createStore(dbPath) {
     },
     getTask(id) { return rowTask(db.prepare('SELECT * FROM tasks WHERE id=?').get(id)) },
     listTasks(query = {}) {
-      const where = []
-      const values = []
-      for (const [col, key] of [['board_id', 'boardId'], ['status', 'status'], ['workspace', 'workspace'], ['assignee_session', 'assigneeSession'], ['assignee_alias', 'assigneeAlias']]) {
-        if (query[key] !== undefined) { where.push(col + ' = ?'); values.push(query[key]) }
-      }
-      const limit = Math.min(Math.max(Number(query.limit ?? 100), 1), 500)
-      const rows = db.prepare('SELECT * FROM tasks' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY priority DESC, updated_at DESC LIMIT ?').all(...values, limit)
+      const { clause, values } = taskFilterOf(query)
+      const limit = clampInt(query.limit, 100, 1, 500)
+      const offset = offsetOf(query.offset)
+      const rows = db.prepare('SELECT * FROM tasks' + clause
+        + ' ORDER BY priority DESC, updated_at DESC, id ASC LIMIT ? OFFSET ?').all(...values, limit, offset)
       return rows.map(rowTask)
     },
-    updateTask(id, patch, exec) {
+    /** Paginated task query; listTasks(query) keeps the legacy array shape. */
+    listTasksPage(query = {}) {
+      const { clause, values } = taskFilterOf(query)
+      const limit = clampInt(query.limit, 100, 1, 500)
+      const offset = offsetOf(query.offset)
+      const total = Number(db.prepare('SELECT COUNT(*) AS n FROM tasks' + clause).get(...values)?.n ?? 0)
+      const rows = db.prepare('SELECT * FROM tasks' + clause
+        + ' ORDER BY priority DESC, updated_at DESC, id ASC LIMIT ? OFFSET ?').all(...values, limit, offset)
+      return { tasks: rows.map(rowTask), total, limit, offset, hasMore: offset + rows.length < total }
+    },
+    updateTask(id, patch = {}, exec, options = {}) {
       const existing = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
-      if (existing === undefined) throw new Error('task not found: ' + id)
+      if (existing === undefined) throw codedError('NOT_FOUND', 'task not found: ' + id)
+      if (options.operator !== true && !isTaskOwner(existing, exec)) {
+        throw codedError('FORBIDDEN', 'updateTask: only the assignee, creator, or an operator may update this task')
+      }
       assertStatus(patch.status)
+      // Q3-A optimistic concurrency: expectedRevision is optional, but every
+      // update is still a CAS on the revision read above. The legacy client
+      // therefore cannot silently overwrite a newer write either.
+      let expected = null
+      if (patch.expectedRevision !== undefined && patch.expectedRevision !== null) {
+        const wanted = Number(patch.expectedRevision)
+        if (!Number.isInteger(wanted) || wanted < 1) {
+          throw codedError('INVALID_ARGUMENT', 'expectedRevision must be a positive integer')
+        }
+        expected = wanted
+      }
+      if (expected !== null && expected !== Number(existing.revision)) {
+        throw codedError('CONFLICT', `revision mismatch: expected ${expected}, current ${existing.revision}`, {
+          taskCode: 'CONFLICT', currentRevision: Number(existing.revision), currentTask: rowTask(existing),
+        })
+      }
       const fields = []
       const values = []
       const allowed = {
@@ -152,23 +261,74 @@ export function createStore(dbPath) {
       }
       if (fields.length === 0) return rowTask(existing)
       fields.push('updated_at = ?', 'revision = revision + 1')
-      values.push(now(), id)
-      db.prepare('UPDATE tasks SET ' + fields.join(', ') + ' WHERE id=?').run(...values)
+      values.push(now(), id, existing.revision)
+      const result = db.prepare('UPDATE tasks SET ' + fields.join(', ') + ' WHERE id=? AND revision=?').run(...values)
+      if (result.changes === 0) {
+        const current = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
+        throw codedError('CONFLICT', 'revision changed concurrently', {
+          taskCode: 'CONFLICT', currentRevision: current === undefined ? null : Number(current.revision), currentTask: rowTask(current),
+        })
+      }
       event(actorOf(exec), 'task.update', 'task', id, patch)
       return rowTask(db.prepare('SELECT * FROM tasks WHERE id=?').get(id))
     },
-    claimTask(id, assignee, exec) {
+    claimTask(id, assignee = {}, exec = {}, options = {}) {
+      const caller = actorOf(exec)
+      const callerAlias = actorAliasOf(exec)
+      const operator = options.operator === true
+      const requestedSession = typeof assignee?.session === 'string' && assignee.session.trim() !== ''
+        ? assignee.session.trim() : null
+      const requestedAlias = typeof assignee?.alias === 'string' && assignee.alias.trim() !== ''
+        ? assignee.alias.trim() : null
+      if (!operator) {
+        if (caller === null) throw codedError('FORBIDDEN', 'claimTask: caller session is unavailable')
+        if (requestedSession !== null && requestedSession !== caller) {
+          throw codedError('FORBIDDEN', 'claimTask: a session may only claim a task for itself')
+        }
+        if (requestedAlias !== null && requestedAlias !== callerAlias) {
+          throw codedError('FORBIDDEN', 'claimTask: a session may only claim a task under its own alias')
+        }
+      }
       const result = db.prepare(`UPDATE tasks SET status='in_progress', assignee_session=?, assignee_alias=?, updated_at=?, revision=revision+1
         WHERE id=? AND status='pending' AND (assignee_session IS NULL OR assignee_session='')`).run(
-        assignee.session ?? actorOf(exec), assignee.alias ?? null, now(), id,
+        calledSession(operator, requestedSession, caller), calledAlias(operator, requestedAlias, callerAlias), now(), id,
       )
-      if (result.changes === 0) throw new Error('task is not claimable (not pending or already assigned)')
-      event(actorOf(exec), 'task.claim', 'task', id, assignee)
+      if (result.changes === 0) {
+        throw codedError('CONFLICT', 'task is not claimable (not pending or already assigned)', { taskCode: 'CONFLICT' })
+      }
+      event(actorOf(exec), 'task.claim', 'task', id, { session: calledSession(operator, requestedSession, caller), alias: calledAlias(operator, requestedAlias, callerAlias) })
       return rowTask(db.prepare('SELECT * FROM tasks WHERE id=?').get(id))
     },
-    completeTask(id, exec) {
-      const result = db.prepare(`UPDATE tasks SET status='completed', updated_at=?, revision=revision+1 WHERE id=?`).run(now(), id)
-      if (result.changes === 0) throw new Error('task not found: ' + id)
+    completeTask(id, exec = {}, options = {}) {
+      const existing = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
+      if (existing === undefined) throw codedError('NOT_FOUND', 'task not found: ' + id)
+      const caller = actorOf(exec)
+      const callerAlias = actorAliasOf(exec)
+      if (options.operator !== true) {
+        if (typeof existing.assignee_session === 'string' && existing.assignee_session !== '') {
+          if (caller === null || existing.assignee_session !== caller) {
+            throw codedError('FORBIDDEN', 'completeTask: only the assignee may complete this task')
+          }
+        } else if (typeof existing.assignee_alias === 'string' && existing.assignee_alias !== '') {
+          if (callerAlias === null || existing.assignee_alias !== callerAlias) {
+            throw codedError('FORBIDDEN', 'completeTask: only the assignee may complete this task')
+          }
+        } else if (typeof existing.created_by === 'string' && existing.created_by !== '') {
+          if (caller === null || existing.created_by !== caller) {
+            throw codedError('FORBIDDEN', 'completeTask: only the creator or an operator may complete an unassigned task')
+          }
+        } else {
+          throw codedError('FORBIDDEN', 'completeTask: task has no owner; an operator must complete it')
+        }
+      }
+      const result = db.prepare(`UPDATE tasks SET status='completed', updated_at=?, revision=revision+1
+        WHERE id=? AND revision=?`).run(now(), id, existing.revision)
+      if (result.changes === 0) {
+        const current = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
+        throw codedError('CONFLICT', 'revision changed concurrently', {
+          taskCode: 'CONFLICT', currentRevision: current === undefined ? null : Number(current.revision), currentTask: rowTask(current),
+        })
+      }
       event(actorOf(exec), 'task.complete', 'task', id)
       return rowTask(db.prepare('SELECT * FROM tasks WHERE id=?').get(id))
     },

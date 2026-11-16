@@ -64,6 +64,16 @@ export function apply(ctx) {
   const store = createStore(process.env.DSH_BULLETIN_DB || undefined)
   ctx.effect(() => () => store.close())
 
+  const isOperator = exec => {
+    try {
+      const policy = ctx.get?.('sandboxPolicy')
+      const resolved = policy?.resolve?.({ session: exec?.agent?.session })
+      return resolved?.mode === 'danger-full-access'
+    } catch {
+      return false
+    }
+  }
+
   const register = (descriptor, execute) => ctx.tools.register({ ...descriptor, execute })
 
   register(describe('bulletin_board_create', 'Create a bulletin board / task board.', {
@@ -76,13 +86,30 @@ export function apply(ctx) {
   })
 
   register(describe('bulletin_board_list', 'List bulletin boards.', {
-    status: statusProp, workspace: str('Filter by workspace.'), limit: num('Max rows (1-200).'),
-  }), async (args) => ({ boards: store.listBoards(args) }))
+    status: statusProp, workspace: str('Filter by workspace.'),
+    query: str('Keyword search over id/title/description/workspace.'),
+    limit: num('Max rows (1-200).'), offset: num('Row offset (default 0).'),
+  }), async (args) => store.listBoardsPage(args))
 
-  register(describe('bulletin_board_get', 'Read one bulletin board.', { boardId: str('Board id.') }, ['boardId']), async args => {
+  register(describe('bulletin_board_get', 'Read one bulletin board.', {
+    boardId: str('Board id.'), taskLimit: num('Task rows to return (1-500, default 500).'),
+    taskOffset: num('Task row offset (default 0).'),
+  }, ['boardId']), async args => {
     const board = store.getBoard(args.boardId)
     if (board === null) throw new Error('board not found: ' + args.boardId)
-    return { board, tasks: store.listTasks({ boardId: args.boardId, limit: 500 }) }
+    const page = store.listTasksPage({
+      boardId: args.boardId,
+      limit: args.taskLimit ?? 500,
+      offset: args.taskOffset ?? 0,
+    })
+    return {
+      board,
+      tasks: page.tasks,
+      taskTotal: page.total,
+      taskOffset: page.offset,
+      taskLimit: page.limit,
+      tasksTruncated: page.hasMore,
+    }
   })
 
   register(describe('bulletin_task_add', 'Add a task to a board.', {
@@ -95,26 +122,35 @@ export function apply(ctx) {
     return store.addTask(args.boardId, { ...args, workspace: args.workspace ?? a.cwd }, exec)
   })
 
-  register(describe('bulletin_task_update', 'Update a task; status transitions are validated.', {
+  register(describe('bulletin_task_update', 'Update a task; only the assignee, creator, or a danger-full-access operator '
+    + 'may update it (others get FORBIDDEN). status transitions are validated. expectedRevision enables '
+    + 'optimistic concurrency: a stale or mismatched revision returns CONFLICT with currentRevision.', {
     taskId: str('Task id.'), title: str('Title.'), description: str('Description.'), status: statusProp,
     assigneeSession: str('Assigned session id.'), assigneeAlias: str('Assigned alias.'), workspace: str('Workspace.'),
     priority: num('Priority.'), dependsOn: arr('Dependency ids.'), relatedTasks: arr('Related ids.'),
     blockedReason: str('Reason when status=blocked.'), metadata: { type: 'object', additionalProperties: true },
-  }, ['taskId']), async (args, exec) => store.updateTask(args.taskId, args, exec))
+    expectedRevision: num('Optional current revision; mismatch returns CONFLICT.'),
+  }, ['taskId']), async (args, exec) => store.updateTask(args.taskId, args, exec, { operator: isOperator(exec) }))
 
   register(describe('bulletin_task_list', 'Query tasks by board/status/workspace/assignee.', {
     boardId: str('Board id.'), status: statusProp, workspace: str('Workspace.'),
-    assigneeSession: str('Session id.'), assigneeAlias: str('Alias.'), limit: num('Max rows (1-500).'),
-  }), async args => ({ tasks: store.listTasks(args) }))
+    assigneeSession: str('Session id.'), assigneeAlias: str('Alias.'),
+    query: str('Keyword search over id/title/description/blockedReason/metadata/assignee/workspace/dependencies/createdBy.'),
+    limit: num('Max rows (1-500).'), offset: num('Row offset (default 0).'),
+  }), async args => store.listTasksPage(args))
 
-  register(describe('bulletin_task_claim', 'Atomically claim a pending task for the caller.', {
-    taskId: str('Task id.'), assigneeSession: str('Optional explicit session id.'), assigneeAlias: str('Optional alias.'),
+  register(describe('bulletin_task_claim', 'Atomically claim a pending task for the caller. A normal caller may not '
+    + 'claim on behalf of another session/alias (FORBIDDEN); an operator may delegate.', {
+    taskId: str('Task id.'), assigneeSession: str('Optional explicit session id (operator only; a non-self value is rejected).'),
+    assigneeAlias: str('Optional alias (operator only; a non-self value is rejected).'),
   }, ['taskId']), async (args, exec) => {
     const a = actor(exec)
-    return store.claimTask(args.taskId, { session: args.assigneeSession ?? a.session, alias: args.assigneeAlias ?? a.alias }, exec)
+    return store.claimTask(args.taskId, { session: args.assigneeSession ?? a.session, alias: args.assigneeAlias ?? a.alias }, exec, { operator: isOperator(exec) })
   })
 
-  register(describe('bulletin_task_complete', 'Mark a task completed.', { taskId: str('Task id.') }, ['taskId']), async (args, exec) => store.completeTask(args.taskId, exec))
+  register(describe('bulletin_task_complete', 'Mark a task completed. Only the assignee (or, for legacy unassigned '
+    + 'tasks, the creator) may complete it; danger-full-access operators may override.', { taskId: str('Task id.') }, ['taskId']),
+  async (args, exec) => store.completeTask(args.taskId, exec, { operator: isOperator(exec) }))
 
   register(describe('bulletin_digest', 'Tasks related to the caller: assignee, workspace, or explicit session/alias.', {
     session: str('Optional session id; defaults to caller.'), alias: str('Optional alias.'), workspace: str('Optional workspace.'),
@@ -167,15 +203,18 @@ export function apply(ctx) {
   // Read-only Web Remote for the Agent Network console section.
   class BulletinBoardRemote {
     overview() {
-      const tasks = store.listTasks({ limit: 500 })
+      const boardsPage = store.listBoardsPage({ limit: 100 })
+      const tasksPage = store.listTasksPage({ limit: 500 })
       return {
-        boards: store.listBoards({ limit: 100 }),
-        tasks,
-        counts: Object.fromEntries(STATUSES.map(s => [s, tasks.filter(t => t.status === s).length])),
+        boards: boardsPage.boards,
+        tasks: tasksPage.tasks,
+        boardsTotal: boardsPage.total,
+        tasksTotal: tasksPage.total,
+        counts: Object.fromEntries(STATUSES.map(s => [s, tasksPage.tasks.filter(t => t.status === s).length])),
       }
     }
-    boards(query) { return { boards: store.listBoards(query ?? {}) } }
-    tasks(query) { return { tasks: store.listTasks(query ?? {}) } }
+    boards(query) { return store.listBoardsPage(query ?? {}) }
+    tasks(query) { return store.listTasksPage(query ?? {}) }
   }
   Object.defineProperty(BulletinBoardRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
     configurable: true, enumerable: false, value: Object.freeze({ version: 1, methods: REMOTE_METHODS }),

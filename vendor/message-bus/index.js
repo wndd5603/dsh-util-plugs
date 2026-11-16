@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Universal session message bus for DeepSeek Harness.
  *
  * Project-agnostic: messages live in one SQLite database (default
@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openMessageStore } from './src/store.js'
 import {
@@ -49,6 +49,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'meetingDetail', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'networkPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'messageAudit', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'auditPage', invocation: Object.freeze({ kind: 'direct' }) }),
 ])
 
 /**
@@ -91,7 +92,9 @@ export const Config = objectSchema({
     dedupeWindowMs: number(600000, { description: 'Same (from,to,bodySha256) or dedupeKey window; 0 disables dedupe.', min: 0, int: true }),
     coalesceWindowMs: number(400, { description: 'Merge several deliveries to one envelope inside this window.', min: 0, int: true }),
     maxEnvelopeItems: number(10, { description: 'Flush a merged envelope after this many items.', min: 1, max: 100, int: true }),
-  }), { description: 'Wake envelope and dedupe behaviour.' }),
+    pendingTtlDays: number(0, { description: 'Q2-A: reported expiresAt for queued delivery rows (days). 0 = no TTL (Phase A default; no sweep).', min: 0, int: true }),
+    undeliverableTtlDays: number(0, { description: 'Q2-A: reported expiresAt for undeliverable (archived/not-found/no-preset) rows. 0 = no TTL.', min: 0, int: true }),
+  }), { description: 'Wake envelope, dedupe and Q2-A delivery-state reporting.' }),
   displayNames: record({}, { description: 'Alias -> display name used in envelopes and audit.' }),
   displayNamesBySession: record({}, { description: 'Session id -> display name (wins over displayNames).' }),
   routes: record({}, { description: 'Alias -> session id routes seeded into the SQLite routes table at load.' }),
@@ -101,12 +104,16 @@ export const Config = objectSchema({
   allowRouteRegister: boolean(false, {
     description: 'Register operator tool message_route_register (alias->session changes). Off by default: alias hijack guard.',
   }),
-  allowPurge: boolean(true, {
-    description: 'Register the operator tool message_purge (destructive; requires an explicit confirm token).',
+  allowPurge: boolean(false, {
+    description: 'Register the operator tool message_purge (destructive; requires an explicit confirm token). Off by default: destructive operations must be opted in.',
   }),
   retentionDays: number(0, {
     description: 'Delete messages older than N days on load and once per day. 0 = keep forever (manual purge only).',
     int: true, min: 0,
+  }),
+  queueMaxOffset: number(100000, {
+    description: 'Maximum message_queue offset (default 100000; CR1/F2). A request above it returns offsetClamped=true and an empty page instead of repeating a page. Raise it for larger audit windows.',
+    int: true, min: 1,
   }),
   webUi: nested(objectSchema({
     enabled: boolean(true, { description: 'Register the task-95 Web message center Remote namespace (messages list/search/detail/delete/send).' }),
@@ -303,9 +310,12 @@ function readTasksPage(rawArgs) {
   }
   if (query !== '') {
     const like = likePattern(query)
-    where.push("(id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR assignee_alias LIKE ? ESCAPE '\\'"
-      + " OR assignee_session LIKE ? ESCAPE '\\' OR depends_on LIKE ? ESCAPE '\\' OR related_tasks LIKE ? ESCAPE '\\')")
-    values.push(like, like, like, like, like, like)
+    where.push("(id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'"
+      + " OR blocked_reason LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\'"
+      + " OR assignee_alias LIKE ? ESCAPE '\\'"
+      + " OR assignee_session LIKE ? ESCAPE '\\' OR depends_on LIKE ? ESCAPE '\\' OR related_tasks LIKE ? ESCAPE '\\'"
+      + " OR created_by LIKE ? ESCAPE '\\')")
+    values.push(like, like, like, like, like, like, like, like, like, like)
   }
   const whereSql = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
   const db = openSnapshotDb(bulletinDbPath())
@@ -339,7 +349,6 @@ function readTaskDetail(rawArgs) {
     return {
       ok: true,
       task: taskPageRow(row),
-      metadata: row.metadata,
       events: events.map(event => ({ id: event.id, at: event.at, actor: event.actor, action: event.action, detail: event.detail })),
     }
   } catch (error) {
@@ -499,6 +508,16 @@ function readMeetingDetail(rawQuery) {
   const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
   const meetingId = typeof query.meetingId === 'string' ? query.meetingId.trim() : ''
   if (meetingId === '') return { ok: false, error: 'meetingId is required' }
+  const rawRound = typeof query.round === 'string' ? query.round.trim() : ''
+  const round = rawRound === '' ? null : (rawRound.toLowerCase() === 'notes' ? 'notes' : rawRound.toUpperCase())
+  if (round !== null && !['R1', 'R2', 'R3', 'notes'].includes(round)) {
+    return { ok: false, error: 'invalid round: ' + rawRound + ' (expected R1|R2|R3|notes)' }
+  }
+  const rawLimit = query.limit ?? query.messageLimit
+  const rawOffset = query.offset ?? query.messageOffset
+  const limit = Number.isFinite(Number(rawLimit)) ? Math.min(100, Math.max(1, Math.trunc(Number(rawLimit)))) : 20
+  const offset = Number.isFinite(Number(rawOffset)) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(Number(rawOffset)))) : 0
+  const bodyLimit = Number.isFinite(Number(query.bodyLimit)) ? Math.min(20000, Math.max(0, Math.trunc(Number(query.bodyLimit)))) : 0
   const dbPath = networkDbPath()
   if (dbPath === undefined || !existsSync(dbPath)) return { ok: false, error: 'meeting database not found' }
   let db
@@ -507,7 +526,7 @@ function readMeetingDetail(rawQuery) {
     const row = db.prepare('SELECT * FROM meetings WHERE meeting_id=?').get(meetingId)
     if (row === undefined) return { ok: false, error: 'meeting not found', meetingId }
     const participants = db.prepare('SELECT session_id, role, ack_state FROM meeting_participants WHERE meeting_id=?').all(meetingId)
-    const dbMessages = db.prepare('SELECT * FROM messages WHERE meeting_id=? ORDER BY at ASC').all(meetingId)
+    const dbMessages = db.prepare('SELECT * FROM messages WHERE meeting_id=? ORDER BY at ASC, msg_id ASC').all(meetingId)
     const raw = String(meetingId)
     const digest = createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 12)
     const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '_').slice(0, 48) || 'meeting'
@@ -515,7 +534,7 @@ function readMeetingDetail(rawQuery) {
     let sidecar = {}
     try { sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8')) } catch { sidecar = {} }
     const posts = new Map((Array.isArray(sidecar.posts) ? sidecar.posts : []).map(post => [String(post.msgId), post]))
-    const messages = dbMessages.map(message => {
+    const allMessages = dbMessages.map(message => {
       const post = posts.get(String(message.msg_id)) ?? {}
       return {
         msgId: message.msg_id,
@@ -529,6 +548,21 @@ function readMeetingDetail(rawQuery) {
         at: typeof message.at === 'number' ? new Date(message.at).toISOString() : message.at,
       }
     })
+    const rounds = {}
+    for (const message of allMessages) {
+      if (typeof message.round === 'string' && message.round !== '') rounds[message.round] = (rounds[message.round] ?? 0) + 1
+    }
+    const filteredMessages = round === null ? allMessages : allMessages.filter(message => message.round === round)
+    const messages = filteredMessages.slice(offset, offset + limit).map(message => {
+      const totalChars = message.body === null ? 0 : message.body.length
+      const truncated = bodyLimit > 0 && totalChars > bodyLimit
+      return {
+        ...message,
+        ...(bodyLimit > 0 ? { body: truncated ? message.body.slice(0, bodyLimit) : message.body } : {}),
+        bodyTotalChars: totalChars,
+        bodyTruncated: truncated,
+      }
+    })
     const iso = value => {
       if (value === null || value === undefined) return null
       const date = new Date(value)
@@ -540,15 +574,27 @@ function readMeetingDetail(rawQuery) {
         meetingId: row.meeting_id, title: row.title,
         status: row.status === 'final' ? 'finalized' : row.status,
         convener: row.convener, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at),
-        deadline: iso(row.deadline), dirPath: row.dir_path,
+        deadline: iso(row.deadline),
+        dirPath: typeof row.dir_path === 'string' && row.dir_path !== '' ? basename(row.dir_path) : null,
       },
       participants: participants.map(participant => ({ sessionId: participant.session_id, role: participant.role, ackState: participant.ack_state })),
       messages,
+      // messageTotal is the whole meeting; total/filtered describe the round
+      // filter (identical when round is omitted); offset/limit page `messages`.
+      messageTotal: allMessages.length,
+      total: filteredMessages.length,
+      filtered: filteredMessages.length,
+      round,
+      rounds,
+      offset,
+      limit,
+      nextOffset: offset + messages.length,
+      hasMore: offset + messages.length < filteredMessages.length,
       decisions: Array.isArray(sidecar.decisions) ? sidecar.decisions : [],
       actions: Array.isArray(sidecar.actions) ? sidecar.actions : [],
       summary: sidecar.summary ?? null,
       summaryText: sidecar.summaryText ?? null,
-      bodyAvailable: sidecarPath !== null,
+      bodyAvailable: allMessages.some(message => message.body !== null),
     }
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) }
@@ -642,7 +688,13 @@ function readMessageAudit(store, rawArgs) {
     const row = db.prepare('SELECT id, at, from_session, to_session, subject, bytes, sha256 FROM messages WHERE id = ?').get(messageId)
     if (row === undefined || row === null) return { ok: false, gone: true, id: messageId }
     const total = Number(db.prepare('SELECT COUNT(*) AS n FROM deliveries WHERE message_id = ?').get(messageId)?.n ?? 0)
-    const deliveries = db.prepare('SELECT id, at, to_session, duplicate, suppressed, delivered, coalesced, resumed, error'
+    // Legacy/degraded schemas cannot SELECT the Q2-A columns; project NULLs so
+    // the audit stays readable instead of returning ok:false for old DBs.
+    const deliveryStateSelect = store.deliverySchema?.degraded === true
+      ? ' NULL AS target_state, NULL AS delivery_state, NULL AS reason_code, NULL AS expires_at, 0 AS attempt_count, NULL AS successor_session_id'
+      : ' target_state, delivery_state, reason_code, expires_at, attempt_count, successor_session_id'
+    const deliveries = db.prepare('SELECT id, at, to_session, duplicate, suppressed, delivered, coalesced, resumed, error,'
+      + deliveryStateSelect
       + ' FROM deliveries WHERE message_id = ? ORDER BY id ASC LIMIT ? OFFSET ?').all(messageId, limit, offset)
     const readState = db.prepare('SELECT session_id, read_at FROM read_state WHERE message_id = ? ORDER BY read_at DESC').all(messageId)
     const envelopes = db.prepare('SELECT to_session, delivered_at, consumed_at FROM envelope_state WHERE message_id = ?'
@@ -666,6 +718,12 @@ function readMessageAudit(store, rawArgs) {
         duplicate: delivery.duplicate === 1, suppressed: delivery.suppressed === 1,
         delivered: delivery.delivered === 1, coalesced: delivery.coalesced === 1,
         resumed: delivery.resumed === 1, error: delivery.error ?? null,
+        targetState: delivery.target_state ?? null,
+        deliveryState: delivery.delivery_state ?? (delivery.suppressed === 1 ? 'suppressed' : delivery.delivered === 1 ? 'delivered' : 'queued'),
+        reasonCode: delivery.reason_code ?? null,
+        expiresAt: delivery.expires_at ?? null,
+        attempts: Number(delivery.attempt_count ?? 0),
+        successorSessionId: delivery.successor_session_id ?? null,
       })),
       readState: readState.map(entry => ({ sessionId: entry.session_id, readAt: entry.read_at })),
       envelopes: envelopes.map(envelope => ({
@@ -677,6 +735,98 @@ function readMessageAudit(store, rawArgs) {
     }
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) }
+  }
+}
+
+/**
+ * Read-only session-network audit page for the meeting console. Reads the same
+ * network.db as meetingDetail; append-only audit_log is never written. Legacy
+ * rows with target=NULL and no meta.meetingId are reported as
+ * targetSource:'none' (not attributable), never guessed or back-filled.
+ */
+const AUDIT_EFFECTIVE_TARGET_SQL = `COALESCE(NULLIF(TRIM(a.target), ''),
+  CASE WHEN COALESCE(json_valid(a.meta_json), 0) = 1
+    THEN 'meeting:' || json_extract(a.meta_json, '$.meetingId') END)`
+const AUDIT_TARGET_SOURCE_SQL = `CASE
+  WHEN a.target IS NOT NULL AND TRIM(a.target) <> '' THEN 'column'
+  WHEN COALESCE(json_valid(a.meta_json), 0) = 1
+    AND CASE WHEN COALESCE(json_valid(a.meta_json), 0) = 1
+      THEN json_extract(a.meta_json, '$.meetingId') END IS NOT NULL THEN 'meta'
+  ELSE 'none' END`
+
+function auditActorOf(value) {
+  if (typeof value !== 'string' || !value.startsWith('{')) return value
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed !== null && typeof parsed === 'object'
+      && ('sessionId' in parsed || 'displayName' in parsed || 'roleName' in parsed)) {
+      return { sessionId: parsed.sessionId ?? null, displayName: parsed.displayName ?? null, roleName: parsed.roleName ?? null }
+    }
+  } catch { /* keep raw */ }
+  return value
+}
+
+function readAuditPage(rawQuery) {
+  const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
+  const text = value => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
+  const limit = Number.isFinite(Number(query.limit)) ? Math.min(500, Math.max(1, Math.trunc(Number(query.limit)))) : 100
+  const offset = Number.isFinite(Number(query.offset)) ? Math.max(0, Math.trunc(Number(query.offset))) : 0
+  const dbPath = networkDbPath()
+  if (dbPath === undefined || !existsSync(dbPath)) {
+    return { ok: false, error: 'network database not found', items: [], total: 0, offset, limit, hasMore: false }
+  }
+  let db
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+    const clauses = []
+    const params = []
+    const actor = text(query.actor)
+    const action = text(query.action)
+    const target = text(query.target)
+    const meetingId = text(query.meetingId)
+    const result = text(query.result)
+    const targetSource = text(query.targetSource)
+    if (actor !== null) { clauses.push('a.actor LIKE ?'); params.push('%' + actor + '%') }
+    if (action !== null) { clauses.push('a.action = ?'); params.push(action) }
+    if (result !== null) { clauses.push('a.result = ?'); params.push(result) }
+    if (typeof query.since === 'string' && Number.isFinite(Date.parse(query.since))) {
+      clauses.push('a.at >= ?'); params.push(Date.parse(query.since))
+    }
+    if (target !== null) {
+      clauses.push(`(${AUDIT_EFFECTIVE_TARGET_SQL}) = ?`); params.push(target)
+    }
+    if (meetingId !== null) {
+      clauses.push(`(${AUDIT_EFFECTIVE_TARGET_SQL}) = ?`); params.push('meeting:' + meetingId)
+    }
+    if (targetSource !== null && ['column', 'meta', 'none'].includes(targetSource)) {
+      clauses.push(`(${AUDIT_TARGET_SOURCE_SQL}) = ?`); params.push(targetSource)
+    }
+    const where = clauses.length === 0 ? '' : ' WHERE ' + clauses.join(' AND ')
+    const total = Number(db.prepare('SELECT COUNT(*) AS n FROM audit_log a' + where).get(...params)?.n ?? 0)
+    const rows = db.prepare(`SELECT a.*,
+        (${AUDIT_EFFECTIVE_TARGET_SQL}) AS effective_target,
+        (${AUDIT_TARGET_SOURCE_SQL}) AS target_source
+      FROM audit_log a` + where + ' ORDER BY a.id DESC LIMIT ? OFFSET ?').all(...params, limit, offset)
+    const items = rows.map(row => {
+      let meta = null
+      if (row.meta_json !== null) {
+        try { meta = JSON.parse(row.meta_json) } catch { meta = row.meta_json }
+      }
+      const source = row.target_source ?? 'none'
+      return {
+        ...row,
+        actor: auditActorOf(row.actor),
+        meta,
+        effectiveTarget: row.effective_target ?? null,
+        targetSource: source,
+        unattributed: source === 'none',
+      }
+    })
+    return { ok: true, items, total, offset, limit, hasMore: offset + items.length < total }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error), items: [], total: 0, offset, limit, hasMore: false }
+  } finally {
+    try { db?.close() } catch { /* ignore */ }
   }
 }
 
@@ -711,6 +861,10 @@ function normalizeConfig(config) {
       dedupeWindowMs: Math.max(0, num(delivery.dedupeWindowMs, deliveryDefaults.dedupeWindowMs)),
       coalesceWindowMs: Math.max(0, num(delivery.coalesceWindowMs, deliveryDefaults.coalesceWindowMs)),
       maxEnvelopeItems: Math.max(1, Math.trunc(num(delivery.maxEnvelopeItems, deliveryDefaults.maxEnvelopeItems))),
+      // Phase A defaults are 0: expiresAt is reported but no row is expired or
+      // hidden. Phase B can turn retention on without a code change.
+      pendingTtlDays: Math.max(0, Math.trunc(num(delivery.pendingTtlDays, 0))),
+      undeliverableTtlDays: Math.max(0, Math.trunc(num(delivery.undeliverableTtlDays, 0))),
     },
     displayNames: merged.displayNames !== null && typeof merged.displayNames === 'object' ? merged.displayNames : {},
     displayNamesBySession: merged.displayNamesBySession !== null && typeof merged.displayNamesBySession === 'object'
@@ -720,6 +874,7 @@ function normalizeConfig(config) {
     allowRouteRegister: merged.allowRouteRegister === true,
     allowPurge: merged.allowPurge !== false,
     retentionDays: Math.max(0, Math.trunc(num(merged.retentionDays, 0))),
+    queueMaxOffset: Math.max(1, Math.trunc(num(merged.queueMaxOffset, 100000))),
     webUi: {
       enabled: webUi.enabled !== false,
       allowSend: webUi.allowSend !== false,
@@ -751,7 +906,11 @@ export function apply(ctx, config) {
     return
   }
   const store = openMessageStore(cfg.dbPath)
-  const { lightweight, dedupeWindowMs, coalesceWindowMs, maxEnvelopeItems } = cfg.delivery
+  if (store.deliverySchema?.degraded) {
+    logger.warn('[message-bus] Q2-A delivery columns unavailable (missing: '
+      + store.deliverySchema.missing.join(', ') + '); legacy delivery schema in use')
+  }
+  const { lightweight, dedupeWindowMs, coalesceWindowMs, maxEnvelopeItems, pendingTtlDays, undeliverableTtlDays } = cfg.delivery
 
   for (const [alias, sessionId] of Object.entries(cfg.configuredRoutes)) {
     if (typeof alias === 'string' && typeof sessionId === 'string') {
@@ -881,13 +1040,41 @@ export function apply(ctx, config) {
     const sessionId = typeof exec?.agent?.session?.id === 'string' ? exec.agent.session.id : null
     return { sessionId, displayName: sessionId === null ? 'unknown' : resolveDisplayName(sessionId, null) }
   }
+  const callerSessionId = (exec) => {
+    const value = exec?.agent?.session?.id
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  }
+  /**
+   * Q3-A identity boundary: `session` / `readBy` are compatibility parameters,
+   * never an identity assertion. A non-self value is rejected with FORBIDDEN so
+   * one session cannot forge another session's read receipts or read timeline.
+   */
+  const resolveSelfSessionArg = (rawValue, exec, action) => {
+    const caller = callerSessionId(exec)
+    if (caller === null) {
+      throw codedError('INVALID_ARGUMENT', action + ': caller session is unavailable; exec.agent.session.id is required')
+    }
+    if (rawValue === undefined || rawValue === null) return caller
+    if (typeof rawValue !== 'string') {
+      throw codedError('INVALID_ARGUMENT', action + ': session must be a string')
+    }
+    const requested = rawValue.trim()
+    if (requested === '') return caller
+    if (requested !== caller) {
+      throw codedError('FORBIDDEN', action + ': session must equal the caller session (requested ' + requested + ', caller ' + caller + ')')
+    }
+    return caller
+  }
   const resolveTarget = (to, { allowInactive = false } = {}) => {
     const raw = String(to ?? '').trim()
     // 1) exact session id -> live Agent registry (or a resumable id)
     if (SESSION_ID_RE.test(raw)) {
       const sessionId = raw.toLowerCase()
       const agent = allowInactive ? resolveAgent(sessionId) : requireLive(sessionId)
-      return { sessionId, agent, alias: null, displayName: resolveDisplayName(sessionId, null), source: 'agents' }
+      return {
+        sessionId, agent, alias: null, displayName: resolveDisplayName(sessionId, null), source: 'agents',
+        match: 'session-id', aliasStatus: null, supersededBy: null, migratedTo: null,
+      }
     }
     // 2) alias -> host-native sessionDirectory (only joined aliases)
     const directory = directoryService()
@@ -901,13 +1088,20 @@ export function apply(ctx, config) {
         alias: joined.alias ?? raw,
         displayName: joined.displayName ?? resolveDisplayName(joined.sessionId, joined.alias ?? raw),
         source: 'sessionDirectory',
+        match: 'alias',
+        aliasStatus: joined.status ?? null,
+        supersededBy: joined.supersededBy ?? null,
+        migratedTo: joined.migratedTo ?? null,
       }
     }
     // 3) legacy route table fallback (migration only; never PEERS)
     const route = store.resolveRoute(raw)
     if (route !== undefined && route !== null && typeof route.session_id === 'string') {
       const agent = allowInactive ? resolveAgent(route.session_id) : requireLive(route.session_id)
-      return { sessionId: route.session_id, agent, alias: route.alias, displayName: route.display_name, source: 'legacy-route' }
+      return {
+        sessionId: route.session_id, agent, alias: route.alias, displayName: route.display_name,
+        source: 'legacy-route', match: 'alias', aliasStatus: 'legacy', supersededBy: null, migratedTo: null,
+      }
     }
     // 4) live Agent header alias/displayName -> unique match only
     const agents = agentsService()
@@ -916,7 +1110,12 @@ export function apply(ctx, config) {
       return header.displayName === raw || header.alias === raw
     })
     if (matches.length === 1) {
-      return { sessionId: matches[0].session.id, agent: matches[0], alias: raw, displayName: raw, source: 'agent-header' }
+      const header = matches[0]?.session?.header ?? {}
+      return {
+        sessionId: matches[0].session.id, agent: matches[0], alias: raw, displayName: raw, source: 'agent-header',
+        match: header.alias === raw ? 'header-alias' : 'display-name',
+        aliasStatus: null, supersededBy: null, migratedTo: null,
+      }
     }
     // Recovery hint must match the effective config: message_route_register is
     // only registered when allowRouteRegister is true (alias-hijack guard).
@@ -926,6 +1125,97 @@ export function apply(ctx, config) {
     throw codedError('RECIPIENT_NOT_FOUND', 'unknown recipient: ' + JSON.stringify(raw)
       + ' (use a session-<uuid> id, or join with alias_register; ' + aliasHint + ')')
   }
+
+  // ---- Q2-A: target/delivery state contract (additive; Phase A) ----
+  const ROUTE_FIELDS = target => ({
+    source: target?.source ?? 'unknown',
+    match: target?.match ?? null,
+    alias: target?.alias ?? null,
+    aliasStatus: target?.aliasStatus ?? null,
+    resolvedSessionId: target?.sessionId ?? null,
+    supersededBy: target?.supersededBy ?? null,
+    migratedFrom: target?.migratedFrom ?? null,
+    migratedTo: target?.migratedTo ?? null,
+  })
+  const REASON_TEXT = {
+    'recipient-live': 'target is live',
+    'self-delivery-no-wake': 'self-delivery stored without waking (pass wakeSelf:true to override)',
+    'duplicate-suppressed': 'duplicate message suppressed by the dedupe window',
+    'recipient-inactive': 'target session is persisted but inactive; waiting for a live event',
+    'auto-resume-disabled': 'autoResume is disabled; queued until the session becomes live',
+    'resume-rate-limited': 'auto-resume rate limit reached; queued for the next event',
+    'resume-failed': 'auto-resume did not deliver; queued for retry',
+    'resume-no-preset': 'target has no resolvable agent preset; cannot auto-resume',
+    'recipient-archived': 'target session is archived; unarchive and resume to deliver',
+    'session-not-found': 'recipient session does not exist; message is retained for audit in Phase A',
+    'session-unreadable': 'recipient session store is unreadable or unsupported',
+    'target-unknown': 'target state is unknown (no reliable persistence/agent source)',
+  }
+  const reasonText = code => REASON_TEXT[code] ?? String(code ?? 'unknown')
+  const ttlIso = (days) => {
+    const value = Number(days)
+    if (!(value > 0)) return null
+    return new Date(Date.now() + value * 24 * 60 * 60 * 1000).toISOString()
+  }
+  const persistenceExists = async (sessionId) => {
+    const persistence = safeCtxGet(ctx, 'sessionPersistence')
+    if (persistence === undefined || typeof persistence.stat !== 'function') {
+      return { known: false, exists: undefined }
+    }
+    try {
+      const stat = await persistence.stat(sessionId)
+      return { known: true, exists: stat !== undefined && stat !== null }
+    } catch (error) {
+      const name = String(error?.name ?? error?.code ?? '')
+      if (name === 'SessionPersistenceNotFoundError' || error?.code === 'SESSION_NOT_FOUND' || name === 'ENOENT') {
+        return { known: true, exists: false }
+      }
+      return { known: false, exists: undefined }
+    }
+  }
+  /**
+   * Physical target classification with the Q2 priority:
+   * archived > not-found > live > inactive. `unknown` is returned when no
+   * reliable source can decide; it is never guessed into not-found.
+   */
+  const classifySession = async (sessionId) => {
+    if (archivedSessionIds().includes(sessionId)) return { targetState: 'archived', exists: true }
+    const probe = await persistenceExists(sessionId)
+    if (probe.exists === false) return { targetState: 'not-found', exists: false }
+    const agent = resolveAgent(sessionId)
+    const live = agent !== undefined
+      && (agent.status === undefined || agent.status === 'idle' || agent.status === 'running')
+    if (live) return { targetState: 'live', exists: probe.exists ?? true, agent }
+    if (probe.exists === true) return { targetState: 'inactive', exists: true }
+    return { targetState: 'unknown', exists: probe.exists }
+  }
+  const mapResumeFailure = (error, errorCode) => {
+    const code = String(errorCode ?? '')
+    const message = String(error ?? '')
+    if (code === 'archived' || message === 'archived') {
+      return { deliveryState: 'undeliverable', reasonCode: 'recipient-archived', retryable: true, targetState: 'archived' }
+    }
+    if (code === 'no-preset') {
+      return { deliveryState: 'undeliverable', reasonCode: 'resume-no-preset', retryable: true }
+    }
+    if (code === 'SessionPersistenceNotFoundError' || /not found/iu.test(message)) {
+      return { deliveryState: 'undeliverable', reasonCode: 'session-not-found', retryable: false, targetState: 'not-found' }
+    }
+    if (code === 'SessionFormatUnsupportedError' || code === 'SessionPersistenceCorruptionError'
+      || /unreadable|unsupported format/iu.test(message)) {
+      return { deliveryState: 'undeliverable', reasonCode: 'session-unreadable', retryable: false }
+    }
+    if (code === 'autoResume-rate-limited') {
+      return { deliveryState: 'queued', reasonCode: 'resume-rate-limited', retryable: true }
+    }
+    if (code === 'autoResume-disabled') {
+      return { deliveryState: 'queued', reasonCode: 'auto-resume-disabled', retryable: true }
+    }
+    return { deliveryState: 'queued', reasonCode: 'resume-failed', retryable: true }
+  }
+  const expiresFor = (deliveryState) => deliveryState === 'undeliverable'
+    ? ttlIso(undeliverableTtlDays)
+    : deliveryState === 'queued' ? ttlIso(pendingTtlDays) : null
 
   // ---- coalescing (never for priority messages) ----
   const pending = new Map()
@@ -1054,8 +1344,15 @@ export function apply(ctx, config) {
   }
   const archivedSessionIds = () => {
     try {
-      const ids = safeCtxGet(ctx, 'workspaceRegistry')?.archivedSessionIds
-      return Array.isArray(ids) ? ids.map(String) : []
+      const registry = safeCtxGet(ctx, 'workspaceRegistry')
+      // Accept the host registry shapes used across DSH versions (network-info
+      // archiveIds is the reference): flat array, global array, or workspace list.
+      if (Array.isArray(registry?.archivedSessionIds)) return registry.archivedSessionIds.map(String)
+      if (Array.isArray(registry?.global?.archivedSessionIds)) return registry.global.archivedSessionIds.map(String)
+      const list = typeof registry?.list === 'function' ? registry.list() : registry
+      const ids = (Array.isArray(list) ? list : []).flatMap(workspace =>
+        Array.isArray(workspace?.archivedSessionIds) ? workspace.archivedSessionIds : [])
+      return ids.filter(value => typeof value === 'string')
     } catch { return [] }
   }
   const resumeComposition = async (sessionId) => {
@@ -1085,13 +1382,13 @@ export function apply(ctx, config) {
     }
   }
   const resumeTargetAgent = async (sessionId, callerSessionId = null) => {
-    if (!cfg.autoResume) return { agent: undefined, error: 'autoResume-disabled' }
+    if (!cfg.autoResume) return { agent: undefined, error: 'autoResume-disabled', errorCode: 'autoResume-disabled' }
     const rateKey = typeof callerSessionId === 'string' && callerSessionId !== '' ? callerSessionId : 'unknown'
     const now = Date.now()
     const recent = (resumeAttempts.get(rateKey) ?? []).filter(at => now - at < 60000)
     if (recent.length >= cfg.autoResumeRateLimitPerMinute) {
       resumeAttempts.set(rateKey, recent)
-      return { agent: undefined, error: 'autoResume-rate-limited' }
+      return { agent: undefined, error: 'autoResume-rate-limited', errorCode: 'autoResume-rate-limited' }
     }
     recent.push(now)
     resumeAttempts.set(rateKey, recent)
@@ -1101,26 +1398,26 @@ export function apply(ctx, config) {
       const liveAgent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
       const active = liveAgent !== undefined
         && (liveAgent.status === undefined || liveAgent.status === 'idle' || liveAgent.status === 'running')
-      if (active && liveAgent === existing.agent) return { agent: liveAgent, error: null }
+      if (active && liveAgent === existing.agent) return { agent: liveAgent, error: null, errorCode: null }
       // Cached handle is stale/disposed: drop it and resume again.
       resumedHandles.delete(sessionId)
-      if (active) return { agent: liveAgent, error: null }
+      if (active) return { agent: liveAgent, error: null, errorCode: null }
     }
     const inflight = resuming.get(sessionId)
     if (inflight !== undefined) return await inflight
     if (agents === undefined || typeof agents.resume !== 'function') {
-      return { agent: undefined, error: 'agents-resume-unavailable' }
+      return { agent: undefined, error: 'agents-resume-unavailable', errorCode: 'agents-resume-unavailable' }
     }
     if (archivedSessionIds().includes(sessionId)) {
       logger.warn('[message-bus] session ' + sessionId + ' is archived; refusing auto-resume (message stays queued)')
-      return { agent: undefined, error: 'archived' }
+      return { agent: undefined, error: 'archived', errorCode: 'archived' }
     }
     const task = (async () => {
       try {
         const composition = await resumeComposition(sessionId)
         if (composition === undefined) {
           logger.warn('[message-bus] no preset composition for ' + sessionId + '; refusing auto-resume (message stays queued)')
-          return { agent: undefined, error: 'no-preset' }
+          return { agent: undefined, error: 'no-preset', errorCode: 'no-preset' }
         }
         const selection = resumeSelection()
         const handle = await agents.resume({
@@ -1134,10 +1431,18 @@ export function apply(ctx, config) {
         logger.info('[message-bus] auto-resumed ' + sessionId
           + (selection === undefined || selection === null ? '' : ' (' + selection.provider + '/' + selection.model + ')')
           + ' preset=' + composition.agentPreset)
-        return { agent: handle?.agent, error: handle?.agent === undefined ? 'resume-no-agent' : null }
+        return {
+          agent: handle?.agent,
+          error: handle?.agent === undefined ? 'resume-no-agent' : null,
+          errorCode: handle?.agent === undefined ? 'resume-no-agent' : null,
+        }
       } catch (error) {
         logger.warn('[message-bus] auto-resume failed for ' + sessionId + ': ' + String(error))
-        return { agent: undefined, error: String(error?.message ?? error) }
+        return {
+          agent: undefined,
+          error: String(error?.message ?? error),
+          errorCode: String(error?.name ?? error?.code ?? 'resume-failed'),
+        }
       } finally {
         resuming.delete(sessionId)
       }
@@ -1153,8 +1458,13 @@ export function apply(ctx, config) {
     if (body.trim().length === 0) throw new Error('body must not be empty')
     if (cfg.strictMode && sandboxModeOf(exec) !== 'danger-full-access' && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
     const target = resolveTarget(to, { allowInactive: true })
+    // Q2-A: classify BEFORE dedupe so a suppressed duplicate cannot hide an
+    // archived/not-found target. This probe is cheap (no resume, no write).
+    const classification = await classifySession(target.sessionId)
+    const targetStateAtSend = classification.targetState
+    const route = ROUTE_FIELDS(target)
     await assertCrossPermission(exec, target)
-    let agent = target.agent
+    let agent = targetStateAtSend === 'live' ? classification.agent : undefined
     if (agent !== undefined && agent.status !== undefined && agent.status !== 'idle' && agent.status !== 'running') {
       agent = undefined
     }
@@ -1187,20 +1497,58 @@ export function apply(ctx, config) {
         lightweight, duplicate: true, suppressed: true, delivered: false,
         existingId: duplicate.id, existingAt: duplicate.at, dedupeKey,
         dedupeWindowMs, test, priority,
+        targetState: targetStateAtSend, deliveryState: 'suppressed', reasonCode: 'duplicate-suppressed',
+        routeSource: route.source, expiresAt: null,
       })
       return {
         ok: true, duplicate: true, suppressed: true,
         existingId: duplicate.id, existingAt: duplicate.at,
         bodySha256: sha, dedupeKey, dedupeWindowMs, session: target.sessionId,
+        targetState: targetStateAtSend, deliveryState: 'suppressed', notDeliverable: false, retryable: false,
+        reasonCode: 'duplicate-suppressed', reason: reasonText('duplicate-suppressed'),
+        expiresAt: null, route,
       }
     }
 
-    if (agent === undefined && cfg.autoResume) {
-      const resumed = await resumeTargetAgent(target.sessionId, caller.sessionId)
-      agent = resumed.agent
-      wakeError = resumed.error
-    } else if (agent === undefined) {
-      wakeError = 'autoResume-disabled'
+    let resolvedTargetState = targetStateAtSend
+    let deliveryState = null
+    let reasonCode = null
+    let retryable = false
+    if (agent === undefined) {
+      if (targetStateAtSend === 'archived') {
+        wakeError = 'archived'
+        deliveryState = 'undeliverable'
+        reasonCode = 'recipient-archived'
+        retryable = true
+      } else if (targetStateAtSend === 'not-found') {
+        // Phase A: keep the legacy accept+store behaviour, but label it
+        // undeliverable so callers never have to parse wakeError.
+        wakeError = 'session-not-found'
+        deliveryState = 'undeliverable'
+        reasonCode = 'session-not-found'
+        retryable = false
+      } else if (cfg.autoResume) {
+        const resumed = await resumeTargetAgent(target.sessionId, caller.sessionId)
+        agent = resumed.agent
+        wakeError = resumed.error
+        if (agent !== undefined) {
+          resolvedTargetState = 'live'
+          deliveryState = 'delivered'
+          reasonCode = 'recipient-live'
+          retryable = false
+        } else {
+          const mapped = mapResumeFailure(resumed.error, resumed.errorCode)
+          deliveryState = mapped.deliveryState
+          reasonCode = mapped.reasonCode
+          retryable = mapped.retryable
+          if (typeof mapped.targetState === 'string') resolvedTargetState = mapped.targetState
+        }
+      } else {
+        wakeError = 'autoResume-disabled'
+        deliveryState = 'queued'
+        reasonCode = 'auto-resume-disabled'
+        retryable = true
+      }
     }
 
     const messageId = 'msg-' + Date.now().toString(36) + '-' + sha.slice(0, 8)
@@ -1211,23 +1559,33 @@ export function apply(ctx, config) {
       dedupeKey, nonce, forced: force, priority, test, projectScope,
     })
     if (agent === undefined) {
+      const expiresAt = expiresFor(deliveryState)
       store.insertDelivery({
         messageId, at, fromSession: caller.sessionId, fromDisplay, toSession: target.sessionId,
         subject, bodyBytes: bytes, bodySha256: sha, lightweight, delivered: false,
         dedupeKey, dedupeWindowMs, priority, forced: force, test,
-        error: 'not delivered yet: ' + String(wakeError ?? 'not-live') + '; message stays queued',
+        targetState: resolvedTargetState, deliveryState, reasonCode,
+        routeSource: route.source, expiresAt,
+        error: 'not delivered yet: ' + String(wakeError ?? reasonCode ?? 'not-live') + '; message stays queued',
       })
       return {
         ok: true, accepted: true, delivered: false, stored: true, queued: true,
         wakeError: wakeError ?? 'not-live',
+        targetState: resolvedTargetState, deliveryState,
+        notDeliverable: deliveryState === 'undeliverable', retryable,
+        reasonCode, reason: reasonText(reasonCode), expiresAt, route,
         session: target.sessionId, messageId, bodySha256: sha, subject,
       }
     }
     const shouldWake = !selfDelivery || wakeSelf
+    const effectiveDeliveryState = shouldWake ? 'delivered' : 'stored-self'
+    const effectiveReasonCode = shouldWake ? 'recipient-live' : 'self-delivery-no-wake'
     store.insertDelivery({
       messageId, at, fromSession: caller.sessionId, fromDisplay, toSession: target.sessionId,
       subject, bodyBytes: bytes, bodySha256: sha, lightweight, delivered: shouldWake,
       dedupeKey, dedupeWindowMs, priority, forced: force, test,
+      targetState: 'live', deliveryState: effectiveDeliveryState, reasonCode: effectiveReasonCode,
+      routeSource: route.source, expiresAt: null,
       ...(shouldWake ? {} : { error: 'self-delivery stored without wake (pass wakeSelf:true to override)' }),
     })
     let transport = 'none'
@@ -1270,7 +1628,10 @@ export function apply(ctx, config) {
       }
     }
     return {
-      ok: true, session: target.sessionId, alias: target.alias ?? null, messageId, subject, bodySha256: sha,
+      ok: true, accepted: true, stored: true, delivered: shouldWake, session: target.sessionId,
+      alias: target.alias ?? null, messageId, subject, bodySha256: sha,
+      targetState: 'live', deliveryState: effectiveDeliveryState, notDeliverable: false, retryable: false,
+      reasonCode: effectiveReasonCode, reason: reasonText(effectiveReasonCode), expiresAt: null, route,
       lightweight, priority, queued: shouldWake, selfDelivery, woke: shouldWake,
       transport, ...(transportError === null ? {} : { transportError }),
     }
@@ -1282,7 +1643,7 @@ export function apply(ctx, config) {
       + 'global SQLite database; the recipient gets only a lightweight envelope and reads the body '
       + 'with message_read. Supports dedupeKey/force/nonce and priority bypass. strictMode (default true) '
       + 'requires a one-time approval for direct session-id targets; alias/join is preferred. Project-agnostic. '
-      + 'Capability/operator-only index: skill("team-bootstrap") §2 / CAPABILITY_AUDIT.md.',
+      + 'Capability/operator-only index: skill("team-bootstrap") §2.',
     parameters: {
       type: 'object',
       properties: {
@@ -1310,16 +1671,25 @@ export function apply(ctx, config) {
   ctx.tools.register({
     name: 'message_queue',
     description: 'List messages in the global message bus (newest first), optionally filtered by recipient, '
-      + 'and include readAt for a reader plus suppressed dedupe deliveries. Read-only.',
+      + 'and include readAt for the calling session plus suppressed dedupe deliveries. Read-only. '
+      + 'Paginated with offset; count is the returned page size, total is the matching normal-message '
+      + 'count and suppressedTotal is the matching dedupe-suppressed count. kind="store"|"suppressed" '
+      + 'separates the two data sets; kind="all" keeps the legacy merged view. '
+      + 'offset is capped by config queueMaxOffset (default 100000); offsetClamped=true plus nextOffset '
+      + 'describes the page boundary, so a caller never repeats the same page forever. '
+      + 'readBy is accepted for compatibility but must equal the caller (non-self -> FORBIDDEN).',
     parameters: {
       type: 'object',
       properties: {
         to: { type: 'string', description: 'Optional recipient session id filter.' },
-        readBy: { type: 'string', description: 'Session id used to compute readAt (defaults to caller).' },
+        readBy: { type: 'string', description: 'Deprecated compatibility alias for the caller session; a different session is rejected with FORBIDDEN.' },
         unreadOnly: { type: 'boolean', description: 'Only messages without readAt for readBy.' },
+        undeliveredOnly: { type: 'boolean', description: 'Only stored messages whose latest delivery is undelivered (queued or undeliverable; excludes suppressed duplicates).' },
         since: { type: 'string', description: 'ISO timestamp lower bound.' },
         limit: { type: 'number', description: 'Max entries (default 20, max 200).' },
-        includeSuppressed: { type: 'boolean', description: 'Include dedupe-suppressed delivery rows (default true).' },
+        offset: { type: 'number', description: 'Page offset (default 0; requests above queueMaxOffset, default 100000, are flagged and return an empty page).' },
+        kind: { type: 'string', enum: ['all', 'store', 'suppressed'], description: 'all = merged legacy view; store = normal messages only; suppressed = dedupe-suppressed rows only.' },
+        includeSuppressed: { type: 'boolean', description: 'Include dedupe-suppressed delivery rows in kind="all" (default true).' },
       },
       required: [],
       additionalProperties: false,
@@ -1327,32 +1697,100 @@ export function apply(ctx, config) {
     output: jsonOutput,
     execute(args, exec) {
       const limit = Number.isInteger(args.limit) ? Math.min(200, Math.max(1, args.limit)) : 20
-      const readBy = typeof args.readBy === 'string' && args.readBy.trim() !== ''
-        ? args.readBy.trim()
-        : (exec?.agent?.session?.id ?? null)
+      const requestedOffset = Number.isInteger(args.offset) ? Math.max(0, args.offset) : 0
+      const maxOffset = cfg.queueMaxOffset
+      const offsetClamped = requestedOffset > maxOffset
+      const offset = offsetClamped ? maxOffset : requestedOffset
+      const kind = ['all', 'store', 'suppressed'].includes(args.kind) ? args.kind : 'all'
+      const readBy = resolveSelfSessionArg(args.readBy, exec, 'message_queue')
       const since = typeof args.since === 'string' && Number.isFinite(Date.parse(args.since))
         ? args.since : null
-      const rows = store.listMessages({
-        toSession: typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null,
-        readBy, unreadOnly: args.unreadOnly === true, since, limit,
+      const undeliveredOnly = args.undeliveredOnly === true
+      const toSession = typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null
+      // Suppressed rows have no read receipt and are never "undelivered stored
+      // messages"; those filters keep the legacy exclusion.
+      const suppressedInScope = args.unreadOnly !== true && !undeliveredOnly
+      const wantSuppressed = kind !== 'store' && suppressedInScope
+        && (kind === 'suppressed' || args.includeSuppressed !== false)
+      const total = store.countMessages({ toSession, readBy, unreadOnly: args.unreadOnly === true, undeliveredOnly, since })
+      // suppressedTotal describes the requested view: explicit kind=suppressed
+      // always counts it; kind=all counts it only when it is actually included.
+      const suppressedTotal = suppressedInScope && (kind === 'suppressed' || (kind === 'all' && args.includeSuppressed !== false))
+        ? store.countSuppressed({ toSession, since }) : 0
+      const selectedTotal = kind === 'suppressed' ? suppressedTotal : (kind === 'store' || !wantSuppressed) ? total : total + suppressedTotal
+      const emptyCounts = { total: 0, delivered: 0, queued: 0, undeliverable: 0, suppressed: 0, expired: 0 }
+      // F2: an offset above the configured cap is reported, not silently
+      // re-clamped onto the last allowed page (which duplicated that page
+      // forever while hasMore stayed true). The caller gets nextOffset=null.
+      if (offsetClamped) {
+        return {
+          ok: true, readBy, undeliveredOnly, kind,
+          count: 0,
+          total, suppressedTotal, selectedTotal,
+          offset, requestedOffset, offsetClamped: true, limit,
+          nextOffset: null,
+          hasMore: false,
+          tailTruncated: selectedTotal > offset,
+          counts: emptyCounts,
+          items: [],
+        }
+      }
+      // Fetch enough rows from each source for the requested union page, then
+      // slice once. This keeps total/count independent from the page size and
+      // bounds the fetch by the actual result set instead of a fixed 10200.
+      const fetch = Math.min(selectedTotal, offset + limit)
+      const rows = kind === 'suppressed' ? [] : store.listMessages({
+        toSession, readBy, unreadOnly: args.unreadOnly === true, undeliveredOnly, since, limit: fetch,
       })
-      const suppressed = (args.includeSuppressed === false || args.unreadOnly === true) ? [] : store.listSuppressed({
-        toSession: typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null,
-        since, limit,
-      }).map(row => ({
+      const latest = store.latestDeliveries(rows.map(row => row.id))
+      const suppressedRows = wantSuppressed ? store.listSuppressed({ toSession, since, limit: fetch }) : []
+      const suppressed = suppressedRows.map(row => ({
         kind: 'suppressed', id: null, at: row.at, from: row.from_display, fromSession: row.from_session, to: row.to_session,
         subject: row.subject, bytes: row.body_bytes, sha256: row.body_sha256,
         dedupeKey: row.dedupe_key, suppressed: true, priority: row.priority === 1, forced: row.forced === 1,
         existingId: row.existing_id,
         existingAt: row.existing_at, readAt: null,
+        deliveryState: 'suppressed', delivery: store.deliveryView(row),
       }))
-      return {
-        ok: true, readBy, count: rows.length + suppressed.length,
-        items: [...rows.map(row => ({
+      const normal = rows.map(row => {
+        const delivery = store.deliveryView(latest.get(row.id))
+        return {
           kind: 'store', id: row.id, at: row.at, from: row.from_display, fromSession: row.from_session, to: row.to_session,
           subject: row.subject, bytes: row.bytes, sha256: row.sha256, dedupeKey: row.dedupe_key,
           forced: row.forced === 1, priority: row.priority === 1, readAt: row.read_at ?? null,
-        })), ...suppressed].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, limit),
+          deliveryState: delivery?.state ?? null,
+          delivery,
+          error: delivery?.error ?? null,
+        }
+      })
+      const byNewest = (a, b) => String(b.at ?? '').localeCompare(String(a.at ?? ''))
+        || String(b.id ?? b.existingId ?? '').localeCompare(String(a.id ?? a.existingId ?? ''))
+      const sortedSuppressed = suppressed.sort(byNewest)
+      const merged = [...normal, ...sortedSuppressed].sort(byNewest)
+      const source = kind === 'store' ? normal : kind === 'suppressed' ? sortedSuppressed : merged
+      const items = source.slice(offset, offset + limit)
+      const counts = { total: items.length, delivered: 0, queued: 0, undeliverable: 0, suppressed: 0, expired: 0 }
+      for (const item of items) {
+        if (item.deliveryState === 'suppressed') counts.suppressed += 1
+        else if (item.deliveryState === 'queued') counts.queued += 1
+        else if (item.deliveryState === 'undeliverable') counts.undeliverable += 1
+        else if (item.deliveryState === 'expired') counts.expired += 1
+        else if (item.deliveryState === 'delivered') counts.delivered += 1
+      }
+      const nextOffset = offset + items.length
+      // If the next page would cross queueMaxOffset, stop claiming hasMore and
+      // surface the truncated tail instead of returning the same page again.
+      const tailTruncated = nextOffset < selectedTotal && nextOffset > maxOffset
+      return {
+        ok: true, readBy, undeliveredOnly, kind,
+        count: items.length,
+        total, suppressedTotal, selectedTotal,
+        offset, requestedOffset, offsetClamped: false, limit,
+        nextOffset,
+        hasMore: nextOffset < selectedTotal && !tailTruncated,
+        tailTruncated,
+        counts,
+        items,
       }
     },
     presentCall: () => ({ card: 'generic', title: 'List message bus queue', kind: 'read' }),
@@ -1401,21 +1839,21 @@ export function apply(ctx, config) {
 
   ctx.tools.register({
     name: 'message_ack',
-    description: 'Mark message ids as read (readAt) for a session. This is a read receipt, not a delete/consume: it does not remove the message or affect delivery. Idempotent.',
+    description: 'Mark message ids as read (readAt) for the calling session. This is a read receipt, not a delete/consume: '
+      + 'it does not remove the message or affect delivery. Idempotent. session is accepted for compatibility but must '
+      + 'equal the caller; marking another session read is rejected with FORBIDDEN.',
     parameters: {
       type: 'object',
       properties: {
         ids: { type: 'array', items: { type: 'string' }, description: 'Message ids to mark read.' },
-        session: { type: 'string', description: 'Reader session id (defaults to caller).' },
+        session: { type: 'string', description: 'Deprecated compatibility alias for the caller session; a different session is rejected with FORBIDDEN.' },
       },
       required: ['ids'],
       additionalProperties: false,
     },
     output: jsonOutput,
     execute(args, exec) {
-      const sessionId = typeof args.session === 'string' && args.session.trim() !== ''
-        ? args.session.trim() : exec?.agent?.session?.id
-      if (typeof sessionId !== 'string' || sessionId === '') throw new Error('session is required')
+      const sessionId = resolveSelfSessionArg(args.session, exec, 'message_ack')
       const ids = Array.isArray(args.ids) ? args.ids.filter(id => typeof id === 'string' && id !== '') : []
       const now = nowIso()
       for (const id of ids) {
@@ -1455,17 +1893,33 @@ export function apply(ctx, config) {
 
   ctx.tools.register({
     name: 'message_routes',
-    description: 'List registered alias -> session routes in the global bus. Read-only.',
+    description: 'List registered alias -> session routes in the global bus. Read-only. `usable` is computed from the '
+      + 'current target state (live/inactive = true, archived/not-found = false, unknown state source = "unknown"); '
+      + 'it is never hardcoded to true.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: jsonOutput,
-    execute() {
-      return {
-        ok: true,
-        routes: store.listRoutes().map(route => ({
+    async execute() {
+      const routes = []
+      for (const route of store.listRoutes()) {
+        let targetState = 'unknown'
+        try {
+          targetState = (await classifySession(String(route.session_id))).targetState
+        } catch { targetState = 'unknown' }
+        const usable = targetState === 'live' || targetState === 'inactive'
+          ? true
+          : targetState === 'unknown' ? 'unknown' : false
+        routes.push({
           alias: route.alias, session: route.session_id, displayName: route.display_name, updatedAt: route.updated_at,
-          usable: true, source: 'db',
-        })),
+          status: 'unknown',
+          targetState,
+          usable,
+          reason: targetState === 'archived' ? 'recipient-archived'
+            : targetState === 'not-found' ? 'session-not-found'
+              : targetState === 'unknown' ? 'target-state-unknown' : null,
+          source: 'db',
+        })
       }
+      return { ok: true, routes }
     },
     presentCall: () => ({ card: 'generic', title: 'List message routes', kind: 'read' }),
   })
@@ -1529,7 +1983,10 @@ export function apply(ctx, config) {
           dedupeWindowMs,
           coalesceWindowMs,
           maxEnvelopeItems,
+          pendingTtlDays,
+          undeliverableTtlDays,
           bodyInEnvelope: false,
+          contract: 'q2-a-additive',
         },
         tools: {
           registered: tools,
@@ -1613,7 +2070,7 @@ export function apply(ctx, config) {
     pipe2_session_post: (args, exec) => send({ ...args, to: args.session ?? args.to }, exec),
     pipe2_queue: (args, exec) => {
       const limit = Number.isInteger(args.limit) ? Math.min(200, Math.max(1, args.limit)) : 20
-      const readBy = typeof args.readBy === 'string' ? args.readBy : (exec?.agent?.session?.id ?? null)
+      const readBy = resolveSelfSessionArg(args.readBy, exec, 'pipe2_queue')
       const rows = store.listMessages({ toSession: args.to ?? null, readBy, unreadOnly: args.unreadOnly === true, limit })
       return { ok: true, readBy, count: rows.length, items: rows }
     },
@@ -1668,7 +2125,6 @@ export function apply(ctx, config) {
       if (!Number.isFinite(number)) return fallback
       return Math.max(min, Math.min(max, Math.trunc(number)))
     }
-    const readByOf = value => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
     const listRow = (row, readBy) => ({
       id: row.id,
       at: row.at,
@@ -1690,7 +2146,10 @@ export function apply(ctx, config) {
         : (typeof args.query === 'string' ? args.query.slice(0, 200) : '')
       const limit = clampInt(args.limit, cfg.webUi.pageSize, 1, 100)
       const offset = clampInt(args.offset, 0, 0, Number.MAX_SAFE_INTEGER)
-      const readBy = readByOf(args.readBy)
+      // Q3-A: the Web Remote has no caller identity. readBy/markRead used to let
+      // the browser read and write any session's read timeline; ignore the
+      // compatibility argument and expose no viewer instead.
+      const readBy = null
       const rows = store.listMessages({ keyword, readBy, limit, offset })
       const total = store.countMessages({ keyword, readBy })
       return {
@@ -1714,12 +2173,11 @@ export function apply(ctx, config) {
       if (messageId === '') return { ok: false, error: 'messageId is required' }
       const row = store.getMessage(messageId)
       if (row === undefined || row === null) return { ok: false, gone: true, id: messageId }
-      const readBy = readByOf(args.readBy)
-      const shouldMark = args.markRead === true
-      let readAt = readBy === null ? null : store.getReadAt(readBy, messageId)
-      if (readBy !== null && shouldMark && readAt === null) {
-        readAt = store.markRead(readBy, messageId)
-      }
+      // Q3-A: no caller identity on the Remote path. Keep accepting readBy and
+      // markRead for client compatibility, but never read or write another
+      // session's read receipt from the Web UI.
+      const readBy = null
+      const readAt = null
       return {
         ok: true,
         item: {
@@ -1778,6 +2236,7 @@ export function apply(ctx, config) {
       meetingDetail(query) { return readMeetingDetail(query) }
       networkPage(query) { return readNetworkPage(query) }
       messageAudit(query) { return readMessageAudit(store, query) }
+      auditPage(query) { return readAuditPage(query) }
     }
     Object.defineProperty(MessageBusWebRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
       configurable: true,

@@ -49,6 +49,21 @@ export function apply(ctx, config) {
   if (cfg.enabled === false) return
   const root = getActiveRoot(typeof cfg.root === 'string' && cfg.root !== '' ? cfg.root : undefined)
   const apartment = createApartment({ root })
+  // A root pointer move is only fully effective after the Host restarts and
+  // reopens the apartment at the new root. Until then every write is blocked so
+  // no data can fork into the old root; reads stay available.
+  let migrationPending = false
+  let pendingRoot = null
+  const markMigrationPending = target => { migrationPending = true; pendingRoot = target }
+  const assertWritable = action => {
+    if (!migrationPending) return
+    const error = new Error('apartment: ' + action + ' is blocked because the apartment root moved to '
+      + (pendingRoot ?? 'a new root') + '; restart the DSH Host before writing')
+    error.code = 'APARTMENT_RESTART_REQUIRED'
+    error.pendingRoot = pendingRoot
+    throw error
+  }
+  const lifecycle = () => ({ migrationPending, pendingRoot, restartRequired: migrationPending })
   const register = (descriptor, execute) => ctx.tools.register({ ...descriptor, execute })
   ctx.effect(() => () => apartment.close())
   const assertOperator = (exec) => {
@@ -124,60 +139,88 @@ export function apply(ctx, config) {
       const verify = targetApartment.verify()
       targetApartment.close()
       setActiveRoot(to)
-      return { from, to, counts: copied, sourceCounts: { agents: source.agents, teams: source.teams }, restartRequired: true, verify }
+      markMigrationPending(to)
+      return { from, to, counts: copied, sourceCounts: { agents: source.agents, teams: source.teams }, restartRequired: true, migrationPending: true, pendingRoot: to, verify }
     } finally {
       try { rmSync(staging, { recursive: true, force: true }) } catch { /* best effort */ }
     }
   }
 
-  register(desc('apartment_status', 'Read apartment root, counts and verify summary.'), async () => ({ ...apartment.status(), verify: apartment.verify() }))
+  register(desc('apartment_status', 'Read apartment root, counts and verify summary.'), async () => ({ ...apartment.status(), verify: apartment.verify(), ...lifecycle() }))
   register(desc('apartment_agent_register', 'Create/update an agent home (AGENTS.md, skills, tools).', {
     id: str('Optional stable id.'), name: str('Agent name.'), capabilities: arr('Capabilities.'),
-  }, ['name']), async args => apartment.registerAgent(args))
+  }, ['name']), async args => { assertWritable('apartment_agent_register'); return apartment.registerAgent(args) })
   register(desc('apartment_agent_list', 'List apartment agents.'), async () => ({ agents: apartment.listAgents() }))
   register(desc('apartment_team_create', 'Create a team decoupled from workspace.', {
     id: str('Optional id.'), name: str('Team name.'), purpose: str('Purpose.'), workspace: str('Optional associated workspace.'),
-  }, ['name']), async args => apartment.createTeam(args))
+  }, ['name']), async args => { assertWritable('apartment_team_create'); return apartment.createTeam(args) })
   register(desc('apartment_team_member_add', 'Add an agent to a team with a role (many-to-many).', {
     teamId: str('Team id.'), agentId: str('Agent id.'), role: str('Role.'),
-  }, ['teamId', 'agentId', 'role']), async args => apartment.addMember(args))
+  }, ['teamId', 'agentId', 'role']), async args => { assertWritable('apartment_team_member_add'); return apartment.addMember(args) })
   register(desc('apartment_team_member_remove', 'Remove a team membership.', {
     teamId: str('Team id.'), agentId: str('Agent id.'), role: str('Role.'),
-  }, ['teamId', 'agentId', 'role']), async args => apartment.removeMember(args))
+  }, ['teamId', 'agentId', 'role']), async args => { assertWritable('apartment_team_member_remove'); return apartment.removeMember(args) })
   register(desc('apartment_team_list', 'List teams and memberships.', { teamId: str('Optional team id.') }), async args => ({
     teams: apartment.listTeams(), memberships: apartment.listMemberships(args.teamId),
   }))
   register(desc('apartment_lease', 'Allocate a per-task work directory to an agent.', {
     agentId: str('Agent id.'), workspace: str('Workspace path.'), taskId: str('Optional task id.'), ttlMs: num('Lease TTL ms.'),
-  }, ['agentId', 'workspace']), async args => apartment.claimLease(args))
-  register(desc('apartment_lease_release', 'Release a lease.', { leaseId: str('Lease id.') }, ['leaseId']), async args => apartment.releaseLease(args.leaseId))
+  }, ['agentId', 'workspace']), async args => { assertWritable('apartment_lease'); return apartment.claimLease(args) })
+  register(desc('apartment_lease_release', 'Release a lease.', { leaseId: str('Lease id.') }, ['leaseId']), async args => { assertWritable('apartment_lease_release'); return apartment.releaseLease(args.leaseId) })
   register(desc('apartment_lease_list', 'List leases.', { agentId: str('Optional agent id.') }), async args => ({ leases: apartment.listLeases(args.agentId) }))
-  register(desc('apartment_lease_reap', 'Expire leases whose TTL has passed.'), async () => apartment.reapExpired())
+  register(desc('apartment_lease_reap', 'Expire leases whose TTL has passed.'), async () => { assertWritable('apartment_lease_reap'); return apartment.reapExpired() })
   register(desc('apartment_task_role_assign', 'Bind an agent/team to a role on one task.', {
     taskId: str('Task id.'), agentId: str('Agent id.'), teamId: str('Optional team id.'), role: str('Role.'),
-  }, ['taskId', 'agentId', 'role']), async args => apartment.assignTaskRole(args))
+  }, ['taskId', 'agentId', 'role']), async args => { assertWritable('apartment_task_role_assign'); return apartment.assignTaskRole(args) })
   register(desc('apartment_task_role_list', 'List task-role bindings.', { taskId: str('Optional task id.') }), async args => ({ roles: apartment.listTaskRoles(args.taskId) }))
   register(desc('apartment_experience_record', 'Record reusable experience for an agent.', {
     agentId: str('Agent id.'), taskId: str('Optional task id.'), summary: str('Summary.'), skills: arr('Skills.'), outcome: str('Outcome.'),
-  }, ['agentId', 'summary']), async args => apartment.recordExperience(args))
+  }, ['agentId', 'summary']), async args => { assertWritable('apartment_experience_record'); return apartment.recordExperience(args) })
   register(desc('apartment_experience_list', 'List experience entries.', { agentId: str('Optional agent id.') }), async args => ({ experiences: apartment.listExperiences(args.agentId) }))
-  register(desc('apartment_import_legacy', 'Read team/members/*/AGENTS.md into agent homes + memberships (read-only import).', { workspace: str('Workspace root.') }, ['workspace']), async args => apartment.importLegacy(args.workspace))
-  register(desc('apartment_backup', 'Create a backup snapshot with manifest/sha256.', { label: str('Optional label.') }), async args => apartment.backup(args.label ?? 'manual'))
-  register(desc('apartment_restore', 'Restore agents/work from a backup directory (creates a pre-restore safety backup).', { from: str('Backup directory.') }, ['from']), async (args, exec) => { assertOperator(exec); return apartment.restoreFrom(args.from) })
+  register(desc('apartment_import_legacy', 'Read team/members/*/AGENTS.md into agent homes + memberships (imports write homes/roster).', { workspace: str('Workspace root.') }, ['workspace']), async args => { assertWritable('apartment_import_legacy'); return apartment.importLegacy(args.workspace) })
+  register(desc('apartment_backup', 'Create a backup snapshot with manifest/sha256.', { label: str('Optional label.') }), async args => { assertWritable('apartment_backup'); return apartment.backup(args.label ?? 'manual') })
+  register(desc('apartment_restore', 'Restore agents/work from a backup directory (creates a pre-restore safety backup).', {
+    from: str('Backup directory.'),
+    allowCrossRoot: { type: 'boolean', description: 'Allow a backup whose manifest.root differs from the current root.' },
+  }, ['from']), async (args, exec) => {
+    assertOperator(exec)
+    assertWritable('apartment_restore')
+    return apartment.restoreFrom(args.from, { allowCrossRoot: args.allowCrossRoot === true })
+  })
   register(desc('apartment_verify', 'Verify agent homes and AGENTS.md.'), async () => apartment.verify())
   register(desc('apartment_set_root', 'Switch apartment root pointer (empty/new root); migration should be used to copy data.', { root: str('New absolute root.') }, ['root']), async (args, exec) => {
     assertOperator(exec)
+    assertWritable('apartment_set_root')
     const next = setActiveRoot(args.root)
-    return { ...next, restartRequired: true }
+    markMigrationPending(next.root)
+    return { ...next, restartRequired: true, migrationPending: true, pendingRoot: next.root }
   })
-  register(desc('apartment_migrate', 'Copy apartment data to a new root, write pointer; requires restart.', { to: str('Target absolute root.') }, ['to']), async (args, exec) => { assertOperator(exec); return migrate(args.to) })
+  register(desc('apartment_migrate', 'Copy apartment data to a new root, write pointer; requires restart.', { to: str('Target absolute root.') }, ['to']), async (args, exec) => {
+    assertOperator(exec)
+    assertWritable('apartment_migrate')
+    return migrate(args.to)
+  })
 
   class AgentApartmentRemote {
-    status() { return { ...apartment.status(), verify: apartment.verify() } }
-    setRoot(root) { assertRemoteOperator(); const next = setActiveRoot(root); return { ...next, restartRequired: true } }
-    migrate(to) { assertRemoteOperator(); return migrate(to) }
-    backup(label) { return apartment.backup(label ?? 'manual') }
-    restore(from) { assertRemoteOperator(); return apartment.restoreFrom(from) }
+    status() { return { ...apartment.status(), verify: apartment.verify(), ...lifecycle() } }
+    setRoot(root) {
+      assertRemoteOperator()
+      assertWritable('setRoot')
+      const next = setActiveRoot(root)
+      markMigrationPending(next.root)
+      return { ...next, restartRequired: true, migrationPending: true, pendingRoot: next.root }
+    }
+    migrate(to) { assertRemoteOperator(); assertWritable('migrate'); return migrate(to) }
+    backup(label) { assertWritable('backup'); return apartment.backup(label ?? 'manual') }
+    restore(from, options) {
+      assertRemoteOperator()
+      assertWritable('restore')
+      // Accept both restore(from, {allowCrossRoot}) and restore({from, allowCrossRoot}).
+      const args = from !== null && typeof from === 'object' ? from : null
+      const source = args === null ? from : args.from
+      const allowCrossRoot = (args === null ? options?.allowCrossRoot : args.allowCrossRoot) === true
+      return apartment.restoreFrom(source, { allowCrossRoot })
+    }
     verify() { return apartment.verify() }
     data(query) {
       const section = typeof query?.section === 'string' ? query.section : 'agents'
@@ -202,7 +245,7 @@ export function apply(ctx, config) {
       else if (section === 'experiences') rows = apartment.listExperiences().filter(row => match(row.agent_id) || match(row.summary) || match(row.outcome))
       else if (section === 'backups') rows = apartment.listBackups?.() ?? []
       else rows = []
-      return { section, items: rows.slice(offset, offset + limit), total: rows.length, limit, offset, counts: apartment.status(), verify: apartment.verify() }
+      return { section, items: rows.slice(offset, offset + limit), total: rows.length, limit, offset, counts: apartment.status(), verify: apartment.verify(), ...lifecycle() }
     }
   }
   Object.defineProperty(AgentApartmentRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {

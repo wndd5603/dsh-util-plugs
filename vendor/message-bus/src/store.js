@@ -59,7 +59,16 @@ CREATE TABLE IF NOT EXISTS deliveries (
   resumed         INTEGER NOT NULL DEFAULT 0,
   caller_alias    TEXT,
   impersonation   INTEGER NOT NULL DEFAULT 0,
-  error           TEXT
+  error           TEXT,
+  -- Q2-A additive delivery contract (NULL on pre-Q2 rows; no backfill/write).
+  target_state    TEXT,
+  delivery_state  TEXT,
+  reason_code     TEXT,
+  route_source    TEXT,
+  successor_session_id TEXT,
+  expires_at      TEXT,
+  attempt_count   INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_to_at ON deliveries(to_session, at);
 CREATE INDEX IF NOT EXISTS idx_deliveries_dup ON deliveries(duplicate, to_session, at);
@@ -92,7 +101,68 @@ CREATE TABLE IF NOT EXISTS routes (
 
 const nowIso = () => new Date().toISOString()
 
-export function openMessageStore(dbPath) {
+/**
+ * Q2-A read-side compatibility: derive a stable delivery state for rows written
+ * before the new columns existed. Never throws, never mutates the DB.
+ */
+function deriveDeliveryState(row) {
+  if (row === undefined || row === null) return null
+  if (row.suppressed === 1) return 'suppressed'
+  if (row.delivered === 1) return 'delivered'
+  if (row.delivery_state === 'expired') return 'expired'
+  if (typeof row.delivery_state === 'string' && row.delivery_state !== '') return row.delivery_state
+  const error = String(row.error ?? '')
+  if (/not found|archived|no-preset|unreadable/iu.test(error)) return 'undeliverable'
+  return 'queued'
+}
+
+function deriveReasonCode(row) {
+  if (row === undefined || row === null) return null
+  if (row.suppressed === 1) return 'duplicate-suppressed'
+  if (row.delivered === 1) return 'recipient-live'
+  if (typeof row.reason_code === 'string' && row.reason_code !== '') return row.reason_code
+  const error = String(row.error ?? '')
+  if (/not found|SessionPersistenceNotFoundError/iu.test(error)) return 'session-not-found'
+  if (/archived/iu.test(error)) return 'recipient-archived'
+  if (/no-preset/iu.test(error)) return 'resume-no-preset'
+  if (/rate-limited/iu.test(error)) return 'resume-rate-limited'
+  if (/autoResume-disabled/iu.test(error)) return 'auto-resume-disabled'
+  if (/unreadable/iu.test(error)) return 'session-unreadable'
+  return row.delivered === 1 ? 'recipient-live' : 'resume-failed'
+}
+
+// Q2-A additive delivery columns. When an old DB refuses ALTER (locked,
+// read-only, exotic SQLite build), the store degrades to the legacy delivery
+// schema instead of failing to open; reads still classify old rows on the fly.
+const Q2_DELIVERY_COLUMNS = [
+  ['target_state', 'TEXT'],
+  ['delivery_state', 'TEXT'],
+  ['reason_code', 'TEXT'],
+  ['route_source', 'TEXT'],
+  ['successor_session_id', 'TEXT'],
+  ['expires_at', 'TEXT'],
+  ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
+  ['last_attempt_at', 'TEXT'],
+]
+
+/** Public, read-only delivery view shared by message_queue/status/audit. */
+export function deliveryView(row) {
+  if (row === undefined || row === null) return null
+  return {
+    id: row.id === undefined || row.id === null ? null : String(row.id),
+    state: deriveDeliveryState(row),
+    targetState: row.target_state ?? null,
+    reasonCode: deriveReasonCode(row),
+    delivered: row.delivered === 1,
+    error: row.error ?? null,
+    expiresAt: row.expires_at ?? null,
+    attempts: Number(row.attempt_count ?? 0),
+    successorSessionId: row.successor_session_id ?? null,
+  }
+}
+
+
+export function openMessageStore(dbPath, options = {}) {
   mkdirSync(dirname(dbPath), { recursive: true })
   const db = new DatabaseSync(dbPath)
   // Host DB stays in $DSH_HOME; WAL + NORMAL is the durability/latency default
@@ -104,15 +174,57 @@ export function openMessageStore(dbPath) {
   } catch { /* PRAGMA is best-effort on older SQLite builds */ }
   db.exec(SCHEMA)
 
+  // Q2-A: additive columns for existing DBs. No row/data migration: old rows
+  // keep NULL and are classified on read. ALTER TABLE is best-effort: if the DB
+  // refuses it (lock, read-only, exotic SQLite) the store degrades to the
+  // legacy delivery schema instead of failing to open. Every delivery statement
+  // below is selected from the columns that actually exist.
+  const columnsOf = (table) => {
+    try { return db.prepare('PRAGMA table_info(' + table + ')').all().map(row => row.name) } catch { return [] }
+  }
+  const allowAlter = options.alterDeliveryColumns !== false
+  const deliveryAlterErrors = []
+  for (const [column, definition] of Q2_DELIVERY_COLUMNS) {
+    if (columnsOf('deliveries').includes(column)) continue
+    if (!allowAlter) {
+      deliveryAlterErrors.push({ column, message: 'ALTER skipped (alterDeliveryColumns=false)' })
+      continue
+    }
+    try { db.exec('ALTER TABLE deliveries ADD COLUMN ' + column + ' ' + definition) } catch (error) {
+      deliveryAlterErrors.push({ column, message: String(error?.message ?? error) })
+    }
+  }
+  const deliveryColumns = new Set(columnsOf('deliveries'))
+  const missingDeliveryColumns = Q2_DELIVERY_COLUMNS.map(([column]) => column).filter(column => !deliveryColumns.has(column))
+  const deliverySchemaDegraded = missingDeliveryColumns.length > 0
+  const deliverySchema = Object.freeze({
+    degraded: deliverySchemaDegraded,
+    columns: Object.freeze([...deliveryColumns]),
+    missing: Object.freeze(missingDeliveryColumns),
+    alterErrors: Object.freeze(deliveryAlterErrors.map(entry => Object.freeze({ ...entry }))),
+  })
+  if (!deliverySchemaDegraded) {
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_deliveries_state ON deliveries(delivery_state, expires_at)')
+    } catch { /* index is an optimization only */ }
+  }
+
   const stmtInsertMessage = db.prepare(`
     INSERT INTO messages (id, at, from_session, from_alias, from_display, to_session, subject,
       body, bytes, sha256, dedupe_key, nonce, forced, priority, test, project_scope, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-  const stmtInsertDelivery = db.prepare(`
-    INSERT INTO deliveries (message_id, at, from_session, from_alias, from_display, to_session, subject,
-      body_bytes, body_sha256, lightweight, duplicate, suppressed, delivered, existing_id, existing_at,
-      dedupe_key, dedupe_window_ms, priority, forced, test, coalesced, resumed, caller_alias, impersonation, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+  const stmtInsertDelivery = deliverySchemaDegraded
+    ? db.prepare(`
+      INSERT INTO deliveries (message_id, at, from_session, from_alias, from_display, to_session, subject,
+        body_bytes, body_sha256, lightweight, duplicate, suppressed, delivered, existing_id, existing_at,
+        dedupe_key, dedupe_window_ms, priority, forced, test, coalesced, resumed, caller_alias, impersonation, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    : db.prepare(`
+      INSERT INTO deliveries (message_id, at, from_session, from_alias, from_display, to_session, subject,
+        body_bytes, body_sha256, lightweight, duplicate, suppressed, delivered, existing_id, existing_at,
+        dedupe_key, dedupe_window_ms, priority, forced, test, coalesced, resumed, caller_alias, impersonation, error,
+        target_state, delivery_state, reason_code, route_source, successor_session_id, expires_at, attempt_count, last_attempt_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
   const insertMessage = (m) => {
     stmtInsertMessage.run(
@@ -124,15 +236,29 @@ export function openMessageStore(dbPath) {
     return m
   }
 
+  const deliveryBaseArgs = (d) => [
+    d.messageId ?? null, d.at ?? nowIso(), d.fromSession ?? null, d.fromAlias ?? null, d.fromDisplay ?? null,
+    d.toSession, d.subject ?? '', d.bodyBytes ?? null, d.bodySha256 ?? null,
+    d.lightweight === false ? 0 : 1, d.duplicate ? 1 : 0, d.suppressed ? 1 : 0, d.delivered ? 1 : 0,
+    d.existingId ?? null, d.existingAt ?? null, d.dedupeKey ?? null, d.dedupeWindowMs ?? null,
+    d.priority ? 1 : 0, d.forced ? 1 : 0, d.test ? 1 : 0, d.coalesced ? 1 : 0,
+    d.resumed ? 1 : 0, d.callerAlias ?? null, d.impersonation ? 1 : 0, d.error ?? null,
+  ]
+
   const insertDelivery = (d) => {
-    stmtInsertDelivery.run(
-      d.messageId ?? null, d.at ?? nowIso(), d.fromSession ?? null, d.fromAlias ?? null, d.fromDisplay ?? null,
-      d.toSession, d.subject ?? '', d.bodyBytes ?? null, d.bodySha256 ?? null,
-      d.lightweight === false ? 0 : 1, d.duplicate ? 1 : 0, d.suppressed ? 1 : 0, d.delivered ? 1 : 0,
-      d.existingId ?? null, d.existingAt ?? null, d.dedupeKey ?? null, d.dedupeWindowMs ?? null,
-      d.priority ? 1 : 0, d.forced ? 1 : 0, d.test ? 1 : 0, d.coalesced ? 1 : 0,
-      d.resumed ? 1 : 0, d.callerAlias ?? null, d.impersonation ? 1 : 0, d.error ?? null,
-    )
+    const args = deliveryBaseArgs(d)
+    if (!deliverySchemaDegraded) {
+      // Q2-A columns are present; persist the full delivery contract.
+      args.push(
+        d.targetState ?? null, d.deliveryState ?? null, d.reasonCode ?? null, d.routeSource ?? null,
+        d.successorSessionId ?? null, d.expiresAt ?? null,
+        Number.isFinite(Number(d.attemptCount)) ? Math.max(0, Math.trunc(Number(d.attemptCount))) : 0,
+        d.lastAttemptAt ?? null,
+      )
+    }
+    // Degraded mode writes only legacy columns; deriveDeliveryState classifies
+    // the row from delivered/suppressed/error instead of the missing columns.
+    stmtInsertDelivery.run(...args)
   }
 
   const findDuplicate = ({ toSession, fromSession, bodySha256, dedupeKey, windowMs, nowMs = Date.now() }) => {
@@ -151,7 +277,7 @@ export function openMessageStore(dbPath) {
   const getMessage = (id) => db.prepare('SELECT * FROM messages WHERE id = ?').get(id)
 
   /** Shared WHERE builder for list/search/count (task-95 web message center). */
-  const messageFilter = ({ toSession, since, readBy, unreadOnly, keyword } = {}) => {
+  const messageFilter = ({ toSession, since, readBy, unreadOnly, keyword, undeliveredOnly } = {}) => {
     const clauses = []
     const params = []
     if (toSession) { clauses.push('m.to_session = ?'); params.push(toSession) }
@@ -160,6 +286,14 @@ export function openMessageStore(dbPath) {
       clauses.push('(r.read_at IS NOT NULL OR r.read_at IS NULL)')
     }
     if (unreadOnly && readBy) clauses.push('r.read_at IS NULL')
+    // Q2-A: latest delivery is stored/undelivered (queued or undeliverable),
+    // never a suppressed duplicate. Excludes delivered messages.
+    if (undeliveredOnly) {
+      clauses.push(`EXISTS (SELECT 1 FROM deliveries d
+        WHERE d.message_id = m.id
+          AND d.id = (SELECT MAX(d2.id) FROM deliveries d2 WHERE d2.message_id = m.id)
+          AND d.delivered = 0 AND d.suppressed = 0)`)
+    }
     const term = typeof keyword === 'string' ? keyword.trim() : ''
     if (term !== '') {
       const like = '%' + term.replace(/[%_]/gu, match => '\\' + match) + '%'
@@ -169,21 +303,21 @@ export function openMessageStore(dbPath) {
     return { clauses, params }
   }
 
-  const listMessages = ({ toSession, readBy, unreadOnly, since, keyword, limit = 20, offset = 0 } = {}) => {
-    const { clauses, params } = messageFilter({ toSession, since, readBy, unreadOnly, keyword })
+  const listMessages = ({ toSession, readBy, unreadOnly, since, keyword, undeliveredOnly, limit = 20, offset = 0 } = {}) => {
+    const { clauses, params } = messageFilter({ toSession, since, readBy, unreadOnly, keyword, undeliveredOnly })
     const where = clauses.length > 0 ? 'WHERE ' + clauses.join(' AND ') : ''
     const sql = `SELECT m.*, ${readBy ? 'r.read_at' : 'NULL'} AS read_at
       FROM messages m
       ${readBy ? 'LEFT JOIN read_state r ON r.message_id = m.id AND r.session_id = ?' : ''}
       ${where}
-      ORDER BY m.at DESC LIMIT ? OFFSET ?`
+      ORDER BY m.at DESC, m.id DESC LIMIT ? OFFSET ?`
     const bound = readBy ? [readBy, ...params, limit, offset] : [...params, limit, offset]
     return db.prepare(sql).all(...bound)
   }
 
   /** Total matching rows for one list/search query (pagination). */
-  const countMessages = ({ toSession, readBy, unreadOnly, since, keyword } = {}) => {
-    const { clauses, params } = messageFilter({ toSession, since, readBy, unreadOnly, keyword })
+  const countMessages = ({ toSession, readBy, unreadOnly, since, keyword, undeliveredOnly } = {}) => {
+    const { clauses, params } = messageFilter({ toSession, since, readBy, unreadOnly, keyword, undeliveredOnly })
     const where = clauses.length > 0 ? 'WHERE ' + clauses.join(' AND ') : ''
     const sql = `SELECT COUNT(*) AS n FROM messages m
       ${readBy ? 'LEFT JOIN read_state r ON r.message_id = m.id AND r.session_id = ?' : ''}
@@ -210,13 +344,38 @@ export function openMessageStore(dbPath) {
     return Number(result.changes) > 0
   }
 
-  const listSuppressed = ({ toSession, since, limit = 20 } = {}) => {
+  const suppressedFilter = ({ toSession, since } = {}) => {
     const clauses = ['duplicate = 1', 'suppressed = 1']
     const params = []
     if (toSession) { clauses.push('to_session = ?'); params.push(toSession) }
     if (since) { clauses.push('at >= ?'); params.push(since) }
-    return db.prepare(`SELECT * FROM deliveries WHERE ${clauses.join(' AND ')} ORDER BY at DESC LIMIT ?`)
-      .all(...params, limit)
+    return { where: clauses.join(' AND '), params }
+  }
+
+  const listSuppressed = ({ toSession, since, limit = 20, offset = 0 } = {}) => {
+    const { where, params } = suppressedFilter({ toSession, since })
+    return db.prepare(`SELECT * FROM deliveries WHERE ${where} ORDER BY at DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...params, limit, Math.max(0, Math.trunc(Number(offset) || 0)))
+  }
+
+  /** Total matching suppressed/dedupe rows (pagination companion of listSuppressed). */
+  const countSuppressed = ({ toSession, since } = {}) => {
+    const { where, params } = suppressedFilter({ toSession, since })
+    const row = db.prepare(`SELECT COUNT(*) AS n FROM deliveries WHERE ${where}`).get(...params)
+    return row === undefined || row === null ? 0 : Number(row.n)
+  }
+
+  /** Latest delivery row per message id (Q2-A queue view; no body selected). */
+  const latestDeliveries = (messageIds) => {
+    const ids = [...new Set((Array.isArray(messageIds) ? messageIds : []).filter(id => typeof id === 'string' && id !== ''))]
+    const map = new Map()
+    if (ids.length === 0) return map
+    const placeholders = ids.map(() => '?').join(',')
+    const rows = db.prepare(`SELECT d.* FROM deliveries d
+      WHERE d.id IN (SELECT MAX(d2.id) FROM deliveries d2 WHERE d2.message_id IN (${placeholders}) GROUP BY d2.message_id)`)
+      .all(...ids)
+    for (const row of rows) map.set(row.message_id, row)
+    return map
   }
 
   /** Undelivered stored messages for one session, oldest first (auto-resume flush). */
@@ -227,8 +386,16 @@ export function openMessageStore(dbPath) {
     WHERE d.to_session = ? AND d.delivered = 0 AND d.suppressed = 0 AND d.message_id IS NOT NULL
     ORDER BY d.id ASC LIMIT ?`).all(String(toSession), Math.max(1, Math.min(200, Math.trunc(limit))))
 
+  const stmtMarkDeliveryDelivered = deliverySchemaDegraded
+    ? db.prepare('UPDATE deliveries SET delivered = 1, error = NULL WHERE id = ?')
+    : db.prepare(`UPDATE deliveries SET delivered = 1, error = NULL,
+      delivery_state = 'delivered', reason_code = 'recipient-live', expires_at = NULL,
+      attempt_count = attempt_count + 1, last_attempt_at = ? WHERE id = ?`)
+
   const markDeliveryDelivered = (deliveryId) => {
-    const result = db.prepare("UPDATE deliveries SET delivered = 1, error = NULL WHERE id = ?").run(deliveryId)
+    const result = deliverySchemaDegraded
+      ? stmtMarkDeliveryDelivered.run(deliveryId)
+      : stmtMarkDeliveryDelivered.run(nowIso(), deliveryId)
     return Number(result.changes ?? 0) > 0
   }
 
@@ -296,12 +463,38 @@ export function openMessageStore(dbPath) {
       const row = db.prepare(sql).get()
       return row === undefined || row === null ? 0 : Number(Object.values(row)[0])
     }
+    // Q2-A pending inventory: stored messages whose latest delivery is neither
+    // delivered nor a suppressed duplicate. Read-only; no state rewriting.
+    const pending = { total: 0, queued: 0, undeliverable: 0, expired: 0, oldestAt: null, byReason: {} }
+    try {
+      // Read the Q2-A columns only when they exist; a degraded (legacy) schema
+      // classifies rows from error/delivered/suppressed instead of failing.
+      const stateColumn = deliveryColumns.has('delivery_state') ? 'd.delivery_state' : 'NULL AS delivery_state'
+      const reasonColumn = deliveryColumns.has('reason_code') ? 'd.reason_code' : 'NULL AS reason_code'
+      const rows = db.prepare(`SELECT d.id, d.at, d.delivered, d.suppressed, ${stateColumn}, ${reasonColumn},
+        d.error FROM deliveries d
+        WHERE d.delivered = 0 AND d.suppressed = 0 AND d.message_id IS NOT NULL
+          AND d.id = (SELECT MAX(d2.id) FROM deliveries d2 WHERE d2.message_id = d.message_id)`
+      ).all()
+      for (const row of rows) {
+        const state = deriveDeliveryState(row)
+        const reason = deriveReasonCode(row)
+        pending.total += 1
+        if (state === 'undeliverable') pending.undeliverable += 1
+        if (state === 'queued') pending.queued += 1
+        if (state === 'expired') { pending.expired += 1; pending.undeliverable += 1 }
+        if (pending.oldestAt === null || String(row.at) < pending.oldestAt) pending.oldestAt = row.at ?? null
+        if (reason !== null) pending.byReason[reason] = (pending.byReason[reason] ?? 0) + 1
+      }
+    } catch { /* best effort: status must never fail because of the pending view */ }
     return {
       messages: one('SELECT COUNT(*) AS n FROM messages'),
       deliveries: one('SELECT COUNT(*) AS n FROM deliveries'),
       suppressedDeliveries: one('SELECT COUNT(*) AS n FROM deliveries WHERE suppressed = 1'),
+      undeliveredDeliveries: one('SELECT COUNT(*) AS n FROM deliveries WHERE delivered = 0 AND suppressed = 0 AND message_id IS NOT NULL'),
       readState: one('SELECT COUNT(*) AS n FROM read_state'),
       routes: one('SELECT COUNT(*) AS n FROM routes'),
+      pending,
     }
   }
 
@@ -356,10 +549,10 @@ export function openMessageStore(dbPath) {
   }
 
   return {
-    db, dbPath,
+    db, dbPath, deliverySchema,
     insertMessage, insertDelivery, findDuplicate, getMessage, listMessages, countMessages,
-    deleteMessage, listSuppressed,
-    pendingDeliveries, markDeliveryDelivered,
+    deleteMessage, listSuppressed, countSuppressed, latestDeliveries,
+    pendingDeliveries, markDeliveryDelivered, deliveryView,
     markRead, getReadAt, upsertRoute, resolveRoute, listRoutes, counts, purge,
     envelopeState, markEnvelopeDelivered, markEnvelopeConsumed, envelopeCounts,
     databaseFacts, checkpoint,

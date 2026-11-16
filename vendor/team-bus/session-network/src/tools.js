@@ -610,6 +610,22 @@ export function registerTools(ctx, deps) {
     return file
   }
 
+  // P1-4: the sidecar is read-modify-write. An in-process per-meeting lock
+  // serializes every writer so two participants posting concurrently cannot
+  // overwrite each other's append (the rename above keeps each write atomic).
+  const meetingStoreLocks = new Map()
+  function withMeetingStoreLock(meetingId, fn) {
+    const key = String(meetingId)
+    const previous = meetingStoreLocks.get(key) ?? Promise.resolve()
+    const run = previous.then(fn, fn)
+    const tail = run.then(() => {}, () => {})
+    meetingStoreLocks.set(key, tail)
+    tail.then(() => {
+      if (meetingStoreLocks.get(key) === tail) meetingStoreLocks.delete(key)
+    })
+    return run
+  }
+
   function normalizeMeetingStatus(status) {
     if (status === null || status === undefined) return null
     return status === 'final' ? 'finalized' : String(status)
@@ -648,6 +664,149 @@ export function registerTools(ctx, deps) {
       agent?.displayName, agent?.info?.displayName, header?.displayName,
       session?.id, agent?.id,
     ) ?? '(unknown)'
+  }
+
+  /**
+   * Q3-A meeting identity. `resolveMeetingAuthor` is a display name; it must
+   * never be used as an authorization key. The authoritative caller is the
+   * host-injected session id, with alias/displayName only used to match legacy
+   * (`convener` held an alias before Batch A) meetings.
+   */
+  function callerIdentity(exec) {
+    const agent = exec?.agent ?? {}
+    const session = agent?.session ?? {}
+    const header = session?.header ?? {}
+    return {
+      sessionId: firstString(session?.id, agent?.id) ?? null,
+      alias: firstString(agent?.alias, agent?.info?.alias, header?.alias) ?? null,
+      displayName: firstString(agent?.displayName, agent?.info?.displayName, header?.displayName) ?? null,
+    }
+  }
+
+  function isMeetingOperator(exec) {
+    try {
+      const policy = ctx.get?.('sandboxPolicy')
+      const resolved = policy?.resolve?.({ session: exec?.agent?.session })
+      return resolved?.mode === 'danger-full-access'
+    } catch {
+      return false
+    }
+  }
+
+  function meetingConvenerSessionOf(state) {
+    const value = state?.store?.convenerSession
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  }
+
+  /**
+   * P1-3: alias authorization must follow the host alias route. A bare string
+   * match is not enough for a write claim: the alias row must belong to the
+   * calling session. displayName is never an authorization key.
+   */
+  function aliasRouteMatchesSession(alias, sessionId) {
+    if (typeof alias !== 'string' || alias === '' || sessionId === null) return false
+    if (typeof modules.db?.resolveAlias !== 'function') return false
+    const read = withReadDb(() => modules.db.resolveAlias(alias))
+    if (!read.ok) return false
+    const row = read.value
+    return row !== undefined && row !== null && row.session_id === sessionId
+  }
+
+  function participantMatches(participants, identity) {
+    const known = new Set()
+    for (const row of Array.isArray(participants) ? participants : []) {
+      const value = typeof row === 'string' ? row : firstString(row?.sessionId, row?.session_id, row?.id)
+      if (value !== undefined) known.add(value)
+    }
+    // displayName is a presentation label, never an authorization key.
+    for (const value of [identity.sessionId, identity.alias]) {
+      if (typeof value === 'string' && value !== '' && known.has(value)) return true
+    }
+    return false
+  }
+
+  function legacyConvenerMatches(state, identity) {
+    const convener = firstString(state?.meeting?.convener, state?.store?.convener)
+    if (convener === undefined) return false
+    return [identity.sessionId, identity.alias]
+      .some(value => typeof value === 'string' && value !== '' && value === convener)
+  }
+
+  /**
+   * `write:true` is used by post/finalize: a legacy meeting (no convenerSession
+   * yet) grants its alias-identified convener read access only; the first write
+   * must explicitly claim the meeting via an idempotent meeting_open. New
+   * meetings store convenerSession in the sidecar, so no alias fallback is used.
+   */
+  function meetingAccess(state, exec, { write = false } = {}) {
+    const identity = callerIdentity(exec)
+    if (isMeetingOperator(exec)) return { allowed: true, role: 'operator', identity }
+    const participant = participantMatches(state.participants, identity)
+    const convenerSession = meetingConvenerSessionOf(state)
+    if (convenerSession !== null) {
+      if (identity.sessionId !== null && identity.sessionId === convenerSession) {
+        return { allowed: true, role: 'convener', identity }
+      }
+      if (participant) return { allowed: true, role: 'participant', identity }
+      return { allowed: false, code: 'FORBIDDEN', identity, reason: 'caller is not a meeting participant or convener' }
+    }
+    if (legacyConvenerMatches(state, identity)) {
+      if (write) {
+        return {
+          allowed: false, code: 'MEETING_CONVENER_CLAIM_REQUIRED', identity,
+          reason: 'legacy convener must claim the meeting before writing',
+        }
+      }
+      return { allowed: true, role: 'legacy-convener', identity }
+    }
+    if (participant) return { allowed: true, role: 'participant', identity }
+    return { allowed: false, code: 'FORBIDDEN', identity, reason: 'caller is not a meeting participant or convener' }
+  }
+
+  function meetingAccessError(access, meetingId) {
+    if (access.code === 'MEETING_CONVENER_CLAIM_REQUIRED') {
+      return {
+        ok: false,
+        code: 'MEETING_CONVENER_CLAIM_REQUIRED',
+        meetingCode: 'MEETING_FORBIDDEN',
+        meetingId,
+        error: `MEETING_CONVENER_CLAIM_REQUIRED: claim legacy meeting ${meetingId} first `
+          + '(call meeting_open with the same meetingId)',
+      }
+    }
+    return {
+      ok: false,
+      code: 'FORBIDDEN',
+      meetingCode: 'MEETING_FORBIDDEN',
+      meetingId,
+      error: `FORBIDDEN: ${access.reason ?? 'caller is not a meeting participant or convener'}`,
+    }
+  }
+
+  /** Bind a legacy meeting's alias convener to the caller's session id. */
+  function claimLegacyMeetingForConvener(state, exec) {
+    if (state === null || typeof state !== 'object') return false
+    if (state.store === null || typeof state.store !== 'object') return false
+    if (meetingConvenerSessionOf(state) !== null) return false
+    const identity = callerIdentity(exec)
+    if (identity.sessionId === null) return false
+    const convener = firstString(state?.meeting?.convener, state?.store?.convener)
+    if (convener === undefined) return false
+    // A session-id convener is authoritative. An alias convener is only
+    // claimable when the host alias route maps that alias to this session.
+    let authorized = convener === identity.sessionId
+    if (!authorized && identity.alias !== null && convener === identity.alias) {
+      authorized = aliasRouteMatchesSession(identity.alias, identity.sessionId)
+    }
+    if (!authorized) return false
+    // Re-read before mutating so a claim cannot overwrite a concurrent post.
+    const latest = readMeetingStore(state.store.meetingId) ?? state.store
+    if (meetingConvenerSessionOf({ store: latest }) !== null) return false
+    latest.convenerSession = identity.sessionId
+    latest.convenerClaimedAt = new Date().toISOString()
+    writeMeetingStore(latest)
+    state.store = latest
+    return true
   }
 
   function resolveMeetingWorkspace(exec) {
@@ -718,6 +877,7 @@ export function registerTools(ctx, deps) {
       title: row?.title ?? store?.title ?? null,
       status: normalizeMeetingStatus(row?.status ?? store?.status),
       convener: row?.convener ?? store?.convener ?? null,
+      convenerSession: store?.convenerSession ?? null,
       createdAt: toIsoTime(row?.created_at) ?? store?.createdAt ?? null,
       updatedAt: toIsoTime(row?.updated_at) ?? store?.updatedAt ?? null,
       deadline: toIsoTime(row?.deadline) ?? null,
@@ -859,7 +1019,7 @@ export function registerTools(ctx, deps) {
     description:
       'Read-only snapshot of the local cross-session network: available sessions, aliases/roles, availability and contact route. '
       + 'Never returns cwd, titles, task text or message bodies. Capability index: skill("team-bootstrap") §2 / '
-      + 'docs/toolbox/CAPABILITY_AUDIT.md.',
+      + '.',
     parameters: baseParams({
       section: {
         type: 'string',
@@ -981,13 +1141,59 @@ export function registerTools(ctx, deps) {
   })
 
   ctx.tools.register({
+    name: 'audit_page',
+    description:
+      'Read the session-network append-only audit log (read-only, paginated). Filters: actor/action/result/'
+      + 'target/meetingId/since/targetSource. Each item carries effectiveTarget and targetSource: '
+      + '"column" (target written), "meta" (legacy row whose meetingId exists only in meta) or "none" '
+      + '(historical row with neither target nor meta.meetingId: NOT attributable, never back-filled). '
+      + 'Pass targetSource:"none" to count/label unattributable rows.',
+    parameters: baseParams({
+      limit: { type: 'number', description: 'Max rows (default 100, max 500).' },
+      offset: { type: 'number', description: 'Row offset (default 0).' },
+      actor: { type: 'string', description: 'Actor substring match.' },
+      action: { type: 'string', description: 'Exact action (e.g. meeting_post).' },
+      target: { type: 'string', description: 'Exact effective target (e.g. meeting:M1).' },
+      meetingId: { type: 'string', description: 'Meeting id; matches effective target meeting:<id>.' },
+      since: { type: 'string', description: 'ISO timestamp lower bound.' },
+      result: { type: 'string', description: 'Exact result (ok/error/...).' },
+      targetSource: { type: 'string', enum: ['column', 'meta', 'none'], description: 'Which effective-target source to return.' },
+    }),
+    output: jsonOut,
+    async execute(args = {}) {
+      if (dataDir === null) return { ok: false, code: 'NO_DB', message: 'registry database unavailable (no dataDir)' }
+      if (typeof modules.db?.queryAuditPage !== 'function') {
+        return { ok: false, code: 'AUDIT_UNSUPPORTED', message: 'queryAuditPage is unavailable in this db module' }
+      }
+      const text = value => (typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined)
+      const limit = Number.isFinite(Number(args.limit)) ? Math.min(500, Math.max(1, Math.trunc(Number(args.limit)))) : 100
+      const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.trunc(Number(args.offset))) : 0
+      const read = withReadDb(() => modules.db.queryAuditPage({
+        limit,
+        offset,
+        actor: text(args.actor),
+        action: text(args.action),
+        target: text(args.target),
+        meetingId: text(args.meetingId),
+        since: text(args.since),
+        result: text(args.result),
+        targetSource: text(args.targetSource),
+      }))
+      if (!read.ok) {
+        return { ok: false, code: read.error?.code ?? 'AUDIT_QUERY_FAILED', message: String(read.error?.message ?? read.error) }
+      }
+      return { ok: true, ...read.value }
+    },
+  })
+
+  ctx.tools.register({
     name: 'alias_register',
     description:
       'Register (or propose) this session\'s own alias in the host-native sessionDirectory (host DB). '
       + 'Only the caller session may register/rename itself; wildcards are rejected; no PEERS.json/ACL/workspace writes. '
       + 'Rename limit is 2 per session (the 3rd rename is rejected); old aliases stay resolvable as legacy. '
       + 'Human confirmation required: preview with dryRun and confirm before changing routing; see '
-      + 'docs/toolbox/OPERATOR_ONLY_BOUNDARIES.md.',
+      + 'operator-only boundaries.',
     parameters: baseParams({
       alias: { type: 'string', description: 'Optional proposed alias (lowercase kebab, <=16 chars); omit to auto-derive.' },
       sessionId: { type: 'string', description: 'Optional target session id (defaults to the calling session).' },
@@ -1002,6 +1208,9 @@ export function registerTools(ctx, deps) {
       if (dbHandle === undefined) {
         return { ok: false, code: 'NO_DB', message: 'db module or dataDir unavailable (alias_register needs a writable registry)' }
       }
+      // A previous read may have bound the read-only handle; rebind the
+      // writable one before the alias route is mutated.
+      modules.db.useDb?.(dbHandle)
       const currentSessionId = exec?.agent?.session?.id ?? exec?.agent?.sessionId ?? null
       const requestedSessionId = typeof args.sessionId === 'string' && args.sessionId.trim() !== ''
         ? args.sessionId.trim() : null
@@ -1048,23 +1257,34 @@ export function registerTools(ctx, deps) {
         if (duplicateStore !== null) {
           const duplicateState = loadMeetingState(duplicateStore.meetingId)
           if (duplicateState.ok) {
+            // P1-2: duplicate meeting_open is a read too; the same participant /
+            // convener boundary as post/finalize applies (legacy read-only kept).
+            const access = meetingAccess(duplicateState, exec, { write: false })
+            if (!access.allowed) return meetingAccessError(access, duplicateStore.meetingId)
+            let claimed = false
+            try { claimed = claimLegacyMeetingForConvener(duplicateState, exec) } catch (error) { return meetingError(error) }
             const participants = duplicateState.participants.map(participantView)
             const messages = mergeMeetingMessages(duplicateState.store, duplicateState.messages)
             return {
               ok: true,
               duplicate: true,
               existingMeetingId: duplicateStore.meetingId,
+              claimed,
               meeting: meetingView(duplicateState.meeting, duplicateState.store, participants, messages),
               participants,
               participantIds: participants.map(participant => participant.sessionId),
               messages,
             }
           }
+          const sidecarState = { store: duplicateStore, meeting: undefined, participants: [], messages: [] }
+          const access = meetingAccess(sidecarState, exec, { write: false })
+          if (!access.allowed) return meetingAccessError(access, duplicateStore.meetingId)
           const messages = mergeMeetingMessages(duplicateStore, [])
           return {
             ok: true,
             duplicate: true,
             existingMeetingId: duplicateStore.meetingId,
+            claimed: false,
             meeting: meetingView(undefined, duplicateStore, [], messages),
             participants: [],
             participantIds: [],
@@ -1074,15 +1294,21 @@ export function registerTools(ctx, deps) {
       }
       const existingState = loadMeetingState(meetingId)
       if (existingState.ok) {
+        // Authorize before writing a reconstructed sidecar or claiming.
+        const access = meetingAccess(existingState, exec, { write: false })
+        if (!access.allowed) return meetingAccessError(access, meetingId)
         if (readMeetingStore(meetingId) === null) {
           try { writeMeetingStore(existingState.store) } catch (error) { return meetingError(error) }
         }
+        let claimed = false
+        try { claimed = claimLegacyMeetingForConvener(existingState, exec) } catch (error) { return meetingError(error) }
         const existingParticipants = existingState.participants.map(participantView)
         const existingMessages = mergeMeetingMessages(existingState.store, existingState.messages)
         return {
           ok: true,
           duplicate: true,
           existingMeetingId: meetingId,
+          claimed,
           meeting: meetingView(existingState.meeting, existingState.store, existingParticipants, existingMessages),
           participants: existingParticipants,
           participantIds: existingParticipants.map(participant => participant.sessionId),
@@ -1092,6 +1318,7 @@ export function registerTools(ctx, deps) {
       if (existingState.notFound !== true) return meetingError(existingState.error)
       const title = firstString(args.title) ?? null
       const convener = resolveMeetingAuthor(exec)
+      const convenerSession = callerIdentity(exec).sessionId
       const workspaceDir = resolveMeetingWorkspace(exec)
       const dirPath = workspaceDir === null ? null : join(workspaceDir, 'docs', 'meetings', meetingId)
       const participants = normalizeParticipantEntries(args.participants)
@@ -1150,6 +1377,7 @@ export function registerTools(ctx, deps) {
         meetingId,
         title,
         convener,
+        convenerSession,
         dedupeKey,
         dirPath,
         createdAt: atIso,
@@ -1177,8 +1405,9 @@ export function registerTools(ctx, deps) {
   ctx.tools.register({
     name: 'meeting_post',
     description:
-      'Append one round of meeting speech (R1/R2/R3/notes) to a meeting. dedupeKey is idempotent: a repeated post '
-      + 'returns {ok:true, duplicate:true, existingMsgId} without adding another message.',
+      'Append one round of meeting speech (R1/R2/R3/notes) to a meeting. Only a registered participant or the '
+      + 'convener may post (others get FORBIDDEN); a legacy alias-convener must claim via meeting_open first. '
+      + 'dedupeKey is idempotent: a repeated post returns {ok:true, duplicate:true, existingMsgId} without adding another message.',
     parameters: meetingParameters,
     output: jsonOut,
     async execute(args = {}, exec = {}) {
@@ -1194,6 +1423,8 @@ export function registerTools(ctx, deps) {
       const dedupeKey = firstString(args.dedupeKey) ?? null
       const state = loadMeetingState(meetingId)
       if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      const access = meetingAccess(state, exec, { write: true })
+      if (!access.allowed) return meetingAccessError(access, meetingId)
       if (normalizeMeetingStatus(state.meeting?.status) === 'finalized'
         || state.store.status === 'finalized'
         || Boolean(state.store.finalizedAt)) {
@@ -1266,37 +1497,66 @@ export function registerTools(ctx, deps) {
         if (recovered !== null) return duplicatePostResponse(state, recovered)
         // DB row exists but the sidecar write was lost: heal it from this retry.
         entry.msgId = write.value.msgId
-        state.store.posts = [...(state.store.posts ?? []), entry]
-        state.store.updatedAt = atIso
+        let healed
         try {
-          writeMeetingStore(state.store)
+          healed = await withMeetingStoreLock(meetingId, () => {
+            const latest = readMeetingStore(meetingId) ?? state.store
+            const present = (latest.posts ?? []).some(post => post?.msgId === entry.msgId
+              || (dedupeKey !== null && post?.dedupeKey === dedupeKey))
+            if (!present) {
+              latest.posts = [...(latest.posts ?? []), entry]
+              latest.updatedAt = atIso
+              writeMeetingStore(latest)
+            }
+            return latest
+          })
         } catch (error) {
           return meetingError(error)
         }
-        const messages = mergeMeetingMessages(state.store, state.messages)
+        const messages = mergeMeetingMessages(healed, state.messages)
         const participants = state.participants.map(participantView)
         return {
           ok: true,
           duplicate: true,
           recovered: true,
           existingMsgId: entry.msgId,
-          meeting: meetingView(state.meeting, state.store, participants, messages),
+          meeting: meetingView(state.meeting, healed, participants, messages),
           message: messageView(entry),
           participants,
           participantIds: participants.map(participant => participant.sessionId),
         }
       }
-      state.store.posts = [...(state.store.posts ?? []), entry]
-      state.store.status = normalizeMeetingStatus(write.value.meeting?.status ?? state.store.status) ?? state.store.status
-      state.store.updatedAt = atIso
+      let stored
       try {
-        writeMeetingStore(state.store)
+        stored = await withMeetingStoreLock(meetingId, () => {
+          // Re-read inside the lock: another participant may have appended since
+          // this call loaded `state`, and that post must not be lost.
+          const latest = readMeetingStore(meetingId) ?? state.store
+          if (normalizeMeetingStatus(latest.status) === 'finalized' || Boolean(latest.finalizedAt)) {
+            return { store: latest, duplicate: null, finalized: true }
+          }
+          const duplicate = dedupeKey === null
+            ? null
+            : (latest.posts ?? []).find(post => post?.dedupeKey === dedupeKey) ?? null
+          if (duplicate !== null) return { store: latest, duplicate, finalized: false }
+          latest.posts = [...(latest.posts ?? []), entry]
+          latest.status = normalizeMeetingStatus(write.value.meeting?.status ?? latest.status) ?? latest.status
+          latest.updatedAt = atIso
+          writeMeetingStore(latest)
+          return { store: latest, duplicate: null, finalized: false }
+        })
       } catch (error) {
         return meetingError(error)
       }
+      if (stored.finalized === true) {
+        return meetingInvalid(`meeting is finalized: ${meetingId}`, 'MEETING_FINALIZED')
+      }
+      if (stored.duplicate !== null) {
+        return duplicatePostResponse({ ...state, store: stored.store }, stored.duplicate)
+      }
       const participants = (write.value.participants ?? []).map(participantView)
-      const messages = mergeMeetingMessages(state.store, write.value.messages)
-      const meeting = meetingView(write.value.meeting, state.store, participants, messages)
+      const messages = mergeMeetingMessages(stored.store, write.value.messages)
+      const meeting = meetingView(write.value.meeting, stored.store, participants, messages)
       safeCall(() => audit?.({ action: 'meeting_post', meetingId, round, ok: true, messages: messages.length, caller: resolveAuditCaller(exec) }), () => {})
       return { ok: true, duplicate: false, meeting, message: messageView(entry), participants, participantIds: participants.map(participant => participant.sessionId) }
     },
@@ -1309,7 +1569,7 @@ export function registerTools(ctx, deps) {
       + 'decisions/actions. `round` optionally filters messages to R1|R2|R3|notes.',
     parameters: meetingParameters,
     output: jsonOut,
-    async execute(args = {}) {
+    async execute(args = {}, exec = {}) {
       if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
       const meetingId = firstString(args.meetingId)
       if (meetingId === undefined) return meetingInvalid('meetingId is required')
@@ -1320,6 +1580,10 @@ export function registerTools(ctx, deps) {
       const round = explicitRound ? normalizeRound(args.round) : null
       const state = loadMeetingState(meetingId)
       if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      // P1-2: collect returns every body/decision, so it must share the same
+      // participant/convener boundary as post/finalize (legacy read-only kept).
+      const access = meetingAccess(state, exec, { write: false })
+      if (!access.allowed) return meetingAccessError(access, meetingId)
       const participants = state.participants.map(participantView)
       const allMessages = mergeMeetingMessages(state.store, state.messages)
       const messages = round === null ? allMessages : allMessages.filter(message => message.round === round)
@@ -1346,7 +1610,9 @@ export function registerTools(ctx, deps) {
     name: 'meeting_finalize',
     description:
       'Finalize a meeting (status finalized) and record decisions/actions parsed from body (JSON or Markdown) '
-      + 'or supplied by earlier posts. Idempotent: finalizing twice returns alreadyFinalized:true.',
+      + 'or supplied by earlier posts. Only a registered participant or the convener may finalize (others get FORBIDDEN); '
+      + 'legacy alias-convener meetings require an explicit meeting_open claim before writing. '
+      + 'Idempotent: finalizing twice returns alreadyFinalized:true.',
     parameters: meetingParameters,
     output: jsonOut,
     async execute(args = {}, exec = {}) {
@@ -1355,10 +1621,14 @@ export function registerTools(ctx, deps) {
       if (meetingId === undefined) return meetingInvalid('meetingId is required')
       const state = loadMeetingState(meetingId)
       if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      const alreadyFinalized = state.store.status === 'finalized' || Boolean(state.store.finalizedAt)
+      // Finalizing a closed meeting is a read of its decisions/actions: legacy
+      // alias conveners stay readable, but a live write still needs a claim.
+      const access = meetingAccess(state, exec, { write: !alreadyFinalized })
+      if (!access.allowed) return meetingAccessError(access, meetingId)
       const participants = state.participants.map(participantView)
       const existingDecisions = Array.isArray(state.store.decisions) ? state.store.decisions : []
       const existingActions = Array.isArray(state.store.actions) ? state.store.actions : []
-      const alreadyFinalized = state.store.status === 'finalized' || Boolean(state.store.finalizedAt)
       if (alreadyFinalized) {
         const messages = mergeMeetingMessages(state.store, state.messages)
         const meeting = meetingView(state.meeting, state.store, participants, messages)
@@ -1382,50 +1652,58 @@ export function registerTools(ctx, deps) {
       const decisions = parsedBody.decisions.length > 0 ? parsedBody.decisions : existingDecisions
       const actions = parsedBody.actions.length > 0 ? parsedBody.actions : existingActions
       const atIso = new Date().toISOString()
-      const store = {
-        ...state.store,
-        status: 'finalized',
-        finalizedAt: atIso,
-        updatedAt: atIso,
-        decisions,
-        actions,
-        summaryText: parsedBody.summaryText,
-      }
-      const messages = mergeMeetingMessages(store, state.messages)
-      const meeting = meetingView(state.meeting, store, participants, messages)
-      const summary = {
-        meetingId,
-        title: meeting.title,
-        status: 'finalized',
-        convener: meeting.convener,
-        participantCount: participants.length,
-        participants: participants.map(participant => participant.sessionId),
-        messageCount: messages.length,
-        rounds: meeting.rounds,
-        decisions,
-        actions,
-        decisionCount: decisions.length,
-        actionCount: actions.length,
-        finalizedAt: atIso,
-        ...(parsedBody.summaryText === null ? {} : { summaryText: parsedBody.summaryText }),
-        ...(typeof args.body === 'string' && args.body.trim() !== '' ? {
-          bodySha256: createHash('sha256').update(args.body, 'utf8').digest('hex'),
-          bodyLen: Buffer.byteLength(args.body, 'utf8'),
-        } : {}),
-      }
-      store.summary = summary
+      let stored
       try {
-        writeMeetingStore(store)
+        stored = await withMeetingStoreLock(meetingId, () => {
+          // Re-read inside the lock so a concurrent participant post is kept,
+          // then write the finalized view back atomically.
+          const latest = readMeetingStore(meetingId) ?? state.store
+          const next = {
+            ...latest,
+            status: 'finalized',
+            finalizedAt: atIso,
+            updatedAt: atIso,
+            decisions,
+            actions,
+            summaryText: parsedBody.summaryText,
+          }
+          const lockedMessages = mergeMeetingMessages(next, state.messages)
+          const lockedMeeting = meetingView(state.meeting, next, participants, lockedMessages)
+          next.summary = {
+            meetingId,
+            title: lockedMeeting.title,
+            status: 'finalized',
+            convener: lockedMeeting.convener,
+            participantCount: participants.length,
+            participants: participants.map(participant => participant.sessionId),
+            messageCount: lockedMessages.length,
+            rounds: lockedMeeting.rounds,
+            decisions,
+            actions,
+            decisionCount: decisions.length,
+            actionCount: actions.length,
+            finalizedAt: atIso,
+            ...(parsedBody.summaryText === null ? {} : { summaryText: parsedBody.summaryText }),
+            ...(typeof args.body === 'string' && args.body.trim() !== '' ? {
+              bodySha256: createHash('sha256').update(args.body, 'utf8').digest('hex'),
+              bodyLen: Buffer.byteLength(args.body, 'utf8'),
+            } : {}),
+          }
+          writeMeetingStore(next)
+          return next
+        })
       } catch (error) {
         return meetingError(error)
       }
+      const messages = mergeMeetingMessages(stored, state.messages)
+      const summary = stored.summary
       const statusWrite = withWriteDb(() => {
         const changed = modules.db.setMeetingStatus(meetingId, 'final')
         return { changed, meeting: modules.db.getMeeting(meetingId) }
       })
       if (!statusWrite.ok) return meetingError(statusWrite.error)
       if (statusWrite.value.changed !== true) return meetingNotFound(meetingId)
-      const finalMeeting = meetingView(statusWrite.value.meeting, store, participants, messages)
+      const finalMeeting = meetingView(statusWrite.value.meeting, stored, participants, messages)
       safeCall(() => audit?.({ action: 'meeting_finalize', meetingId, ok: true, decisions: decisions.length, actions: actions.length, caller: resolveAuditCaller(exec) }), () => {})
       return { ok: true, alreadyFinalized: false, meeting: finalMeeting, summary, decisions, actions, participants, participantIds: participants.map(participant => participant.sessionId) }
     },
@@ -1436,7 +1714,7 @@ export function registerTools(ctx, deps) {
     description:
       'Initialize the workspace-root AGENTS.md once. X4 order: auto-create a minimal file first, then the model may ask '
       + 'the user (non-blocking, <=30s) and call again with purpose to upgrade the auto template. Existing files are never overwritten. '
-      + 'Human confirmation required before the first write (team-bootstrap §2 / docs/toolbox/OPERATOR_ONLY_BOUNDARIES.md).',
+      + 'Human confirmation required before the first write (team-bootstrap §2 / operator-only boundaries).',
     parameters: baseParams({
       purpose: { type: 'string', description: 'One-line purpose answered by the user; upgrades an auto template.' },
       skip: { type: 'boolean', description: 'Skip asking and remember the skip for this project root.' },

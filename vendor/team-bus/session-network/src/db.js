@@ -929,20 +929,86 @@ export function insertAudit({ at, actor = null, action, target = null, result = 
   return { id: Number(info.lastInsertRowid), at: toMs(at), actor: parseAuditActor(actorValue), action, target, result }
 }
 
-export function queryAudit({ limit = 100, actor, action, since } = {}) {
-  const db = openSharedRequired()
-  const clauses = []
-  const params = []
-  if (actor !== undefined) { clauses.push('actor LIKE ?'); params.push(`%${String(actor)}%`) }
-  if (action !== undefined) { clauses.push('action = ?'); params.push(String(action)) }
-  if (since !== undefined) { clauses.push('at >= ?'); params.push(toMs(since)) }
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
-  const rows = all(db, `SELECT * FROM audit_log ${where} ORDER BY id DESC LIMIT ?`, [...params, Math.max(1, Math.trunc(limit))])
-  return rows.map(row => ({
+/**
+ * Read-side effective target for audit rows, without rewriting the append-only
+ * table. Historical rows created before the write-side fix have target=NULL and
+ * meta={source:'session-network'} only: they stay unattributed (source 'none')
+ * and are never back-filled or guessed.
+ */
+const AUDIT_EFFECTIVE_TARGET_SQL = `COALESCE(NULLIF(TRIM(a.target), ''),
+  CASE WHEN COALESCE(json_valid(a.meta_json), 0) = 1
+    THEN 'meeting:' || json_extract(a.meta_json, '$.meetingId') END)`
+const AUDIT_TARGET_SOURCE_SQL = `CASE
+  WHEN a.target IS NOT NULL AND TRIM(a.target) <> '' THEN 'column'
+  WHEN COALESCE(json_valid(a.meta_json), 0) = 1
+    AND CASE WHEN COALESCE(json_valid(a.meta_json), 0) = 1
+      THEN json_extract(a.meta_json, '$.meetingId') END IS NOT NULL THEN 'meta'
+  ELSE 'none' END`
+
+function auditRowView(row) {
+  const targetSource = row.target_source ?? 'none'
+  return {
     ...row,
     actor: parseAuditActor(row.actor),
     meta: row.meta_json === null ? null : safeJsonParse(row.meta_json),
-  }))
+    effectiveTarget: row.effective_target ?? null,
+    targetSource,
+    unattributed: targetSource === 'none',
+  }
+}
+
+/**
+ * Paginated audit-log read with an effective target. Supports target/meetingId
+ * scoping so meeting audits can be read without changing the append-only store.
+ * `targetSource` is 'column' (written target), 'meta' (older row whose meetingId
+ * only exists in meta) or 'none' (not attributable).
+ */
+export function queryAuditPage({
+  limit = 100, offset = 0, actor, action, target, meetingId, since, result, targetSource,
+} = {}) {
+  const db = openSharedRequired()
+  const clauses = []
+  const params = []
+  if (actor !== undefined) { clauses.push('a.actor LIKE ?'); params.push(`%${String(actor)}%`) }
+  if (action !== undefined) { clauses.push('a.action = ?'); params.push(String(action)) }
+  if (since !== undefined) {
+    const ms = typeof since === 'number' ? since : Date.parse(String(since))
+    if (Number.isFinite(ms)) { clauses.push('a.at >= ?'); params.push(ms) }
+  }
+  if (result !== undefined) { clauses.push('a.result = ?'); params.push(String(result)) }
+  if (target !== undefined && String(target).trim() !== '') {
+    clauses.push(`(${AUDIT_EFFECTIVE_TARGET_SQL}) = ?`)
+    params.push(String(target).trim())
+  }
+  if (meetingId !== undefined && String(meetingId).trim() !== '') {
+    clauses.push(`(${AUDIT_EFFECTIVE_TARGET_SQL}) = ?`)
+    params.push('meeting:' + String(meetingId).trim())
+  }
+  if (targetSource !== undefined && ['column', 'meta', 'none'].includes(String(targetSource))) {
+    clauses.push(`(${AUDIT_TARGET_SOURCE_SQL}) = ?`)
+    params.push(String(targetSource))
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+  const safeLimit = Math.min(1000, Math.max(1, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 100))
+  const safeOffset = Math.max(0, Number.isFinite(Number(offset)) ? Math.trunc(Number(offset)) : 0)
+  const total = Number(get(db, `SELECT COUNT(*) AS n FROM audit_log a ${where}`, params)?.n ?? 0)
+  const rows = all(db, `SELECT a.*,
+      (${AUDIT_EFFECTIVE_TARGET_SQL}) AS effective_target,
+      (${AUDIT_TARGET_SOURCE_SQL}) AS target_source
+    FROM audit_log a ${where} ORDER BY a.id DESC LIMIT ? OFFSET ?`,
+  [...params, safeLimit, safeOffset])
+  return {
+    items: rows.map(auditRowView),
+    total,
+    offset: safeOffset,
+    limit: safeLimit,
+    hasMore: safeOffset + rows.length < total,
+  }
+}
+
+/** Legacy array-shaped audit query (same fields, plus effectiveTarget/targetSource). */
+export function queryAudit(args = {}) {
+  return queryAuditPage(args).items
 }
 
 function safeJsonParse(text) {

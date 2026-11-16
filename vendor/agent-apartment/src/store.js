@@ -56,13 +56,71 @@ CREATE TABLE IF NOT EXISTS experiences (
   skills TEXT, outcome TEXT, created_at TEXT NOT NULL
 );
 `
+/**
+ * Delete entries under `targetRoot` that do not exist under `sourceRoot` (same
+ * relative path), so a restore reproduces the backup exactly instead of merging
+ * post-backup files into it. Returns the number of removed/replaced entries.
+ */
+const removeExtraEntries = (sourceRoot, targetRoot) => {
+  let removed = 0
+  const walk = (source, target) => {
+    if (!existsSync(source) || !existsSync(target)) return
+    const sourceNames = new Set(readdirSync(source))
+    for (const name of readdirSync(target)) {
+      const sourcePath = join(source, name)
+      const targetPath = join(target, name)
+      if (!sourceNames.has(name)) {
+        rmSync(targetPath, { recursive: true, force: true })
+        removed += 1
+        continue
+      }
+      const sourceIsDir = statSync(sourcePath).isDirectory()
+      const targetIsDir = statSync(targetPath).isDirectory()
+      if (sourceIsDir && targetIsDir) { walk(sourcePath, targetPath); continue }
+      if (sourceIsDir !== targetIsDir) {
+        rmSync(targetPath, { recursive: targetIsDir, force: true })
+        cpSync(sourcePath, targetPath, { recursive: sourceIsDir })
+        removed += 1
+      }
+    }
+  }
+  walk(sourceRoot, targetRoot)
+  return removed
+}
+
 export function createApartment({ root, dbPath } = {}) {
   const resolvedRoot = ensureLayout(resolve(root || defaultRoot()))
+  const dbFile = join(resolvedRoot, 'apartment.sqlite')
   const pendingDb = join(resolvedRoot, 'apartment.sqlite.restore-pending')
+  let restoredPendingDb = false
   if (existsSync(pendingDb)) {
-    try { renameSync(pendingDb, join(resolvedRoot, 'apartment.sqlite')) } catch { /* keep pending for manual recovery */ }
+    try {
+      renameSync(pendingDb, dbFile)
+    } catch (error) {
+      // A committed restore must never be dropped silently: report it so the
+      // operator can resolve the lock/permission problem and retry.
+      const failure = new Error('apartment: pending restore DB could not replace ' + dbFile + ': ' + (error?.message ?? error)
+        + ' (pending file kept at ' + pendingDb + ')')
+      failure.code = 'APARTMENT_RESTORE_PENDING_FAILED'
+      failure.pendingDb = pendingDb
+      failure.targetDb = dbFile
+      throw failure
+    }
+    // WAL/SHM left behind belong to the replaced database; replaying them over
+    // the restored file would corrupt it.
+    for (const suffix of ['-wal', '-shm']) {
+      try { rmSync(dbFile + suffix, { force: true }) } catch (error) {
+        const failure = new Error('apartment: restored DB was applied but stale ' + suffix + ' for ' + dbFile
+          + ' could not be removed: ' + (error?.message ?? error))
+        failure.code = 'APARTMENT_RESTORE_PENDING_FAILED'
+        failure.pendingDb = null
+        failure.targetDb = dbFile
+        throw failure
+      }
+    }
+    restoredPendingDb = true
   }
-  const db = new DatabaseSync(dbPath || join(resolvedRoot, 'apartment.sqlite'))
+  const db = new DatabaseSync(dbPath || dbFile)
   db.exec(schema)
   const reapExpired = () => {
     const result = db.prepare("UPDATE leases SET state='expired' WHERE state='active' AND expires_at IS NOT NULL AND expires_at < ?").run(now())
@@ -82,6 +140,7 @@ export function createApartment({ root, dbPath } = {}) {
   return {
     root: resolvedRoot,
     dbPath: join(resolvedRoot, 'apartment.sqlite'),
+    restoredPendingDb,
     checkpoint: () => db.exec('PRAGMA wal_checkpoint(FULL)'),
     close: () => db.close(),
     status,
@@ -95,7 +154,7 @@ export function createApartment({ root, dbPath } = {}) {
       mkdirSync(join(home, 'skills'), { recursive: true })
       mkdirSync(join(home, 'tools'), { recursive: true })
       db.prepare(`INSERT INTO agents (id,name,home,status,capabilities,created_at,updated_at) VALUES (?,?,?,'active',?,?,?)
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name, home=excluded.home, updated_at=excluded.updated_at`).run(agentId, name, home, JSON.stringify(capabilities), now(), now())
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name, home=excluded.home, capabilities=excluded.capabilities, updated_at=excluded.updated_at`).run(agentId, name, home, JSON.stringify(capabilities), now(), now())
       return db.prepare('SELECT * FROM agents WHERE id=?').get(agentId)
     },
     listAgents() { return db.prepare('SELECT * FROM agents ORDER BY name').all() },
@@ -175,12 +234,28 @@ export function createApartment({ root, dbPath } = {}) {
       writeJson(join(resolvedRoot, 'manifests', `${stamp}.json`), manifest)
       return { backup: dir, files: manifest.files.length }
     },
-    restoreFrom(source) {
+    restoreFrom(source, options = {}) {
       const from = resolve(source)
+      const allowCrossRoot = options !== null && typeof options === 'object' && options.allowCrossRoot === true
       const manifestPath = join(from, 'manifest.json')
       if (!existsSync(manifestPath)) throw new Error('backup manifest not found: ' + from)
       const manifest = readJson(manifestPath, null)
       if (manifest === null || !Array.isArray(manifest.files)) throw new Error('backup manifest invalid: ' + from)
+      // Refuse a backup made for a different apartment root unless the operator
+      // explicitly opts in; an unverifiable (root-less) manifest is treated the
+      // same way instead of silently trusting it.
+      const manifestRoot = typeof manifest.root === 'string' && manifest.root.trim() !== '' ? resolve(manifest.root) : null
+      if (manifestRoot !== resolvedRoot && !allowCrossRoot) {
+        const error = new Error(manifestRoot === null
+          ? 'backup manifest has no root; refusing to restore it into ' + resolvedRoot + ' (pass allowCrossRoot=true to override)'
+          : 'backup root mismatch: backup was created for ' + manifestRoot + ' but target root is ' + resolvedRoot
+            + ' (pass allowCrossRoot=true to override)')
+        error.code = manifestRoot === null ? 'APARTMENT_RESTORE_ROOT_UNVERIFIABLE' : 'APARTMENT_RESTORE_ROOT_MISMATCH'
+        error.manifestRoot = manifestRoot
+        error.targetRoot = resolvedRoot
+        error.restoredFrom = from
+        throw error
+      }
       for (const entry of manifest.files) {
         if (entry === null || typeof entry.path !== 'string' || typeof entry.sha256 !== 'string') throw new Error('backup manifest entry invalid')
         const file = resolve(from, entry.path)
@@ -188,15 +263,49 @@ export function createApartment({ root, dbPath } = {}) {
         if (!existsSync(file) || sha256(readFileSync(file)) !== entry.sha256) throw new Error('backup hash mismatch: ' + entry.path)
       }
       const safety = this.backup('pre-restore')
+      let removedFiles = 0
       for (const dir of ['agents', 'work', 'manifests']) {
-        if (existsSync(join(from, dir))) cpSync(join(from, dir), join(resolvedRoot, dir), { recursive: true })
+        const sourceDir = join(from, dir)
+        if (!existsSync(sourceDir)) continue
+        cpSync(sourceDir, join(resolvedRoot, dir), { recursive: true })
+        // Exact restore: drop entries created after the backup so the filesystem
+        // matches the restored roster instead of merging two states.
+        removedFiles += removeExtraEntries(sourceDir, join(resolvedRoot, dir))
       }
-      let pendingDb = null
+      let pendingDbPath = null
       if (existsSync(join(from, 'apartment.sqlite'))) {
-        pendingDb = join(resolvedRoot, 'apartment.sqlite.restore-pending')
-        cpSync(join(from, 'apartment.sqlite'), pendingDb)
+        pendingDbPath = join(resolvedRoot, 'apartment.sqlite.restore-pending')
+        try {
+          cpSync(join(from, 'apartment.sqlite'), pendingDbPath)
+          // Point every agent home at this root: required for an allowed
+          // cross-root restore and idempotent for a same-root one.
+          const pendingDb = new DatabaseSync(pendingDbPath)
+          try {
+            const update = pendingDb.prepare('UPDATE agents SET home=? WHERE id=?')
+            for (const row of pendingDb.prepare('SELECT id FROM agents').all()) {
+              update.run(join(resolvedRoot, 'agents', row.id), row.id)
+            }
+          } finally { pendingDb.close() }
+        } catch (error) {
+          try { rmSync(pendingDbPath, { force: true }) } catch { /* best effort */ }
+          const failure = new Error('apartment: cannot stage restored DB at ' + pendingDbPath + ': ' + (error?.message ?? error))
+          failure.code = 'APARTMENT_RESTORE_DB_FAILED'
+          failure.pendingDb = null
+          failure.restoredFrom = from
+          failure.safetyBackup = safety.backup
+          throw failure
+        }
       }
-      return { restoredFrom: from, safetyBackup: safety.backup, pendingDb, restartRequired: true }
+      return {
+        restoredFrom: from,
+        targetRoot: resolvedRoot,
+        manifestRoot,
+        crossRoot: manifestRoot !== resolvedRoot,
+        safetyBackup: safety.backup,
+        pendingDb: pendingDbPath,
+        removedFiles,
+        restartRequired: pendingDbPath !== null,
+      }
     },
     listBackups() {
       const dir = join(resolvedRoot, 'backups')
