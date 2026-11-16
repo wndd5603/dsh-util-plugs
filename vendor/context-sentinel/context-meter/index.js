@@ -494,6 +494,15 @@ export function apply(ctx, config) {
   if (agents !== undefined) {
     for (const agent of agents.list()) installWatchdog(agent)
   }
+  // The first agents can be published before this plugin mounts; agent/created
+  // then misses them. Re-scan (idempotent) so the watchdog never stays detached.
+  const watchdogInstallTimer = setInterval(() => {
+    try {
+      const current = ctx.get('agents')
+      if (current !== undefined) for (const agent of current.list()) installWatchdog(agent)
+    } catch { /* fail-open */ }
+  }, 5000)
+  ctx.effect(() => () => { clearInterval(watchdogInstallTimer) }, 'context-meter: watchdog self-heal')
 
   // ---- read-only status tool ------------------------------------------------
   ctx.tools.register({

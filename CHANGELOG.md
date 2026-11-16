@@ -5,6 +5,7 @@
 - **Cross-permission guard**: `crossPermissionGuard` (default true) blocks confined senders from messaging danger-full-access targets via direct id, alias, header or autoResume.
 - **Agent Network panel**: the former “跨会话消息 / Cross-session messages” panel is now “智能体网络 / Agent Network”; it adds a live bulletin-board/task section (boards, task counts by status) above the existing message-center tools. **The plugin console remains a separate panel** with its original cards/configuration/status/extensions. The bulletin-board host exposes a read-only `bulletinBoard` Remote.
 - **Subagent progress**: `agent_progress` reads `team/progress/<sessionId>.json` heartbeats plus the live agent roster and classifies starting/running/stalled/inactive/failed; documented in the `subagent-progress` skill.
+- **Context guard self-heal**: context-meter and team-hooks2 re-scan `agents.list()` every 5s (idempotent), so turn-stopping listeners and archive reminders attach even when the first agents exist before plugin mount/restart.
 - Bundle is now 10 rows; existing rows remain switchable and zero npm dependencies.
 
 ## 2026.11.5-9

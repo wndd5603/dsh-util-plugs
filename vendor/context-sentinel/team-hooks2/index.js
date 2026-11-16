@@ -2519,6 +2519,16 @@ export function apply(ctx, config) {
   if (agents !== undefined) {
     for (const agent of agents.list()) install(agent)
   }
+  // Host startup/resume can create the first agents before this plugin mounts;
+  // agent/created alone then never reaches us. Re-scan periodically (install is
+  // idempotent) so the archive heartbeat cannot stay permanently unattached.
+  const installTimer = setInterval(() => {
+    try {
+      const current = ctx.get('agents')
+      if (current !== undefined) for (const agent of current.list()) install(agent)
+    } catch { /* fail-open */ }
+  }, 5000)
+  ctx.effect(() => () => { clearInterval(installTimer) }, 'team-hooks2: archive listener self-heal')
 
   // ---- diagnostic tool ---------------------------------------------------
   ctx.tools.register({
