@@ -1,4 +1,4 @@
-﻿/** Tool registration for dsh-session-network (P0/P1 skeleton; modules are injected lazily). */
+/** Tool registration for dsh-session-network (P0/P1 skeleton; modules are injected lazily). */
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -550,18 +550,33 @@ export function registerTools(ctx, deps) {
   }
 
   function readMeetingStore(meetingId) {
-    const file = meetingStorePath(meetingId)
-    if (file === null || !existsSync(file)) return null
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    const normalize = parsed => {
       if (parsed === null || typeof parsed !== 'object') return null
       if (!Array.isArray(parsed.posts)) parsed.posts = []
       if (!Array.isArray(parsed.decisions)) parsed.decisions = []
       if (!Array.isArray(parsed.actions)) parsed.actions = []
       return parsed
-    } catch {
-      return null
     }
+    const file = meetingStorePath(meetingId)
+    if (file === null) return null
+    if (existsSync(file)) {
+      try { return normalize(JSON.parse(readFileSync(file, 'utf8'))) } catch { return null }
+    }
+    // Renaming an entity must re-derive its sidecar filename. Accept a stale-hash
+    // sidecar only when its embedded meetingId matches exactly, so old data stays
+    // readable after a rename instead of silently degrading to empty decisions.
+    const raw = String(meetingId)
+    const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '_').slice(0, 48) || 'meeting'
+    try {
+      for (const name of readdirSync(MEETING_STORE_DIR)) {
+        if (!name.startsWith(`${safe}-`) || !name.endsWith('.json')) continue
+        try {
+          const parsed = normalize(JSON.parse(readFileSync(join(MEETING_STORE_DIR, name), 'utf8')))
+          if (parsed !== null && parsed.meetingId === raw) return parsed
+        } catch { /* one corrupt sidecar must not hide the others */ }
+      }
+    } catch { /* directory unreadable */ }
+    return null
   }
 
   function findMeetingStoreByDedupe(dedupeKey) {
@@ -844,7 +859,7 @@ export function registerTools(ctx, deps) {
     description:
       'Read-only snapshot of the local cross-session network: available sessions, aliases/roles, availability and contact route. '
       + 'Never returns cwd, titles, task text or message bodies. Capability index: skill("team-bootstrap") §2 / '
-      + 'CAPABILITY_AUDIT.md.',
+      + 'docs/toolbox/CAPABILITY_AUDIT.md.',
     parameters: baseParams({
       section: {
         type: 'string',
@@ -972,7 +987,7 @@ export function registerTools(ctx, deps) {
       + 'Only the caller session may register/rename itself; wildcards are rejected; no PEERS.json/ACL/workspace writes. '
       + 'Rename limit is 2 per session (the 3rd rename is rejected); old aliases stay resolvable as legacy. '
       + 'Human confirmation required: preview with dryRun and confirm before changing routing; see '
-      + 'OPERATOR_ONLY_BOUNDARIES.md.',
+      + 'docs/toolbox/OPERATOR_ONLY_BOUNDARIES.md.',
     parameters: baseParams({
       alias: { type: 'string', description: 'Optional proposed alias (lowercase kebab, <=16 chars); omit to auto-derive.' },
       sessionId: { type: 'string', description: 'Optional target session id (defaults to the calling session).' },
@@ -1421,7 +1436,7 @@ export function registerTools(ctx, deps) {
     description:
       'Initialize the workspace-root AGENTS.md once. X4 order: auto-create a minimal file first, then the model may ask '
       + 'the user (non-blocking, <=30s) and call again with purpose to upgrade the auto template. Existing files are never overwritten. '
-      + 'Human confirmation required before the first write (team-bootstrap §2 / OPERATOR_ONLY_BOUNDARIES.md).',
+      + 'Human confirmation required before the first write (team-bootstrap §2 / docs/toolbox/OPERATOR_ONLY_BOUNDARIES.md).',
     parameters: baseParams({
       purpose: { type: 'string', description: 'One-line purpose answered by the user; upgrades an auto template.' },
       skip: { type: 'boolean', description: 'Skip asking and remember the skip for this project root.' },
