@@ -213,14 +213,32 @@ export function apply(ctx) {
   // Read-only Web Remote for the Agent Network console section.
   class BulletinBoardRemote {
     overview() {
-      const boardsPage = store.listBoardsPage({ limit: 100 })
-      const tasksPage = store.listTasksPage({ limit: 500 })
-      return {
-        boards: boardsPage.boards,
-        tasks: tasksPage.tasks,
-        boardsTotal: boardsPage.total,
-        tasksTotal: tasksPage.total,
-        counts: Object.fromEntries(STATUSES.map(s => [s, tasksPage.tasks.filter(t => t.status === s).length])),
+      // R1: one read transaction keeps the board page, task page and full
+      // status aggregate on the same snapshot, so counts always sum to
+      // tasksTotal even while another session writes.
+      store.db.exec('BEGIN')
+      try {
+        const boardsPage = store.listBoardsPage({ limit: 100 })
+        const tasksPage = store.listTasksPage({ limit: 500 })
+        // Counts are a full-table aggregate, not a filter over the first
+        // 500-row snapshot. `tasks` stays the bounded first page, and
+        // tasksTruncated tells the caller to page the rest via Remote.tasks().
+        const counts = Object.fromEntries(STATUSES.map(status => [status, 0]))
+        for (const row of store.db.prepare('SELECT status, COUNT(*) AS n FROM tasks GROUP BY status').all()) {
+          if (Object.hasOwn(counts, row.status)) counts[row.status] = Number(row.n)
+        }
+        return {
+          boards: boardsPage.boards,
+          tasks: tasksPage.tasks,
+          boardsTotal: boardsPage.total,
+          tasksTotal: tasksPage.total,
+          tasksLimit: tasksPage.limit,
+          tasksOffset: tasksPage.offset,
+          tasksTruncated: tasksPage.hasMore,
+          counts,
+        }
+      } finally {
+        store.db.exec('COMMIT')
       }
     }
     boards(query) { return store.listBoardsPage(query ?? {}) }

@@ -1786,10 +1786,18 @@ export function registerTools(ctx, deps) {
       const participants = state.participants.map(participantView)
       const existingDecisions = Array.isArray(state.store.decisions) ? state.store.decisions : []
       const existingActions = Array.isArray(state.store.actions) ? state.store.actions : []
-      if (alreadyFinalized) {
-        const messages = mergeMeetingMessages(state.store, state.messages)
-        const meeting = meetingView(state.meeting, state.store, participants, messages)
-        const summary = state.store.summary ?? {
+      // R3: the idempotent response is built from the sidecar that holds the
+      // winning finalize. The DB row may still show an older status when a
+      // concurrent finalize has written the sidecar but not yet the registry.
+      const finalizedResponse = store => {
+        const decisionsForResponse = Array.isArray(store.decisions) ? store.decisions : []
+        const actionsForResponse = Array.isArray(store.actions) ? store.actions : []
+        const messages = mergeMeetingMessages(store, state.messages)
+        const finalizedRow = state.meeting === undefined || state.meeting === null
+          ? state.meeting
+          : { ...state.meeting, status: 'final' }
+        const meeting = meetingView(finalizedRow, store, participants, messages)
+        const summary = store.summary ?? {
           meetingId,
           title: meeting.title,
           status: 'finalized',
@@ -1797,24 +1805,31 @@ export function registerTools(ctx, deps) {
           participantCount: participants.length,
           messageCount: messages.length,
           rounds: meeting.rounds,
-          decisions: existingDecisions,
-          actions: existingActions,
-          decisionCount: existingDecisions.length,
-          actionCount: existingActions.length,
-          finalizedAt: state.store.finalizedAt ?? null,
+          decisions: decisionsForResponse,
+          actions: actionsForResponse,
+          decisionCount: decisionsForResponse.length,
+          actionCount: actionsForResponse.length,
+          finalizedAt: store.finalizedAt ?? null,
         }
-        return { ok: true, alreadyFinalized: true, meeting, summary, decisions: existingDecisions, actions: existingActions, participants, participantIds: participants.map(participant => participant.sessionId) }
+        return { ok: true, alreadyFinalized: true, meeting, summary, decisions: decisionsForResponse, actions: actionsForResponse, participants, participantIds: participants.map(participant => participant.sessionId) }
       }
+      if (alreadyFinalized) return finalizedResponse(state.store)
       const parsedBody = parseMeetingFinalBody(args.body)
       const decisions = parsedBody.decisions.length > 0 ? parsedBody.decisions : existingDecisions
       const actions = parsedBody.actions.length > 0 ? parsedBody.actions : existingActions
       const atIso = new Date().toISOString()
-      let stored
+      let written
       try {
-        stored = await withMeetingStoreLock(meetingId, () => {
+        written = await withMeetingStoreLock(meetingId, () => {
           // Re-read inside the lock so a concurrent participant post is kept,
           // then write the finalized view back atomically.
           const latest = readMeetingStore(meetingId) ?? state.store
+          // R3 CAS: the finalized check above happened before the lock. A
+          // concurrent finalize (same process or another sharing dataDir) may
+          // have won the lock first; never overwrite its decisions/actions.
+          if (normalizeMeetingStatus(latest.status) === 'finalized' || Boolean(latest.finalizedAt)) {
+            return { alreadyFinalized: true, store: latest }
+          }
           const next = {
             ...latest,
             status: 'finalized',
@@ -1847,11 +1862,13 @@ export function registerTools(ctx, deps) {
             } : {}),
           }
           writeMeetingStore(next)
-          return next
+          return { alreadyFinalized: false, store: next }
         })
       } catch (error) {
         return meetingError(error)
       }
+      if (written.alreadyFinalized === true) return finalizedResponse(written.store)
+      const stored = written.store
       const messages = mergeMeetingMessages(stored, state.messages)
       const summary = stored.summary
       const statusWrite = withWriteDb(() => {

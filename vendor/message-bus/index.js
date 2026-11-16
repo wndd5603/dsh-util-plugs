@@ -17,7 +17,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openMessageStore } from './src/store.js'
 import {
-  boolean, number, string, record, nested, objectSchema,
+  boolean, number, string, record, nested, objectSchema, enumOf,
   defaultsOf, fieldDocs, validateConfig,
 } from './lib/standard-schema.js'
 
@@ -68,6 +68,13 @@ export const Config = objectSchema({
   }),
   dbPath: string('', {
     description: 'SQLite path. Empty = $DSH_HOME/message-bus/bus.sqlite; a leading ~ is expanded to the home dir.',
+  }),
+  maxBodyChars: number(100000, {
+    description: 'Hard maximum message body length in characters (default 100000). Longer bodies are rejected with INVALID_ARGUMENT and neither stored nor queued; there is no silent truncation.',
+    int: true, min: 1,
+  }),
+  notFoundPolicy: enumOf('reject', ['reject', 'queue'], {
+    description: "Q2-B not-found policy (default 'reject'): a session-<uuid> target that does not exist is not stored and returns deliveryState=undeliverable/reasonCode=session-not-found. 'queue' keeps the legacy store+queue behaviour. Per-call queueUndeliverable:true overrides either value for one send.",
   }),
   strictMode: boolean(true, {
     description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval in confined modes; set false to allow direct ids. Auto-bypassed under danger-full-access (no approval answerer). Alias/join is always unaffected.',
@@ -674,15 +681,47 @@ function readNetworkPage(rawArgs) {
   }
 }
 
+/** Default hard cap for the per-message audit's readState/envelopes sections. */
+const AUDIT_SECTION_DEFAULT_LIMIT = 50
+const AUDIT_SECTION_MAX_LIMIT = 200
+
+/**
+ * Section-specific paging for messageAudit. Callers may use the flat
+ * `readStateLimit`/`readStateOffset` (and envelopes equivalents), a nested
+ * `readState:{limit,offset}` object, or `section:'readState'` + `limit/offset`.
+ * The legacy top-level `limit`/`offset` still page `deliveries` only.
+ */
+function auditSectionBounds(args, name) {
+  const nestedArgs = args?.[name] !== null && typeof args?.[name] === 'object' && !Array.isArray(args?.[name])
+    ? args[name] : {}
+  const rawLimit = args?.[name + 'Limit'] ?? nestedArgs.limit
+    ?? (args?.section === name ? args?.limit : undefined)
+  const rawOffset = args?.[name + 'Offset'] ?? nestedArgs.offset
+    ?? (args?.section === name ? args?.offset : undefined)
+  const limit = Number.isFinite(Number(rawLimit))
+    ? Math.min(AUDIT_SECTION_MAX_LIMIT, Math.max(1, Math.trunc(Number(rawLimit))))
+    : AUDIT_SECTION_DEFAULT_LIMIT
+  const offset = Number.isFinite(Number(rawOffset))
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(Number(rawOffset))))
+    : 0
+  return { limit, offset }
+}
+
 /**
  * Read-only delivery/read audit for one bus message (metadata only; the body is
  * never selected, so the Web detail view cannot exfiltrate message text).
+ *
+ * `deliveries` uses the legacy top-level limit/offset. `readState` and
+ * `envelopes` are bounded by default (50 rows each) and expose their own
+ * total/limit/offset/hasMore; the legacy arrays are preserved.
  */
 function readMessageAudit(store, rawArgs) {
   const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : {}
   const messageId = typeof args.messageId === 'string' ? args.messageId.trim() : ''
   if (messageId === '') return { ok: false, error: 'messageId is required' }
   const { limit, offset } = pageBoundsOf(args)
+  const readStateBounds = auditSectionBounds(args, 'readState')
+  const envelopeBounds = auditSectionBounds(args, 'envelopes')
   try {
     const db = store.db
     const row = db.prepare('SELECT id, at, from_session, to_session, subject, bytes, sha256 FROM messages WHERE id = ?').get(messageId)
@@ -696,9 +735,16 @@ function readMessageAudit(store, rawArgs) {
     const deliveries = db.prepare('SELECT id, at, to_session, duplicate, suppressed, delivered, coalesced, resumed, error,'
       + deliveryStateSelect
       + ' FROM deliveries WHERE message_id = ? ORDER BY id ASC LIMIT ? OFFSET ?').all(messageId, limit, offset)
-    const readState = db.prepare('SELECT session_id, read_at FROM read_state WHERE message_id = ? ORDER BY read_at DESC').all(messageId)
+    const readStateTotal = Number(db.prepare('SELECT COUNT(*) AS n FROM read_state WHERE message_id = ?').get(messageId)?.n ?? 0)
+    const readStateLatest = db.prepare('SELECT read_at FROM read_state WHERE message_id = ?'
+      + ' ORDER BY read_at DESC, session_id ASC LIMIT 1').get(messageId)
+    const readState = db.prepare('SELECT session_id, read_at FROM read_state WHERE message_id = ?'
+      + ' ORDER BY read_at DESC, session_id ASC LIMIT ? OFFSET ?')
+      .all(messageId, readStateBounds.limit, readStateBounds.offset)
+    const envelopesTotal = Number(db.prepare('SELECT COUNT(*) AS n FROM envelope_state WHERE message_id = ?').get(messageId)?.n ?? 0)
     const envelopes = db.prepare('SELECT to_session, delivered_at, consumed_at FROM envelope_state WHERE message_id = ?'
-      + ' ORDER BY delivered_at ASC').all(messageId)
+      + ' ORDER BY delivered_at ASC, to_session ASC LIMIT ? OFFSET ?')
+      .all(messageId, envelopeBounds.limit, envelopeBounds.offset)
     // Only routes that actually resolve this message's target session belong in
     // the audit; the full alias table is exposed by message_routes instead of
     // dumping up to 200 unrelated global routes into one message's audit.
@@ -707,11 +753,13 @@ function readMessageAudit(store, rawArgs) {
     const scopedRoutes = routes.map(route => ({
       alias: route.alias, sessionId: route.session_id, displayName: route.display_name,
     }))
+    const readStateHasMore = readStateBounds.offset + readState.length < readStateTotal
+    const envelopesHasMore = envelopeBounds.offset + envelopes.length < envelopesTotal
     return {
       ok: true,
       message: {
         id: row.id, toSession: row.to_session, subject: row.subject, at: row.at,
-        bytes: row.bytes, sha256: row.sha256, readAt: readState[0]?.read_at ?? null,
+        bytes: row.bytes, sha256: row.sha256, readAt: readStateLatest?.read_at ?? null,
       },
       deliveries: deliveries.map(delivery => ({
         id: String(delivery.id), at: delivery.at, toSession: delivery.to_session,
@@ -726,9 +774,27 @@ function readMessageAudit(store, rawArgs) {
         successorSessionId: delivery.successor_session_id ?? null,
       })),
       readState: readState.map(entry => ({ sessionId: entry.session_id, readAt: entry.read_at })),
+      readStateTotal,
+      readStateLimit: readStateBounds.limit,
+      readStateOffset: readStateBounds.offset,
+      readStateHasMore,
+      readStateTruncated: readStateHasMore,
+      readStatePage: {
+        returned: readState.length, total: readStateTotal,
+        limit: readStateBounds.limit, offset: readStateBounds.offset, hasMore: readStateHasMore,
+      },
       envelopes: envelopes.map(envelope => ({
         toSession: envelope.to_session, deliveredAt: envelope.delivered_at, consumedAt: envelope.consumed_at,
       })),
+      envelopesTotal,
+      envelopesLimit: envelopeBounds.limit,
+      envelopesOffset: envelopeBounds.offset,
+      envelopesHasMore,
+      envelopesTruncated: envelopesHasMore,
+      envelopesPage: {
+        returned: envelopes.length, total: envelopesTotal,
+        limit: envelopeBounds.limit, offset: envelopeBounds.offset, hasMore: envelopesHasMore,
+      },
       routes: scopedRoutes,
       routesScope: scopedRoutes.length === 0 ? 'none' : 'session',
       total, limit, offset,
@@ -848,6 +914,8 @@ function normalizeConfig(config) {
   const webUi = merged.webUi !== null && typeof merged.webUi === 'object' ? merged.webUi : {}
   return {
     enabled: merged.enabled !== false,
+    maxBodyChars: Math.max(1, Math.trunc(num(merged.maxBodyChars, 100000))),
+    notFoundPolicy: merged.notFoundPolicy === 'queue' ? 'queue' : 'reject',
     strictMode: merged.strictMode !== false,
     crossPermissionGuard: merged.crossPermissionGuard !== false,
     autoResume: merged.autoResume !== false,
@@ -1147,7 +1215,7 @@ export function apply(ctx, config) {
     'resume-failed': 'auto-resume did not deliver; queued for retry',
     'resume-no-preset': 'target has no resolvable agent preset; cannot auto-resume',
     'recipient-archived': 'target session is archived; unarchive and resume to deliver',
-    'session-not-found': 'recipient session does not exist; message is retained for audit in Phase A',
+    'session-not-found': 'recipient session does not exist; message was not stored (pass queueUndeliverable:true to retain it)',
     'session-unreadable': 'recipient session store is unreadable or unsupported',
     'target-unknown': 'target state is unknown (no reliable persistence/agent source)',
   }
@@ -1456,6 +1524,10 @@ export function apply(ctx, config) {
     if (to === '') throw new Error('to/session is required')
     const body = typeof args.body === 'string' ? args.body : ''
     if (body.trim().length === 0) throw new Error('body must not be empty')
+    if (body.length > cfg.maxBodyChars) {
+      throw codedError('INVALID_ARGUMENT', 'message body is ' + body.length + ' characters; maxBodyChars is '
+        + cfg.maxBodyChars + ' (config). The message was not stored or queued; no silent truncation.')
+    }
     if (cfg.strictMode && sandboxModeOf(exec) !== 'danger-full-access' && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
     const target = resolveTarget(to, { allowInactive: true })
     // Q2-A: classify BEFORE dedupe so a suppressed duplicate cannot hide an
@@ -1485,6 +1557,22 @@ export function apply(ctx, config) {
     const wakeSelf = args.wakeSelf === true
     const projectScope = typeof args.projectScope === 'string' && args.projectScope.trim() !== ''
       ? args.projectScope.trim() : null
+
+    // Q2-B not-found policy. Default 'reject': a target that provably does not
+    // exist has no auto-retry path, so storing it only grows a dead queue. The
+    // legacy Phase-A store+queue path remains available via config
+    // notFoundPolicy:'queue' or the per-call queueUndeliverable:true escape.
+    const queueUndeliverable = args.queueUndeliverable === true
+    if (targetStateAtSend === 'not-found' && cfg.notFoundPolicy !== 'queue' && !queueUndeliverable) {
+      return {
+        ok: false, code: 'SESSION_NOT_FOUND',
+        accepted: false, stored: false, delivered: false, queued: false,
+        targetState: 'not-found', deliveryState: 'undeliverable',
+        notDeliverable: true, retryable: false,
+        reasonCode: 'session-not-found', reason: reasonText('session-not-found'),
+        session: target.sessionId, subject, bodySha256: sha, route,
+      }
+    }
 
     const duplicate = force ? undefined : store.findDuplicate({
       toSession: target.sessionId, fromSession: caller.sessionId,
@@ -1521,8 +1609,8 @@ export function apply(ctx, config) {
         reasonCode = 'recipient-archived'
         retryable = true
       } else if (targetStateAtSend === 'not-found') {
-        // Phase A: keep the legacy accept+store behaviour, but label it
-        // undeliverable so callers never have to parse wakeError.
+        // Escaped Phase-A compatibility: store + queue the undeliverable row
+        // (config notFoundPolicy:'queue' or queueUndeliverable:true).
         wakeError = 'session-not-found'
         deliveryState = 'undeliverable'
         reasonCode = 'session-not-found'
@@ -1569,7 +1657,8 @@ export function apply(ctx, config) {
         error: 'not delivered yet: ' + String(wakeError ?? reasonCode ?? 'not-live') + '; message stays queued',
       })
       return {
-        ok: true, accepted: true, delivered: false, stored: true, queued: true,
+        ok: true, accepted: true, delivered: false, stored: true,
+        queued: resolvedTargetState === 'not-found' ? false : true,
         wakeError: wakeError ?? 'not-live',
         targetState: resolvedTargetState, deliveryState,
         notDeliverable: deliveryState === 'undeliverable', retryable,
@@ -1649,9 +1738,10 @@ export function apply(ctx, config) {
       properties: {
         to: { type: 'string', description: 'Recipient: session-<uuid> or registered alias.' },
         session: { type: 'string', description: 'Legacy alias for to.' },
-        body: { type: 'string', description: 'Message body (1..100000 characters).' },
+        body: { type: 'string', description: 'Message body (1..maxBodyChars characters, default 100000; over-limit bodies are rejected with INVALID_ARGUMENT, never truncated).' },
         subject: { type: 'string', description: 'Optional subject line.' },
         from: { type: 'string', description: 'Optional sender label override (audit keeps the real caller).' },
+        queueUndeliverable: { type: 'boolean', description: 'Q2-B escape hatch: when the target session does not exist, store+queue the message instead of rejecting it (default false; config notFoundPolicy:"queue" does the same globally).' },
         dedupeKey: { type: 'string', description: 'Optional idempotency key; same key within dedupeWindowMs is suppressed.' },
         force: { type: 'boolean', description: 'Bypass dedupe.' },
         nonce: { type: 'string', description: 'Optional uniqueness suffix for the message id.' },
@@ -1971,6 +2061,8 @@ export function apply(ctx, config) {
         resumedCount: resumedHandles.size,
         autoResumeRateLimitPerMinute: cfg.autoResumeRateLimitPerMinute,
         resumeModel: cfg.resumeModel,
+        maxBodyChars: cfg.maxBodyChars,
+        notFoundPolicy: cfg.notFoundPolicy,
         dbPath: cfg.dbPath,
         database: { ...facts, ...(hostDb ?? {}), ...(dbError === null ? {} : { error: dbError }) },
         transport,
