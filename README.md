@@ -4,7 +4,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 一次安装，为 DeepSeek Harness 增加 11 个可独立启用的插件。
 
-> Version: 2026.11.17-1 (dev) · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-1 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -34,7 +34,7 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 ### Install from GitHub
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#dev
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 ```
 
 The package is self-contained: all eleven runtime plugins live under `vendor/`; no npm publish is required.
@@ -111,7 +111,7 @@ MIT © 2026 wndd5603
 ### 从 GitHub 安装
 
 ```sh
-dsh plugin --profile web add github:wndd5603/dsh-util-plugs#dev
+dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 ```
 
 安装包自带全部运行代码（11 个插件位于 `vendor/`），无需先发布 npm。
