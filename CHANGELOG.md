@@ -1,3 +1,11 @@
+## 2026.11.17-1 (dev)
+
+- **Agent Hub reliability**: panel/slot stays registered without an active conversation; the apartment remote is resolved lazily with scope.get, so an unmounted apartment no longer removes the whole entry.
+- **Delivery policy**: targetState/deliveryState/reasonCode/route, maxBodyChars 100000, notFoundPolicy default reject, queue/audit paging and undelivered filters.
+- **Task/meeting/apartment safety**: bulletin owner/CAS/pagination and full overview counts; meeting participant/convener checks, legacy claim, finalize CAS and cross-process sidecar lock; migrate/restore restart gate and root validation.
+- **Web UI**: meeting detail load-more, read-only Web receipts, README demo GIFs.
+- **Clean-profile E2E**: dsh e2e-ui2 profile-selection and install freshness verified.
+
 ## 2026.11.16-4 (dev)
 
 - **Removed `local-worker` row/tools**: local models now use DSH's own provider selection (`llm-pi-ai` Local Ollama) with `subagent` or a new session; no separate worker plugin. Bundle is 11 rows.
