@@ -2017,7 +2017,12 @@ function apply(ctx) {
     await owner.remote.$mount(createRemoteContribution())
   })
   ctx.inject(['remote.messageBus'], scope => {
-    const apartmentRemote = scope.remote?.agentApartment
+    // `remote.agentApartment` is not in this scope's inject set: a direct
+    // property access throws "cannot get property ... without inject" inside
+    // the Cordis Context get trap. Read lazily via ctx.get() (no inject
+    // requirement) at each call so a late-mounted apartment Remote is picked
+    // up and its absence degrades to undefined instead of aborting apply().
+    const apartmentRemote = () => scope.get('remote.agentApartment')
     const t = scope.locale.bind(LOCALE_NS)
     const api = {
       list: (keyword, limit, offset, readBy) => scope.remote.messageBus.list(keyword, limit, offset, readBy),
@@ -2025,13 +2030,13 @@ function apply(ctx) {
       get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
       delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
       send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
-      apartmentStatus: () => apartmentRemote?.status?.(),
-      apartmentData: query => apartmentRemote?.data?.(query),
-      apartmentSetRoot: root => apartmentRemote?.setRoot?.(root),
-      apartmentMigrate: to => apartmentRemote?.migrate?.(to),
-      apartmentBackup: label => apartmentRemote?.backup?.(label),
-      apartmentRestore: from => apartmentRemote?.restore?.(from),
-      apartmentVerify: () => apartmentRemote?.verify?.(),
+      apartmentStatus: () => apartmentRemote()?.status?.(),
+      apartmentData: query => apartmentRemote()?.data?.(query),
+      apartmentSetRoot: root => apartmentRemote()?.setRoot?.(root),
+      apartmentMigrate: to => apartmentRemote()?.migrate?.(to),
+      apartmentBackup: label => apartmentRemote()?.backup?.(label),
+      apartmentRestore: from => apartmentRemote()?.restore?.(from),
+      apartmentVerify: () => apartmentRemote()?.verify?.(),
       tasksPage: query => scope.remote.messageBus.tasksPage(query),
       taskDetail: query => scope.remote.messageBus.taskDetail(query),
       memoryPage: query => scope.remote.messageBus.memoryPage(query),
