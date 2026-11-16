@@ -45,7 +45,12 @@ export function createDshProviderClient({ llm, agentDefaultModel, rawConfig = {}
       })
       const streamOptions = {
         ...prepared.config,
-        messages: messages.map(message => ({ role: message.role, content: message.content })),
+        messages: messages.map(message => ({
+          role: message.role,
+          content: typeof message.content === 'string'
+            ? [{ type: 'text', text: message.content }]
+            : message.content,
+        })),
         maxTokens,
         temperature: 0,
         signal: options.signal,
