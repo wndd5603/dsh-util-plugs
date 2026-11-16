@@ -246,6 +246,11 @@ const zh = {
   related: '关联',
   priorityLabel: '优先级',
   blockedReason: '阻塞原因',
+  taskSearch: '搜索任务（id / 标题 / 负责人 / 依赖）',
+  pageInfo: '第 {page} / {pages} 页 · 共 {total} 项',
+  pageSizeLabel: '每页',
+  prevPage: '上一页',
+  nextPage: '下一页',
   networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建。',
   apartmentTitle: '智能体公寓 / 存储',
   apartmentSubtitle: '集中管理 Agent 主目录、租约、备份与根目录迁移。',
@@ -330,6 +335,11 @@ const en = {
   related: 'Related',
   priorityLabel: 'Priority',
   blockedReason: 'Blocked reason',
+  taskSearch: 'Search tasks (id / title / assignee / dependency)',
+  pageInfo: 'Page {page} / {pages} · {total} items',
+  pageSizeLabel: 'Per page',
+  prevPage: 'Previous',
+  nextPage: 'Next',
   networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
   apartmentTitle: 'Agent Apartment / storage',
   apartmentSubtitle: 'Central agent homes, leases, backups and root migration.',
@@ -663,11 +673,24 @@ function NetworkSection(props) {
   const [selectedBoardId, setSelectedBoardId] = React.useState(boards[0]?.id)
   const [statusFilter, setStatusFilter] = React.useState('all')
   const [selectedTaskId, setSelectedTaskId] = React.useState(undefined)
+  const [taskQuery, setTaskQuery] = React.useState('')
+  const [taskPage, setTaskPage] = React.useState(0)
+  const taskPageSize = 20
   const activeBoard = boards.find(board => board.id === selectedBoardId) ?? boards[0]
   const boardTasks = activeBoard === undefined ? [] : tasks.filter(task => (task.boardId ?? task.board_id) === activeBoard.id)
-  const visibleTasks = statusFilter === 'all' ? boardTasks : boardTasks.filter(task => task.status === statusFilter)
-  const selectedTask = visibleTasks.find(task => task.id === selectedTaskId)
-  const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined) }
+  const normalizedQuery = taskQuery.trim().toLowerCase()
+  const filteredTasks = boardTasks.filter(task => {
+    if (statusFilter !== 'all' && task.status !== statusFilter) return false
+    if (normalizedQuery === '') return true
+    return [task.id, task.title, task.assigneeAlias, task.assigneeSession, task.status,
+      ...(Array.isArray(task.dependsOn) ? task.dependsOn : []), ...(Array.isArray(task.relatedTasks) ? task.relatedTasks : [])]
+      .filter(value => typeof value === 'string').some(value => value.toLowerCase().includes(normalizedQuery))
+  })
+  const taskPageCount = Math.max(1, Math.ceil(filteredTasks.length / taskPageSize))
+  const safeTaskPage = Math.min(taskPage, taskPageCount - 1)
+  const pageTasks = filteredTasks.slice(safeTaskPage * taskPageSize, safeTaskPage * taskPageSize + taskPageSize)
+  const selectedTask = pageTasks.find(task => task.id === selectedTaskId)
+  const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined); setTaskPage(0) }
 
   const boardGrid = panel('div', { className: 'mb-boardGrid' }, boards.slice(0, 8).map(board => {
     const active = activeBoard?.id === board.id
@@ -692,12 +715,12 @@ function NetworkSection(props) {
     type: 'button',
     className: 'mb-chipButton',
     'data-active': statusFilter === status ? 'true' : 'false',
-    onClick: () => setStatusFilter(status),
+    onClick: () => { setStatusFilter(status); setTaskPage(0) },
   }, status === 'all' ? t('allTasks') : status, ' ', String(status === 'all' ? boardTasks.length : boardTasks.filter(task => task.status === status).length))))
 
-  const taskList = visibleTasks.length === 0
+  const taskList = pageTasks.length === 0
     ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('noTasks'))
-    : panel('div', { className: 'mb-taskList' }, visibleTasks.map(task => panel('button', {
+    : panel('div', { className: 'mb-taskList' }, pageTasks.map(task => panel('button', {
       key: task.id,
       type: 'button',
       className: 'mb-task',
@@ -725,7 +748,23 @@ function NetworkSection(props) {
 
   const taskPanel = activeBoard === undefined ? null : panel('div', { style: { marginTop: 12 } },
     panel('div', { className: 'mb-cardSub', style: { marginBottom: 4 } }, `${t('boardTasks')} · ${activeBoard.title}`),
-    taskChips, taskList, taskDetail)
+    panel('input', {
+      type: 'search',
+      value: taskQuery,
+      placeholder: t('taskSearch'),
+      className: 'mb-inlineInput',
+      'aria-label': t('taskSearch'),
+      'data-task-search': '',
+      onChange: event => { setTaskQuery(event.target.value); setTaskPage(0); setSelectedTaskId(undefined) },
+    }),
+    taskChips, taskList,
+    panel('div', { className: 'mb-actionRow', style: { justifyContent: 'space-between' } },
+      panel('span', { className: 'mb-muted', 'data-task-page': String(safeTaskPage + 1) },
+        t('pageInfo', { page: safeTaskPage + 1, pages: taskPageCount, total: filteredTasks.length })),
+      panel('div', { style: { display: 'flex', gap: 6 } },
+        panel('button', { type: 'button', className: 'mb-chipButton', disabled: safeTaskPage <= 0, onClick: () => setTaskPage(Math.max(0, safeTaskPage - 1)) }, t('prevPage')),
+        panel('button', { type: 'button', className: 'mb-chipButton', disabled: safeTaskPage >= taskPageCount - 1, onClick: () => setTaskPage(Math.min(taskPageCount - 1, safeTaskPage + 1)) }, t('nextPage')))),
+    taskDetail)
 
   const content = boards.length === 0
     ? panel('p', { className: 'mb-muted' }, t('networkEmpty'))
