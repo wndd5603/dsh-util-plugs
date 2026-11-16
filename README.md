@@ -6,6 +6,14 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Version: 2026.11.16-4 (dev) · Not yet published on npm; install from GitHub.
 
+## 演示 / Demos
+
+![协作网络 / Collaboration network](docs/demo/collaboration.gif)
+
+![插件控制台 / Plugin console](docs/demo/plugin-console.gif)
+
+Clean-profile recordings with synthetic data; no live credentials or private project data. See [docs/demo/README.md](docs/demo/README.md) to regenerate.
+
 ## English
 
 ### What it adds
