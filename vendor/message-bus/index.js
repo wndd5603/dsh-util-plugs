@@ -41,6 +41,9 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'get', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'delete', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'send', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'tasksPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
 ])
 
 /**
@@ -137,6 +140,12 @@ export function isPriorityMessage(subject, body) {
 function dshHomeDir() {
   return process.env.DSH_HOME && process.env.DSH_HOME.length > 0 ? process.env.DSH_HOME : join(homedir(), '.dsh')
 }
+const safeJsonArray = value => {
+  try { const parsed = JSON.parse(value ?? '[]'); return Array.isArray(parsed) ? parsed : [] } catch { return [] }
+}
+const safeJsonObject = value => {
+  try { const parsed = JSON.parse(value ?? '{}'); return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {} } catch { return {} }
+}
 
 /** Read-only Agent Network snapshots so the panel works even if auxiliary Remotes mount late. */
 function readAgentNetworkSnapshot() {
@@ -146,10 +155,15 @@ function readAgentNetworkSnapshot() {
   try {
     db = new DatabaseSync(dbPath, { readOnly: true })
     const boards = db.prepare('SELECT * FROM boards ORDER BY updated_at DESC').all().map(row => ({
-      id: row.id, title: row.title, workspace: row.workspace, status: row.status,
-      priority: row.priority, updatedAt: row.updated_at,
+      id: row.id, title: row.title, description: row.description, workspace: row.workspace,
+      status: row.status, priority: row.priority, labels: safeJsonArray(row.labels), updatedAt: row.updated_at,
     }))
-    const tasks = db.prepare('SELECT id, board_id, title, status, assignee_alias, workspace, priority FROM tasks ORDER BY updated_at DESC').all()
+    const tasks = db.prepare('SELECT * FROM tasks ORDER BY priority DESC, updated_at DESC').all().map(row => ({
+      id: row.id, boardId: row.board_id, title: row.title, description: row.description, status: row.status,
+      assigneeSession: row.assignee_session, assigneeAlias: row.assignee_alias, workspace: row.workspace,
+      priority: row.priority, dependsOn: safeJsonArray(row.depends_on), relatedTasks: safeJsonArray(row.related_tasks),
+      blockedReason: row.blocked_reason, metadata: safeJsonObject(row.metadata), updatedAt: row.updated_at,
+    }))
     const counts = {}
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1
     return { boards, tasks, counts }
@@ -187,6 +201,174 @@ function readApartmentSnapshot() {
     return { root, agents: 0, teams: 0, leases: 0, taskRoles: 0, experiences: 0 }
   } finally {
     try { db?.close() } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Read-only Agent Network pages (task board + memory) for the Web console.
+ * They read sibling plugin databases under $DSH_HOME and never take the
+ * message-bus store lock; the board/memory rows stay owned by their packages.
+ */
+const BULLETIN_STATUSES = Object.freeze(['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated'])
+
+function emptyTaskCounts() {
+  return Object.fromEntries(BULLETIN_STATUSES.map(status => [status, 0]))
+}
+
+/** Escape LIKE wildcards so user input matches literally (ESCAPE '\'). */
+function likePattern(text) {
+  return '%' + String(text).replace(/[\\%_]/g, character => '\\' + character) + '%'
+}
+
+function pageBoundsOf(args) {
+  const number = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback)
+  return {
+    limit: Math.max(1, Math.min(100, Math.trunc(number(args?.limit, 20)))),
+    offset: Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(number(args?.offset, 0)))),
+  }
+}
+
+function textFilterOf(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function openSnapshotDb(path) {
+  return existsSync(path) ? new DatabaseSync(path, { readOnly: true }) : null
+}
+
+function closeSnapshotDb(db) {
+  try { db?.close() } catch { /* ignore */ }
+}
+
+function taskPageRow(row) {
+  return {
+    id: row.id,
+    boardId: row.board_id,
+    title: row.title,
+    status: row.status,
+    assigneeAlias: row.assignee_alias,
+    assigneeSession: row.assignee_session,
+    workspace: row.workspace,
+    priority: row.priority,
+    dependsOn: safeJsonArray(row.depends_on),
+    relatedTasks: safeJsonArray(row.related_tasks),
+    blockedReason: row.blocked_reason,
+    updatedAt: row.updated_at,
+  }
+}
+
+function emptyTasksPage(offset, limit) {
+  return { tasks: [], total: 0, counts: emptyTaskCounts(), offset, limit }
+}
+
+function readTasksPage(rawArgs) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : {}
+  const { limit, offset } = pageBoundsOf(args)
+  const boardId = textFilterOf(args.boardId)
+  const status = textFilterOf(args.status)
+  const assignee = textFilterOf(args.assignee)
+  const workspace = textFilterOf(args.workspace)
+  const query = typeof args.query === 'string' ? args.query.trim().slice(0, 200) : ''
+  const where = []
+  const values = []
+  if (boardId !== null) { where.push('board_id = ?'); values.push(boardId) }
+  if (status !== null) { where.push('status = ?'); values.push(status) }
+  if (workspace !== null) { where.push('workspace = ?'); values.push(workspace) }
+  if (assignee !== null) {
+    where.push('(assignee_alias = ? OR assignee_session = ?)')
+    values.push(assignee, assignee)
+  }
+  if (query !== '') {
+    const like = likePattern(query)
+    where.push("(id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR assignee_alias LIKE ? ESCAPE '\\'"
+      + " OR assignee_session LIKE ? ESCAPE '\\' OR depends_on LIKE ? ESCAPE '\\' OR related_tasks LIKE ? ESCAPE '\\')")
+    values.push(like, like, like, like, like, like)
+  }
+  const whereSql = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
+  const db = openSnapshotDb(join(dshHomeDir(), 'bulletin-board', 'board.sqlite'))
+  if (db === null) return emptyTasksPage(offset, limit)
+  try {
+    const total = Number(db.prepare('SELECT COUNT(*) AS n FROM tasks' + whereSql).get(...values)?.n ?? 0)
+    const rows = db.prepare('SELECT * FROM tasks' + whereSql
+      + ' ORDER BY priority DESC, updated_at DESC LIMIT ? OFFSET ?').all(...values, limit, offset)
+    const counts = emptyTaskCounts()
+    for (const row of db.prepare('SELECT status, COUNT(*) AS n FROM tasks' + whereSql + ' GROUP BY status').all(...values)) {
+      counts[row.status] = Number(row.n)
+    }
+    return { tasks: rows.map(taskPageRow), total, counts, offset, limit }
+  } catch {
+    return emptyTasksPage(offset, limit)
+  } finally {
+    closeSnapshotDb(db)
+  }
+}
+
+function memoryPageRow(row) {
+  return {
+    id: row.id,
+    scope: row.scope,
+    key: row.key,
+    content: row.content,
+    tags: safeJsonArray(row.tags),
+    source_session: row.source_session,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
+
+function emptyMemoriesPage(offset, limit) {
+  return { memories: [], total: 0, scopes: [], offset, limit }
+}
+
+function readMemoryPage(rawArgs) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : {}
+  const { limit, offset } = pageBoundsOf(args)
+  const query = typeof args.query === 'string' ? args.query.trim().slice(0, 200) : ''
+  const scope = textFilterOf(args.scope)
+  const where = []
+  const values = []
+  if (scope !== null) { where.push('scope = ?'); values.push(scope) }
+  if (query !== '') {
+    const like = likePattern(query)
+    where.push("(content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')")
+    values.push(like, like, like)
+  }
+  const whereSql = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
+  const db = openSnapshotDb(join(dshHomeDir(), 'memory', 'memory.sqlite'))
+  if (db === null) return emptyMemoriesPage(offset, limit)
+  try {
+    const total = Number(db.prepare('SELECT COUNT(*) AS n FROM memories' + whereSql).get(...values)?.n ?? 0)
+    const rows = db.prepare('SELECT * FROM memories' + whereSql
+      + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?').all(...values, limit, offset)
+    const scopes = db.prepare('SELECT scope, COUNT(*) AS n FROM memories GROUP BY scope ORDER BY scope')
+      .all().map(row => ({ scope: row.scope, count: Number(row.n) }))
+    return { memories: rows.map(memoryPageRow), total, scopes, offset, limit }
+  } catch {
+    return emptyMemoriesPage(offset, limit)
+  } finally {
+    closeSnapshotDb(db)
+  }
+}
+
+/** Delete exactly one memory row; the explicit confirm token is mandatory. */
+function forgetMemory(rawArgs) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : { id: rawArgs }
+  if (args.confirm !== 'DELETE') return { ok: false, error: 'memoryForget requires confirm:"DELETE"' }
+  const id = typeof args.id === 'string' ? args.id.trim() : ''
+  if (id === '') return { ok: false, error: 'id is required' }
+  const path = join(dshHomeDir(), 'memory', 'memory.sqlite')
+  if (!existsSync(path)) return { ok: false, gone: true, error: 'memory database not found' }
+  let db
+  try {
+    db = new DatabaseSync(path)
+    db.exec('PRAGMA busy_timeout = 5000')
+    const result = db.prepare('DELETE FROM memories WHERE id=?').run(id)
+    if (Number(result.changes) === 0) return { ok: false, gone: true, deleted: false, error: 'memory not found' }
+    return { ok: true, deleted: true, id }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) }
+  } finally {
+    closeSnapshotDb(db)
   }
 }
 
@@ -1280,6 +1462,9 @@ export function apply(ctx, config) {
       get(messageId, readBy, markRead) { return remoteGet(messageId, readBy, markRead) }
       delete(messageId, confirm) { return remoteDeleteTask(messageId, confirm) }
       send(to, subject, body, from) { return remoteSendTask(to, subject, body, from) }
+      tasksPage(query) { return readTasksPage(query) }
+      memoryPage(query) { return readMemoryPage(query) }
+      memoryForget(query) { return forgetMemory(query) }
     }
     Object.defineProperty(MessageBusWebRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
       configurable: true,

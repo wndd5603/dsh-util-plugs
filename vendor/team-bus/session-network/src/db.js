@@ -14,7 +14,8 @@
  *   label computed at write time. This reconciles DESIGN §2 with INTERFACES §2
  *   (`recordHeartbeat(sessionId, at)` / `listStaleSessions(now, bucketMs)`).
  * - Extra (non-breaking) exports: `tx`, `dbStats`, `integrityCheck`,
- *   `tableCounts`, `listMeetings`, `addMeetingParticipant`, `dbPathFor`.
+ *   `tableCounts`, `listMeetings`, `getMeeting`, `listMeetingParticipants`,
+ *   `addMeetingParticipant`, `dbPathFor`.
  * - `openDb` accepts optional `{ bus yTimeoutMs, shared, create }` used by the
  *   CLI/tests; contract defaults are unchanged (`readonly=false`, timeout 5000).
  */
@@ -1050,6 +1051,14 @@ export function addMeetingMessage({ meetingId, msgId, fromAlias = null, toAlias 
 
 export function listMeetingMessages(meetingId) {
   return all(openSharedRequired(), 'SELECT * FROM messages WHERE meeting_id = ? ORDER BY at ASC, msg_id ASC', [String(meetingId)])
+}
+
+export function getMeeting(meetingId) {
+  return get(openSharedRequired(), 'SELECT * FROM meetings WHERE meeting_id = ?', [String(meetingId)])
+}
+
+export function listMeetingParticipants(meetingId) {
+  return all(openSharedRequired(), 'SELECT * FROM meeting_participants WHERE meeting_id = ? ORDER BY rowid ASC', [String(meetingId)])
 }
 
 export function listMeetings() {

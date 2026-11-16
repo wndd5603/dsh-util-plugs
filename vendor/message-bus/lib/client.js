@@ -107,6 +107,15 @@ function createRemoteContribution() {
         parameters: [jsonParameter('query')],
         result: identityCodec('dsh-message-bus#messageBus/memoryForget:result'),
       },
+      {
+        id: 'dsh-message-bus/messageBus/meetingsPage',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'meetingsPage',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/meetingsPage:result'),
+      },
     ],
   }
 }
@@ -299,6 +308,13 @@ const zh = {
   memoryFailed: '记忆操作失败：{error}',
   memoryTotal: '共 {total} 条',
   memoryScopeAll: '全部 scope',
+  meetingsTitle: '会议',
+  meetingsSubtitle: '多轮会议记录、参与者和行动项；由 meeting_* 工具创建与推进。',
+  meetingsSearch: '搜索会议（id / 标题 / 召集人）',
+  meetingsEmpty: '暂无会议。',
+  meetingParticipants: '参与者',
+  meetingMessages: '消息',
+  meetingStatus: '状态',
   working: '处理中…',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
@@ -399,6 +415,13 @@ const en = {
   memoryFailed: 'Memory operation failed: {error}',
   memoryTotal: '{total} entries',
   memoryScopeAll: 'All scopes',
+  meetingsTitle: 'Meetings',
+  meetingsSubtitle: 'Multi-round meetings, participants and action items; use meeting_* tools to create/advance.',
+  meetingsSearch: 'Search meetings (id / title / convener)',
+  meetingsEmpty: 'No meetings yet.',
+  meetingParticipants: 'Participants',
+  meetingMessages: 'Messages',
+  meetingStatus: 'Status',
   working: 'Working…',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',
@@ -714,7 +737,7 @@ function createApartmentRemoteContribution() {
 }
 
 function NetworkSection(props) {
-  const { t, network } = props
+  const { t, network, api } = props
   const boards = Array.isArray(network.boards) ? network.boards : []
   const tasks = Array.isArray(network.tasks) ? network.tasks : []
   const counts = network.counts ?? {}
@@ -724,6 +747,8 @@ function NetworkSection(props) {
   const [selectedTaskId, setSelectedTaskId] = React.useState(undefined)
   const [taskQuery, setTaskQuery] = React.useState('')
   const [taskPage, setTaskPage] = React.useState(0)
+  const [serverPage, setServerPage] = React.useState(undefined)
+  const [taskLoading, setTaskLoading] = React.useState(false)
   const taskPageSize = 20
   const activeBoard = boards.find(board => board.id === selectedBoardId) ?? boards[0]
   const boardTasks = activeBoard === undefined ? [] : tasks.filter(task => (task.boardId ?? task.board_id) === activeBoard.id)
@@ -735,11 +760,34 @@ function NetworkSection(props) {
       ...(Array.isArray(task.dependsOn) ? task.dependsOn : []), ...(Array.isArray(task.relatedTasks) ? task.relatedTasks : [])]
       .filter(value => typeof value === 'string').some(value => value.toLowerCase().includes(normalizedQuery))
   })
-  const taskPageCount = Math.max(1, Math.ceil(filteredTasks.length / taskPageSize))
-  const safeTaskPage = Math.min(taskPage, taskPageCount - 1)
-  const pageTasks = filteredTasks.slice(safeTaskPage * taskPageSize, safeTaskPage * taskPageSize + taskPageSize)
-  const selectedTask = pageTasks.find(task => task.id === selectedTaskId)
-  const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined); setTaskPage(0) }
+  const localPageCount = Math.max(1, Math.ceil(filteredTasks.length / taskPageSize))
+  const safeTaskPage = Math.min(taskPage, localPageCount - 1)
+  const localPageTasks = filteredTasks.slice(safeTaskPage * taskPageSize, safeTaskPage * taskPageSize + taskPageSize)
+  const pageData = serverPage
+  const totalTasks = pageData?.total ?? filteredTasks.length
+  const taskPageCount = Math.max(1, Math.ceil(totalTasks / taskPageSize))
+  const pageTasks = Array.isArray(pageData?.tasks) ? pageData.tasks : localPageTasks
+  const selectedTask = pageTasks.find(task => task.id === selectedTaskId) ?? tasks.find(task => task.id === selectedTaskId)
+  const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined); setTaskPage(0); setServerPage(undefined) }
+
+  React.useEffect(() => {
+    if (activeBoard === undefined || typeof api?.tasksPage !== 'function') { setServerPage(undefined); return }
+    let cancelled = false
+    setTaskLoading(true)
+    setServerPage(undefined)
+    Promise.resolve(api.tasksPage({
+      boardId: activeBoard.id,
+      status: statusFilter === 'all' ? undefined : statusFilter,
+      query: taskQuery.trim(),
+      offset: taskPage * taskPageSize,
+      limit: taskPageSize,
+    })).then(result => {
+      if (cancelled) return
+      const value = result?.ok === true && result.value !== undefined ? result.value : result
+      if (value !== undefined && value !== null) setServerPage(value)
+    }).catch(() => { if (!cancelled) setServerPage(undefined) }).finally(() => { if (!cancelled) setTaskLoading(false) })
+    return () => { cancelled = true }
+  }, [api, activeBoard?.id, statusFilter, taskQuery, taskPage])
 
   const boardGrid = panel('div', { className: 'mb-boardGrid' }, boards.slice(0, 8).map(board => {
     const active = activeBoard?.id === board.id
@@ -809,7 +857,7 @@ function NetworkSection(props) {
     taskChips, taskList,
     panel('div', { className: 'mb-actionRow', style: { justifyContent: 'space-between' } },
       panel('span', { className: 'mb-muted', 'data-task-page': String(safeTaskPage + 1) },
-        t('pageInfo', { page: safeTaskPage + 1, pages: taskPageCount, total: filteredTasks.length })),
+        taskLoading ? t('working') : t('pageInfo', { page: safeTaskPage + 1, pages: taskPageCount, total: totalTasks })),
       panel('div', { style: { display: 'flex', gap: 6 } },
         panel('button', { type: 'button', className: 'mb-chipButton', disabled: safeTaskPage <= 0, onClick: () => setTaskPage(Math.max(0, safeTaskPage - 1)) }, t('prevPage')),
         panel('button', { type: 'button', className: 'mb-chipButton', disabled: safeTaskPage >= taskPageCount - 1, onClick: () => setTaskPage(Math.min(taskPageCount - 1, safeTaskPage + 1)) }, t('nextPage')))),
@@ -929,6 +977,47 @@ function MemorySection(props) {
     message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text))
 }
 
+function MeetingsSection(props) {
+  const { t, meetings, query, status, setQuery, setStatus, page, pageCount, busy, message, onSearch, onPage } = props
+  if (meetings === undefined || meetings === null) return null
+  const items = Array.isArray(meetings.meetings) ? meetings.meetings : []
+  return panel('section', { 'data-agent-meetings': '', className: 'mb-card' },
+    panel('div', { className: 'mb-cardHead' },
+      panel('div', null,
+        panel('h2', { className: 'mb-cardTitle' }, t('meetingsTitle')),
+        panel('p', { className: 'mb-cardSub' }, t('meetingsSubtitle'))),
+      panel('span', { className: 'mb-kicker' }, t('memoryTotal', { total: meetings.total ?? items.length }))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('input', {
+        type: 'search', value: query, placeholder: t('meetingsSearch'), className: 'mb-inlineInput',
+        'aria-label': t('meetingsSearch'), 'data-meeting-search': '',
+        onChange: event => setQuery(event.target.value),
+      }),
+      panel('select', {
+        value: status, className: 'mb-inlineInput', style: { flex: '0 1 150px' },
+        'aria-label': t('meetingStatus'), onChange: event => setStatus(event.target.value),
+      },
+      panel('option', { value: '' }, t('allTasks')),
+      ['open', 'r1', 'r2', 'final', 'cancelled'].map(state => panel('option', { key: state, value: state }, state)),
+      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: onSearch }, t('search'))),
+    items.length === 0
+      ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('meetingsEmpty'))
+      : panel('div', { className: 'mb-taskList' }, items.map(item => panel('article', { key: item.meetingId, className: 'mb-task' },
+        panel('div', { className: 'mb-taskTitle' },
+          panel('span', null, item.title || item.meetingId),
+          panel('span', { className: 'mb-pill', 'data-status': item.status }, item.status)),
+        panel('div', { className: 'mb-taskMeta' },
+          panel('span', null, item.meetingId),
+          panel('span', null, `${t('meetingParticipants')} ${item.participants ?? 0}`),
+          panel('span', null, `${t('meetingMessages')} ${item.messages ?? 0}`),
+          item.convener ? panel('span', null, item.convener) : null)))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('span', { className: 'mb-muted' }, t('pageInfo', { page: page + 1, pages: pageCount, total: meetings.total ?? items.length })),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: page <= 0, onClick: () => onPage(page - 1) }, t('prevPage')),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: page >= pageCount - 1, onClick: () => onPage(page + 1) }, t('nextPage'))),
+    message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text)))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -954,6 +1043,12 @@ function MessageCenterPage(props) {
   const [memoryBusy, setMemoryBusy] = React.useState(false)
   const [memoryMessage, setMemoryMessage] = React.useState(undefined)
   const [memoryDeleteId, setMemoryDeleteId] = React.useState(undefined)
+  const [meetings, setMeetings] = React.useState(undefined)
+  const [meetingQuery, setMeetingQuery] = React.useState('')
+  const [meetingStatus, setMeetingStatus] = React.useState('')
+  const [meetingPage, setMeetingPage] = React.useState(0)
+  const [meetingBusy, setMeetingBusy] = React.useState(false)
+  const [meetingMessage, setMeetingMessage] = React.useState(undefined)
   const [apartmentBusy, setApartmentBusy] = React.useState(false)
   const [apartmentMessage, setApartmentMessage] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
@@ -984,7 +1079,7 @@ function MessageCenterPage(props) {
       } else missing = true
     } catch { missing = true }
     if (missing && attempt < 6) setTimeout(() => { void loadAux(attempt + 1) }, 300)
-    if (!missing) void loadMemory()
+    if (!missing) { void loadMemory(); void loadMeetings() }
   }, [api])
 
   const loadMemory = React.useCallback(async (options = {}) => {
@@ -1007,6 +1102,28 @@ function MessageCenterPage(props) {
       setMemoryBusy(false)
     }
   }, [api, memoryBusy, memoryPage, memoryQuery, memoryScope, t])
+
+  const loadMeetings = React.useCallback(async (options = {}) => {
+    if (meetingBusy || typeof api.meetingsPage !== 'function') return
+    const page = Number.isInteger(options.page) ? options.page : meetingPage
+    setMeetingBusy(true)
+    setMeetingMessage(undefined)
+    try {
+      const result = await api.meetingsPage({
+        query: options.query ?? meetingQuery,
+        status: options.status ?? meetingStatus,
+        offset: page * 20,
+        limit: 20,
+      })
+      const value = result?.ok === true && result.value !== undefined ? result.value : result
+      setMeetings(value ?? { meetings: [], total: 0 })
+      setMeetingPage(page)
+    } catch (caught) {
+      setMeetingMessage({ text: t('memoryFailed', { error: errorTextOf(caught) }), tone: 'danger' })
+    } finally {
+      setMeetingBusy(false)
+    }
+  }, [api, meetingBusy, meetingPage, meetingQuery, meetingStatus, t])
 
   const load = React.useCallback(async (options = {}) => {
     const nextOffset = options.offset ?? offset
@@ -1185,6 +1302,7 @@ function MessageCenterPage(props) {
 
   const pages = pageCount(total, limit)
   const memoryPages = Math.max(1, Math.ceil((memory?.total ?? 0) / 20))
+  const meetingPages = Math.max(1, Math.ceil((meetings?.total ?? 0) / 20))
   const pageNumber = Math.floor(offset / limit) + 1
 
   return panel('div', { className: PAGE_CLASS, 'data-message-bus-page': '' },
@@ -1203,7 +1321,7 @@ function MessageCenterPage(props) {
       panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
         panel('button', { type: 'button', style: buttonStyle('default', loading), onClick: () => { void load({ offset }) }, disabled: loading }, loading ? t('loading') : t('refresh')))),
-    network === undefined ? null : panel(NetworkSection, { t, network }),
+    network === undefined ? null : panel(NetworkSection, { t, network, api }),
     panel(ApartmentSection, {
       t, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
       onSetRoot: () => { void apartmentAction('setRoot') },
@@ -1220,6 +1338,12 @@ function MessageCenterPage(props) {
       onAskDelete: id => setMemoryDeleteId(id),
       onCancelDelete: () => setMemoryDeleteId(undefined),
       onConfirmDelete: id => { void deleteMemory(id) },
+    }),
+    panel(MeetingsSection, {
+      t, meetings, query: meetingQuery, status: meetingStatus, setQuery: setMeetingQuery, setStatus: setMeetingStatus,
+      page: meetingPage, pageCount: meetingPages, busy: meetingBusy, message: meetingMessage,
+      onSearch: () => { void loadMeetings({ page: 0 }) },
+      onPage: next => { void loadMeetings({ page: Math.max(0, Math.min(meetingPages - 1, next)) }) },
     }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
@@ -1342,6 +1466,7 @@ function apply(ctx) {
         tasksPage: query => scope.remote.messageBus.tasksPage(query),
         memoryPage: query => scope.remote.messageBus.memoryPage(query),
         memoryForget: query => scope.remote.messageBus.memoryForget(query),
+        meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',

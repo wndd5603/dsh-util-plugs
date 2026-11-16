@@ -1,5 +1,5 @@
 /** Tool registration for dsh-session-network (P0/P1 skeleton; modules are injected lazily). */
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -254,6 +254,154 @@ function normalizePurpose(value) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
 }
 
+// ---------------------------------------------------------------------------
+// Meeting helpers (P1): finalize-payload parsing and generated ids.
+// ---------------------------------------------------------------------------
+
+/** Strip one Markdown list marker (`-`, `*`, `+`, `1.`, `1)`) from a line. */
+function parseMeetingListLine(line) {
+  const text = String(line ?? '').trim()
+  if (text === '') return null
+  const match = /^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/.exec(text)
+  return match === null ? null : match[1].trim()
+}
+
+/** Normalize decisions to `{id,text,owner?}` entries (never throws). */
+function normalizeDecisionEntries(list) {
+  const entries = Array.isArray(list) ? list : []
+  const out = []
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+    if (entry === null || entry === undefined) continue
+    if (typeof entry === 'string') {
+      const text = entry.trim()
+      if (text !== '') out.push({ id: `D${index + 1}`, text })
+      continue
+    }
+    if (typeof entry !== 'object' || Array.isArray(entry)) continue
+    const text = firstString(entry.text, entry.title, entry.description, entry.decision, entry.summary)
+    if (text === undefined) continue
+    const owner = firstString(entry.owner, entry.assignee)
+    out.push({ id: firstString(entry.id) ?? `D${index + 1}`, text, ...(owner === undefined ? {} : { owner }) })
+  }
+  return out
+}
+
+/** Normalize actions to `{id,text,owner,status}` entries (never throws). */
+function normalizeActionEntries(list) {
+  const entries = Array.isArray(list) ? list : []
+  const out = []
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+    if (entry === null || entry === undefined) continue
+    if (typeof entry === 'string') {
+      const text = entry.trim()
+      if (text !== '') out.push({ id: `A${index + 1}`, text, owner: null, status: 'pending' })
+      continue
+    }
+    if (typeof entry !== 'object' || Array.isArray(entry)) continue
+    const text = firstString(entry.text, entry.title, entry.description, entry.action)
+    if (text === undefined) continue
+    out.push({
+      id: firstString(entry.id) ?? `A${index + 1}`,
+      text,
+      owner: firstString(entry.owner, entry.assignee) ?? null,
+      status: firstString(entry.status) ?? 'pending',
+    })
+  }
+  return out
+}
+
+/**
+ * Parse the optional finalize `body`: JSON (`{decisions,actions,summary}` or an
+ * array of decisions) or Markdown sections (`## 决策` / `## 行动`). Plain text is
+ * recorded as one decision so a free-form minute is never lost.
+ */
+function meetingSectionOf(label) {
+  const normalized = String(label ?? '').replace(/^\*+|\*+$/g, '').trim().toLowerCase()
+  if (/^(decisions?|决策|决定|结论)$/.test(normalized)) return 'decisions'
+  if (/^(actions?|行动|待办|todo|下一步)$/.test(normalized)) return 'actions'
+  return null
+}
+
+function parseMeetingFinalBody(body) {
+  const text = typeof body === 'string' ? body.trim() : ''
+  if (text === '') return { decisions: [], actions: [], summaryText: null, parsed: false }
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text)
+      if (Array.isArray(parsed)) {
+        return { decisions: normalizeDecisionEntries(parsed), actions: [], summaryText: null, parsed: true }
+      }
+      if (parsed !== null && typeof parsed === 'object') {
+        const decisions = normalizeDecisionEntries(parsed.decisions ?? parsed.decision)
+        const actions = normalizeActionEntries(parsed.actions ?? parsed.action)
+        const summaryText = firstString(parsed.summary, parsed.text, parsed.note) ?? null
+        if (decisions.length > 0 || actions.length > 0 || summaryText !== null) {
+          return { decisions, actions, summaryText, parsed: true }
+        }
+      }
+    } catch {
+      // not JSON: fall through to Markdown/plain-text parsing
+    }
+  }
+  const decisions = []
+  const actions = []
+  const intro = []
+  let section = null
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(trimmed)
+    if (heading !== null) {
+      section = meetingSectionOf(heading[1])
+      continue
+    }
+    const listItem = parseMeetingListLine(trimmed)
+    const candidate = listItem ?? trimmed
+    const bareSection = meetingSectionOf(candidate.replace(/^\*+|\*+$/g, ''))
+    if (bareSection !== null) { section = bareSection; continue }
+    const label = /^(.{1,24}?)\s*[:：]\s*(.*)$/.exec(candidate)
+    if (label !== null) {
+      const sectionName = meetingSectionOf(label[1])
+      if (sectionName !== null) {
+        const inline = label[2].trim()
+        if (inline === '') { section = sectionName; continue }
+        if (sectionName === 'decisions') decisions.push(inline)
+        else actions.push(inline)
+        section = sectionName
+        continue
+      }
+    }
+    if (section === 'decisions') decisions.push(candidate)
+    else if (section === 'actions') actions.push(candidate)
+    else intro.push(candidate)
+  }
+  if (decisions.length === 0 && actions.length === 0) {
+    const fallback = intro.length > 0 ? intro.join('\n') : text
+    return { decisions: normalizeDecisionEntries([fallback]), actions: [], summaryText: null, parsed: false }
+  }
+  return {
+    decisions: normalizeDecisionEntries(decisions),
+    actions: normalizeActionEntries(actions),
+    summaryText: intro.length > 0 ? intro.join('\n') : null,
+    parsed: false,
+  }
+}
+
+/** Generated meeting id: `M-YYYYMMDD-HHMMSS-<6hex>` (caller may pass its own). */
+function generateMeetingId(now = new Date()) {
+  const iso = now.toISOString()
+  const stamp = iso.slice(0, 10).replace(/-/g, '') + '-' + iso.slice(11, 19).replace(/:/g, '')
+  return `M-${stamp}-${randomUUID().slice(0, 6)}`
+}
+
+/** Generated msgId keeps meeting/round/author visible for msgId-based dedupe. */
+function generateMeetingMsgId(meetingId, round, author) {
+  const slug = String(author ?? 'anon').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 16) || 'anon'
+  return `${meetingId}-${round}-${slug}-${randomUUID().slice(0, 8)}`
+}
+
 
 /** Pipe2-compatible reserved identity words (alias is a route key, never a generic identity). */
 export const ALIAS_RESERVED = new Set([
@@ -341,16 +489,17 @@ export function registerTools(ctx, deps) {
     if (!modules.db?.openDb || dataDir === null) return undefined
     if (dbState.handle === null) {
       // Read-only: network_info must not create the DB as a side effect (M1: no write side effects).
-      dbState.handle = safeCall(() => modules.db.openDb({ dataDir, readonly: true, create: false }), () => undefined)
+      // Do not cache a failed open: a later meeting_open may create the DB.
+      dbState.handle = safeCall(() => modules.db.openDb({ dataDir, readonly: true, create: false }), () => null)
     }
-    return dbState.handle
+    return dbState.handle ?? undefined
   }
   const ensureDbWritable = () => {
     if (!modules.db?.openDb || dataDir === null) return undefined
     if (dbWriteState.handle === null) {
-      dbWriteState.handle = safeCall(() => modules.db.openDb({ dataDir }), () => undefined)
+      dbWriteState.handle = safeCall(() => modules.db.openDb({ dataDir }), () => null)
     }
-    return dbWriteState.handle
+    return dbWriteState.handle ?? undefined
   }
   /** Run one registry write with the writable handle installed as the shared DB. */
   const withWriteDb = fn => {
@@ -363,6 +512,322 @@ export function registerTools(ctx, deps) {
       return { ok: false, error }
     }
   }
+  /** Run one registry read with the read-only handle installed as the shared DB. */
+  const withReadDb = fn => {
+    const handle = ensureDb()
+    if (handle === undefined) {
+      const error = new Error('registry database unavailable')
+      error.code = 'NO_DB'
+      return { ok: false, error }
+    }
+    try {
+      modules.db.useDb?.(handle)
+      return { ok: true, value: fn(handle) }
+    } catch (error) {
+      return { ok: false, error }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Meeting workflow (P1)
+  //
+  // Contract: `messages` stores only `body_sha256` / `body_len` (INTERFACES §2).
+  // Round + body + decisions/actions therefore live in a per-meeting JSON
+  // sidecar under `<dataDir>/meetings/`; SQLite stays authoritative for the
+  // meeting/participant/message registry and for `dedupe_key` uniqueness.
+  // -------------------------------------------------------------------------
+  const MEETING_ROUNDS = new Set(['R1', 'R2', 'R3', 'notes'])
+  const MEETING_ACK_STATES = new Set(['pending', 'ack', 'absent', 'unacked'])
+  const MEETING_STORE_DIR = dataDir === null || dataDir === ':memory:' ? null : join(dataDir, 'meetings')
+  const meetingStoreAvailable = () => MEETING_STORE_DIR !== null
+
+  function meetingStorePath(meetingId) {
+    if (MEETING_STORE_DIR === null) return null
+    const raw = String(meetingId)
+    const digest = createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 12)
+    const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '_').slice(0, 48) || 'meeting'
+    return join(MEETING_STORE_DIR, `${safe}-${digest}.json`)
+  }
+
+  function readMeetingStore(meetingId) {
+    const file = meetingStorePath(meetingId)
+    if (file === null || !existsSync(file)) return null
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'))
+      if (parsed === null || typeof parsed !== 'object') return null
+      if (!Array.isArray(parsed.posts)) parsed.posts = []
+      if (!Array.isArray(parsed.decisions)) parsed.decisions = []
+      if (!Array.isArray(parsed.actions)) parsed.actions = []
+      return parsed
+    } catch {
+      return null
+    }
+  }
+
+  function findMeetingStoreByDedupe(dedupeKey) {
+    if (MEETING_STORE_DIR === null || typeof dedupeKey !== 'string' || dedupeKey.trim() === '') return null
+    if (!existsSync(MEETING_STORE_DIR)) return null
+    let entries
+    try { entries = readdirSync(MEETING_STORE_DIR) } catch { return null }
+    for (const name of entries) {
+      if (!name.endsWith('.json')) continue
+      try {
+        const parsed = JSON.parse(readFileSync(join(MEETING_STORE_DIR, name), 'utf8'))
+        if (parsed !== null && typeof parsed === 'object' && parsed.dedupeKey === dedupeKey) return parsed
+      } catch {
+        // one corrupt sidecar must not hide the others
+      }
+    }
+    return null
+  }
+
+  function writeMeetingStore(store) {
+    const file = meetingStorePath(store.meetingId)
+    if (file === null) {
+      const error = new Error('meeting store unavailable (no dataDir)')
+      error.code = 'NO_DB'
+      throw error
+    }
+    mkdirSync(MEETING_STORE_DIR, { recursive: true })
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
+    writeFileSync(tmp, JSON.stringify(store, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
+    renameSync(tmp, file)
+    return file
+  }
+
+  function normalizeMeetingStatus(status) {
+    if (status === null || status === undefined) return null
+    return status === 'final' ? 'finalized' : String(status)
+  }
+
+  function toIsoTime(value) {
+    if (value === null || value === undefined) return null
+    if (typeof value === 'number') return Number.isFinite(value) ? new Date(value).toISOString() : null
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value)
+      return Number.isFinite(parsed) ? new Date(parsed).toISOString() : value
+    }
+    return null
+  }
+
+  /** `R1|R2|R3|notes` normalization; returns null for an invalid explicit value. */
+  function normalizeRound(value, fallback = null) {
+    if (value === null || value === undefined || value === '') return fallback
+    const raw = String(value).trim()
+    const canonical = raw.toLowerCase() === 'notes' ? 'notes' : raw.toUpperCase()
+    return MEETING_ROUNDS.has(canonical) ? canonical : null
+  }
+
+  function roundFromMsgId(msgId) {
+    const match = /-(R[123])-/i.exec(String(msgId ?? ''))
+    return match === null ? null : match[1].toUpperCase()
+  }
+
+  function resolveMeetingAuthor(exec) {
+    const agent = exec?.agent ?? {}
+    const session = agent?.session ?? {}
+    const header = session?.header ?? {}
+    return firstString(
+      agent?.alias, agent?.info?.alias, header?.alias,
+      agent?.displayName, agent?.info?.displayName, header?.displayName,
+      session?.id, agent?.id,
+    ) ?? '(unknown)'
+  }
+
+  function resolveMeetingWorkspace(exec) {
+    const agent = exec?.agent ?? {}
+    const session = agent?.session ?? {}
+    return firstString(session?.header?.cwd, session?.cwd, agent?.workspace?.cwd) ?? null
+  }
+
+  function normalizeParticipantEntries(participants) {
+    const list = Array.isArray(participants)
+      ? participants
+      : (typeof participants === 'string' && participants.trim() !== '' ? participants.split(',') : [])
+    const seen = new Set()
+    const out = []
+    for (const entry of list) {
+      const sessionId = typeof entry === 'string'
+        ? entry.trim()
+        : firstString(entry?.sessionId, entry?.session_id, entry?.id)
+      if (sessionId === undefined || seen.has(sessionId)) continue
+      seen.add(sessionId)
+      const rawAck = typeof entry === 'object' && entry !== null ? firstString(entry.ackState, entry.ack_state) : undefined
+      out.push({
+        sessionId,
+        role: typeof entry === 'object' && entry !== null ? firstString(entry.role) ?? null : null,
+        ackState: rawAck !== undefined && MEETING_ACK_STATES.has(rawAck) ? rawAck : 'pending',
+      })
+    }
+    return out
+  }
+
+  function participantView(row) {
+    return {
+      sessionId: row.session_id,
+      role: row.role ?? null,
+      ackState: row.ack_state ?? null,
+    }
+  }
+
+  function messageView(entry) {
+    return {
+      msgId: entry.msgId ?? null,
+      round: entry.round ?? null,
+      from: entry.from ?? null,
+      to: entry.to ?? null,
+      subject: entry.subject ?? null,
+      body: entry.body ?? null,
+      bodySha256: entry.bodySha256 ?? null,
+      bodyLen: entry.bodyLen ?? null,
+      dedupeKey: entry.dedupeKey ?? null,
+      at: toIsoTime(entry.at),
+    }
+  }
+
+  function countRounds(messages) {
+    const counts = {}
+    for (const message of Array.isArray(messages) ? messages : []) {
+      const key = typeof message?.round === 'string' && message.round !== '' ? message.round : 'unclassified'
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  }
+
+  function meetingView(row, store, participants, messages) {
+    const participantList = Array.isArray(participants) ? participants : []
+    const messageList = Array.isArray(messages) ? messages : []
+    return {
+      meetingId: row?.meeting_id ?? store?.meetingId ?? null,
+      title: row?.title ?? store?.title ?? null,
+      status: normalizeMeetingStatus(row?.status ?? store?.status),
+      convener: row?.convener ?? store?.convener ?? null,
+      createdAt: toIsoTime(row?.created_at) ?? store?.createdAt ?? null,
+      updatedAt: toIsoTime(row?.updated_at) ?? store?.updatedAt ?? null,
+      deadline: toIsoTime(row?.deadline) ?? null,
+      dirPath: row?.dir_path ?? store?.dirPath ?? null,
+      participantCount: participantList.length,
+      messageCount: messageList.length,
+      rounds: countRounds(messageList),
+      finalizedAt: store?.finalizedAt ?? null,
+    }
+  }
+
+  function reconstructMeetingStore(dbRow, dbMessages) {
+    const rows = Array.isArray(dbMessages) ? dbMessages : []
+    return {
+      schemaVersion: 1,
+      meetingId: dbRow.meeting_id,
+      title: dbRow.title ?? null,
+      convener: dbRow.convener ?? null,
+      dedupeKey: null,
+      dirPath: dbRow.dir_path ?? null,
+      createdAt: toIsoTime(dbRow.created_at),
+      updatedAt: toIsoTime(dbRow.updated_at),
+      status: normalizeMeetingStatus(dbRow.status) ?? 'open',
+      posts: rows.map(messageRow => ({
+        msgId: messageRow.msg_id,
+        round: roundFromMsgId(messageRow.msg_id),
+        from: messageRow.from_alias ?? null,
+        to: messageRow.to_alias ?? null,
+        subject: null,
+        body: null,
+        bodySha256: messageRow.body_sha256 ?? null,
+        bodyLen: messageRow.body_len ?? null,
+        dedupeKey: messageRow.dedupe_key ?? null,
+        at: toIsoTime(messageRow.at),
+      })),
+      decisions: [],
+      actions: [],
+      finalizedAt: null,
+      summary: null,
+      reconstructed: true,
+    }
+  }
+
+  /** Merge DB message rows (hash/len) with sidecar posts (round/body). */
+  function mergeMeetingMessages(store, dbMessages) {
+    const merged = new Map()
+    for (const row of Array.isArray(dbMessages) ? dbMessages : []) {
+      merged.set(row.msg_id, {
+        msgId: row.msg_id,
+        round: roundFromMsgId(row.msg_id),
+        from: row.from_alias ?? null,
+        to: row.to_alias ?? null,
+        subject: null,
+        body: null,
+        bodySha256: row.body_sha256 ?? null,
+        bodyLen: row.body_len ?? null,
+        dedupeKey: row.dedupe_key ?? null,
+        at: toIsoTime(row.at),
+      })
+    }
+    for (const post of Array.isArray(store?.posts) ? store.posts : []) {
+      if (post === null || typeof post !== 'object' || typeof post.msgId !== 'string') continue
+      merged.set(post.msgId, { ...(merged.get(post.msgId) ?? {}), ...post })
+    }
+    return [...merged.values()]
+      .map(messageView)
+      .sort((left, right) => {
+        const byTime = String(left.at ?? '').localeCompare(String(right.at ?? ''))
+        return byTime !== 0 ? byTime : String(left.msgId ?? '').localeCompare(String(right.msgId ?? ''))
+      })
+  }
+
+  function loadMeetingState(meetingId) {
+    const read = withReadDb(() => ({
+      meeting: typeof modules.db.getMeeting === 'function' ? modules.db.getMeeting(meetingId) : undefined,
+      participants: typeof modules.db.listMeetingParticipants === 'function' ? modules.db.listMeetingParticipants(meetingId) : [],
+      messages: typeof modules.db.listMeetingMessages === 'function' ? modules.db.listMeetingMessages(meetingId) : [],
+    }))
+    if (!read.ok) {
+      if (read.error?.code === 'NO_DB' || read.error?.code === 'DB_NOT_FOUND') {
+        // No registry yet and no sidecar: the meeting simply does not exist.
+        if (readMeetingStore(meetingId) === null) return { ok: false, notFound: true }
+      }
+      return { ok: false, error: read.error }
+    }
+    const stored = readMeetingStore(meetingId)
+    const store = stored ?? (read.value.meeting === undefined ? null : reconstructMeetingStore(read.value.meeting, read.value.messages))
+    if (store === null) return { ok: false, notFound: true }
+    return {
+      ok: true,
+      store,
+      meeting: read.value.meeting,
+      participants: read.value.participants,
+      messages: read.value.messages,
+    }
+  }
+
+  function meetingError(error, fallbackCode = 'MEETING_ERROR') {
+    const code = typeof error?.code === 'string' && error.code !== '' ? error.code : fallbackCode
+    const message = error?.message !== undefined ? String(error.message) : String(error)
+    return { ok: false, code, error: `${code}: ${message}` }
+  }
+
+  function meetingInvalid(message, code = 'MEETING_INVALID') {
+    return { ok: false, code, error: `${code}: ${message}` }
+  }
+
+  function meetingNotFound(meetingId) {
+    return { ok: false, code: 'MEETING_NOT_FOUND', error: `MEETING_NOT_FOUND: meeting not found: ${meetingId}`, meetingId }
+  }
+
+  function duplicatePostResponse(state, entry) {
+    const participants = (state.participants ?? []).map(participantView)
+    const messages = mergeMeetingMessages(state.store, state.messages)
+    return {
+      ok: true,
+      duplicate: true,
+      existingMsgId: entry.msgId,
+      meeting: meetingView(state.meeting, state.store, participants, messages),
+      message: messageView(entry),
+      participants,
+      participantIds: participants.map(participant => participant.sessionId),
+    }
+  }
+
   try {
     ctx.on?.('dispose', () => {
       if (dbWriteState.handle !== null) safeCall(() => modules.db?.closeDb?.(dbWriteState.handle), () => {})
@@ -500,9 +965,6 @@ export function registerTools(ctx, deps) {
     },
   })
 
-  const notImplemented = name => async () =>
-    ({ ok: false, tool: name, error: 'not implemented in P0 skeleton (planned for P1)' })
-
   ctx.tools.register({
     name: 'alias_register',
     description:
@@ -544,23 +1006,397 @@ export function registerTools(ctx, deps) {
     },
   })
 
-  for (const name of ['meeting_open', 'meeting_post', 'meeting_collect', 'meeting_finalize']) {
-    ctx.tools.register({
-      name,
-      description: 'Meeting workflow tool (' + name + '): fixed session meeting protocol (P0/P1).',
-      parameters: baseParams({
-        meetingId: { type: 'string' },
-        title: { type: 'string' },
-        participants: { type: 'array', items: { type: 'string' } },
-        to: { type: 'string' },
-        subject: { type: 'string' },
-        body: { type: 'string' },
-        dedupeKey: { type: 'string' },
-      }),
-      output: jsonOut,
-      execute: notImplemented(name),
-    })
-  }
+  const meetingParameters = baseParams({
+    meetingId: { type: 'string', description: 'Meeting id.' },
+    title: { type: 'string', description: 'meeting_open only: meeting title.' },
+    participants: { type: 'array', items: { type: 'string' }, description: 'meeting_open only: participant session ids/aliases.' },
+    to: { type: 'string', description: 'meeting_open/post: recipient (defaults to all participants).' },
+    subject: { type: 'string', description: 'meeting_open/post: message subject.' },
+    body: { type: 'string', description: 'meeting_open: R1 body; meeting_post: position/minutes; meeting_finalize: decisions/actions (JSON or Markdown).' },
+    dedupeKey: { type: 'string', description: 'Idempotency key; a duplicate returns the existing meeting/message.' },
+    round: { type: 'string', description: 'R1 | R2 | R3 | notes. meeting_post defaults to notes; meeting_collect may filter by it.' },
+  })
+
+  ctx.tools.register({
+    name: 'meeting_open',
+    description:
+      'Open a cross-session meeting: creates the meeting (status open), records the convener and participants, '
+      + 'and registers the optional R1 body as the first meeting message. meetingId/dedupeKey are idempotent.',
+    parameters: meetingParameters,
+    output: jsonOut,
+    async execute(args = {}, exec = {}) {
+      if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
+      const meetingId = firstString(args.meetingId) ?? generateMeetingId()
+      const dedupeKey = firstString(args.dedupeKey) ?? null
+      if (dedupeKey !== null) {
+        const duplicateStore = findMeetingStoreByDedupe(dedupeKey)
+        if (duplicateStore !== null) {
+          const duplicateState = loadMeetingState(duplicateStore.meetingId)
+          if (duplicateState.ok) {
+            const participants = duplicateState.participants.map(participantView)
+            const messages = mergeMeetingMessages(duplicateState.store, duplicateState.messages)
+            return {
+              ok: true,
+              duplicate: true,
+              existingMeetingId: duplicateStore.meetingId,
+              meeting: meetingView(duplicateState.meeting, duplicateState.store, participants, messages),
+              participants,
+              participantIds: participants.map(participant => participant.sessionId),
+              messages,
+            }
+          }
+          const messages = mergeMeetingMessages(duplicateStore, [])
+          return {
+            ok: true,
+            duplicate: true,
+            existingMeetingId: duplicateStore.meetingId,
+            meeting: meetingView(undefined, duplicateStore, [], messages),
+            participants: [],
+            participantIds: [],
+            messages,
+          }
+        }
+      }
+      if (readMeetingStore(meetingId) !== null) return meetingInvalid(`meeting already exists: ${meetingId}`, 'MEETING_EXISTS')
+      const title = firstString(args.title) ?? null
+      const convener = resolveMeetingAuthor(exec)
+      const workspaceDir = resolveMeetingWorkspace(exec)
+      const dirPath = workspaceDir === null ? null : join(workspaceDir, 'docs', 'meetings', meetingId)
+      const participants = normalizeParticipantEntries(args.participants)
+      const body = typeof args.body === 'string' && args.body.trim() !== '' ? args.body : null
+      const to = firstString(args.to) ?? null
+      const subject = firstString(args.subject) ?? null
+      const atMs = Date.now()
+      const atIso = new Date(atMs).toISOString()
+      const message = body === null ? null : {
+        msgId: generateMeetingMsgId(meetingId, 'R1', convener),
+        round: 'R1',
+        from: convener,
+        to,
+        subject,
+        body,
+        bodySha256: createHash('sha256').update(body, 'utf8').digest('hex'),
+        bodyLen: Buffer.byteLength(body, 'utf8'),
+        // Namespaced so opening a meeting never collides with a post dedupeKey.
+        dedupeKey: dedupeKey === null ? null : `${meetingId}|open|${dedupeKey}`,
+        at: atIso,
+      }
+      const created = withWriteDb(() => {
+        modules.db.createMeeting({ meetingId, title, convener, dirPath, at: atMs })
+        for (const participant of participants) {
+          modules.db.addMeetingParticipant({
+            meetingId,
+            sessionId: participant.sessionId,
+            role: participant.role,
+            ackState: participant.ackState,
+          })
+        }
+        let messageResult = null
+        if (message !== null) {
+          messageResult = modules.db.addMeetingMessage({
+            meetingId,
+            msgId: message.msgId,
+            fromAlias: message.from,
+            toAlias: message.to,
+            at: atMs,
+            bodySha256: message.bodySha256,
+            bodyLen: message.bodyLen,
+            dedupeKey: message.dedupeKey,
+          })
+          if (messageResult.inserted === false) message.msgId = messageResult.msgId
+        }
+        return {
+          messageResult,
+          meeting: modules.db.getMeeting(meetingId),
+          participants: modules.db.listMeetingParticipants(meetingId),
+          messages: modules.db.listMeetingMessages(meetingId),
+        }
+      })
+      if (!created.ok) return meetingError(created.error)
+      const store = {
+        schemaVersion: 1,
+        meetingId,
+        title,
+        convener,
+        dedupeKey,
+        dirPath,
+        createdAt: atIso,
+        updatedAt: atIso,
+        status: 'open',
+        posts: message === null ? [] : [message],
+        decisions: [],
+        actions: [],
+        finalizedAt: null,
+        summary: null,
+      }
+      try {
+        writeMeetingStore(store)
+      } catch (error) {
+        return meetingError(error)
+      }
+      const participantViews = created.value.participants.map(participantView)
+      const messages = mergeMeetingMessages(store, created.value.messages)
+      const meeting = meetingView(created.value.meeting, store, participantViews, messages)
+      safeCall(() => audit?.({ action: 'meeting_open', meetingId, ok: true, participants: participantViews.length, messages: messages.length, caller: resolveAuditCaller(exec) }), () => {})
+      return { ok: true, duplicate: false, created: true, meeting, participants: participantViews, participantIds: participantViews.map(participant => participant.sessionId), messages, actions: [], decisions: [] }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'meeting_post',
+    description:
+      'Append one round of meeting speech (R1/R2/R3/notes) to a meeting. dedupeKey is idempotent: a repeated post '
+      + 'returns {ok:true, duplicate:true, existingMsgId} without adding another message.',
+    parameters: meetingParameters,
+    output: jsonOut,
+    async execute(args = {}, exec = {}) {
+      if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
+      const meetingId = firstString(args.meetingId)
+      if (meetingId === undefined) return meetingInvalid('meetingId is required')
+      if (args.round !== undefined && args.round !== null && args.round !== '' && normalizeRound(args.round) === null) {
+        return meetingInvalid(`invalid round: ${String(args.round)} (expected R1|R2|R3|notes)`, 'MEETING_INVALID_ROUND')
+      }
+      const round = normalizeRound(args.round, 'notes')
+      const body = typeof args.body === 'string' ? args.body : ''
+      if (body.trim() === '') return meetingInvalid('body is required')
+      const dedupeKey = firstString(args.dedupeKey) ?? null
+      const state = loadMeetingState(meetingId)
+      if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      if (normalizeMeetingStatus(state.meeting?.status) === 'finalized'
+        || state.store.status === 'finalized'
+        || Boolean(state.store.finalizedAt)) {
+        return meetingInvalid(`meeting is finalized: ${meetingId}`, 'MEETING_FINALIZED')
+      }
+      const existing = dedupeKey === null
+        ? null
+        : (state.store.posts ?? []).find(post => post?.dedupeKey === dedupeKey) ?? null
+      if (existing !== null) return duplicatePostResponse(state, existing)
+      const author = resolveMeetingAuthor(exec)
+      const to = firstString(args.to) ?? null
+      const subject = firstString(args.subject) ?? null
+      const atMs = Date.now()
+      const atIso = new Date(atMs).toISOString()
+      const entry = {
+        msgId: generateMeetingMsgId(meetingId, round, author),
+        round,
+        from: author,
+        to,
+        subject,
+        body,
+        bodySha256: createHash('sha256').update(body, 'utf8').digest('hex'),
+        bodyLen: Buffer.byteLength(body, 'utf8'),
+        dedupeKey,
+        at: atIso,
+      }
+      const write = withWriteDb(() => {
+        let insert = null
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (attempt > 0) entry.msgId = generateMeetingMsgId(meetingId, round, author)
+          insert = modules.db.addMeetingMessage({
+            meetingId,
+            msgId: entry.msgId,
+            fromAlias: entry.from,
+            toAlias: entry.to,
+            at: atMs,
+            bodySha256: entry.bodySha256,
+            bodyLen: entry.bodyLen,
+            dedupeKey: entry.dedupeKey,
+          })
+          if (insert.inserted === true || insert.deduped === true) break
+        }
+        if (insert === null) {
+          const error = new Error('could not allocate a unique msgId')
+          error.code = 'MEETING_MESSAGE_ID_CONFLICT'
+          throw error
+        }
+        if (insert.deduped === true) return { deduped: true, msgId: insert.msgId, meetingId: insert.meetingId }
+        const current = modules.db.getMeeting(meetingId)
+        const desired = round === 'R1' ? 'r1' : (round === 'R2' || round === 'R3') ? 'r2' : null
+        const ranks = { open: 0, r1: 1, r2: 2 }
+        if (desired !== null && current !== undefined && !['final', 'cancelled'].includes(current.status)
+          && (ranks[desired] ?? 0) > (ranks[current.status] ?? 0)) {
+          modules.db.setMeetingStatus(meetingId, desired)
+        }
+        return {
+          deduped: false,
+          meeting: modules.db.getMeeting(meetingId),
+          participants: modules.db.listMeetingParticipants(meetingId),
+          messages: modules.db.listMeetingMessages(meetingId),
+        }
+      })
+      if (!write.ok) return meetingError(write.error)
+      if (write.value.deduped === true) {
+        const duplicateMeetingId = write.value.meetingId
+        if (duplicateMeetingId !== meetingId) {
+          return meetingInvalid(`dedupeKey already belongs to meeting ${duplicateMeetingId}`, 'MEETING_DUPLICATE')
+        }
+        const recovered = (state.store.posts ?? []).find(post => post?.msgId === write.value.msgId || post?.dedupeKey === dedupeKey) ?? null
+        if (recovered !== null) return duplicatePostResponse(state, recovered)
+        // DB row exists but the sidecar write was lost: heal it from this retry.
+        entry.msgId = write.value.msgId
+        state.store.posts = [...(state.store.posts ?? []), entry]
+        state.store.updatedAt = atIso
+        try {
+          writeMeetingStore(state.store)
+        } catch (error) {
+          return meetingError(error)
+        }
+        const messages = mergeMeetingMessages(state.store, state.messages)
+        const participants = state.participants.map(participantView)
+        return {
+          ok: true,
+          duplicate: true,
+          recovered: true,
+          existingMsgId: entry.msgId,
+          meeting: meetingView(state.meeting, state.store, participants, messages),
+          message: messageView(entry),
+          participants,
+          participantIds: participants.map(participant => participant.sessionId),
+        }
+      }
+      state.store.posts = [...(state.store.posts ?? []), entry]
+      state.store.status = normalizeMeetingStatus(write.value.meeting?.status ?? state.store.status) ?? state.store.status
+      state.store.updatedAt = atIso
+      try {
+        writeMeetingStore(state.store)
+      } catch (error) {
+        return meetingError(error)
+      }
+      const participants = (write.value.participants ?? []).map(participantView)
+      const messages = mergeMeetingMessages(state.store, write.value.messages)
+      const meeting = meetingView(write.value.meeting, state.store, participants, messages)
+      safeCall(() => audit?.({ action: 'meeting_post', meetingId, round, ok: true, messages: messages.length, caller: resolveAuditCaller(exec) }), () => {})
+      return { ok: true, duplicate: false, meeting, message: messageView(entry), participants, participantIds: participants.map(participant => participant.sessionId) }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'meeting_collect',
+    description:
+      'Collect one meeting: returns the meeting summary, participants, messages (round/body included) and '
+      + 'decisions/actions. `round` optionally filters messages to R1|R2|R3|notes.',
+    parameters: meetingParameters,
+    output: jsonOut,
+    async execute(args = {}) {
+      if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
+      const meetingId = firstString(args.meetingId)
+      if (meetingId === undefined) return meetingInvalid('meetingId is required')
+      const explicitRound = args.round !== undefined && args.round !== null && args.round !== ''
+      if (explicitRound && normalizeRound(args.round) === null) {
+        return meetingInvalid(`invalid round: ${String(args.round)} (expected R1|R2|R3|notes)`, 'MEETING_INVALID_ROUND')
+      }
+      const round = explicitRound ? normalizeRound(args.round) : null
+      const state = loadMeetingState(meetingId)
+      if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      const participants = state.participants.map(participantView)
+      const allMessages = mergeMeetingMessages(state.store, state.messages)
+      const messages = round === null ? allMessages : allMessages.filter(message => message.round === round)
+      const meeting = meetingView(state.meeting, state.store, participants, allMessages)
+      const decisions = Array.isArray(state.store.decisions) ? state.store.decisions : []
+      const actions = Array.isArray(state.store.actions) ? state.store.actions : []
+      safeCall(() => audit?.({ action: 'meeting_collect', meetingId, round: round ?? 'all', ok: true, messages: messages.length, caller: resolveAuditCaller(exec) }), () => {})
+      return {
+        ok: true,
+        meeting,
+        participants,
+        participantIds: participants.map(participant => participant.sessionId),
+        messages,
+        actions,
+        decisions,
+        rounds: meeting.rounds,
+        count: messages.length,
+        filter: { round },
+      }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'meeting_finalize',
+    description:
+      'Finalize a meeting (status finalized) and record decisions/actions parsed from body (JSON or Markdown) '
+      + 'or supplied by earlier posts. Idempotent: finalizing twice returns alreadyFinalized:true.',
+    parameters: meetingParameters,
+    output: jsonOut,
+    async execute(args = {}, exec = {}) {
+      if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
+      const meetingId = firstString(args.meetingId)
+      if (meetingId === undefined) return meetingInvalid('meetingId is required')
+      const state = loadMeetingState(meetingId)
+      if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      const participants = state.participants.map(participantView)
+      const existingDecisions = Array.isArray(state.store.decisions) ? state.store.decisions : []
+      const existingActions = Array.isArray(state.store.actions) ? state.store.actions : []
+      const alreadyFinalized = state.store.status === 'finalized' || Boolean(state.store.finalizedAt)
+      if (alreadyFinalized) {
+        const messages = mergeMeetingMessages(state.store, state.messages)
+        const meeting = meetingView(state.meeting, state.store, participants, messages)
+        const summary = state.store.summary ?? {
+          meetingId,
+          title: meeting.title,
+          status: 'finalized',
+          convener: meeting.convener,
+          participantCount: participants.length,
+          messageCount: messages.length,
+          rounds: meeting.rounds,
+          decisions: existingDecisions,
+          actions: existingActions,
+          decisionCount: existingDecisions.length,
+          actionCount: existingActions.length,
+          finalizedAt: state.store.finalizedAt ?? null,
+        }
+        return { ok: true, alreadyFinalized: true, meeting, summary, decisions: existingDecisions, actions: existingActions, participants, participantIds: participants.map(participant => participant.sessionId) }
+      }
+      const parsedBody = parseMeetingFinalBody(args.body)
+      const decisions = parsedBody.decisions.length > 0 ? parsedBody.decisions : existingDecisions
+      const actions = parsedBody.actions.length > 0 ? parsedBody.actions : existingActions
+      const atIso = new Date().toISOString()
+      const statusWrite = withWriteDb(() => {
+        const changed = modules.db.setMeetingStatus(meetingId, 'final')
+        return { changed, meeting: modules.db.getMeeting(meetingId) }
+      })
+      if (!statusWrite.ok) return meetingError(statusWrite.error)
+      if (statusWrite.value.changed !== true) return meetingNotFound(meetingId)
+      const store = {
+        ...state.store,
+        status: 'finalized',
+        finalizedAt: atIso,
+        updatedAt: atIso,
+        decisions,
+        actions,
+        summaryText: parsedBody.summaryText,
+      }
+      const messages = mergeMeetingMessages(store, state.messages)
+      const meeting = meetingView(statusWrite.value.meeting, store, participants, messages)
+      const summary = {
+        meetingId,
+        title: meeting.title,
+        status: 'finalized',
+        convener: meeting.convener,
+        participantCount: participants.length,
+        participants: participants.map(participant => participant.sessionId),
+        messageCount: messages.length,
+        rounds: meeting.rounds,
+        decisions,
+        actions,
+        decisionCount: decisions.length,
+        actionCount: actions.length,
+        finalizedAt: atIso,
+        ...(parsedBody.summaryText === null ? {} : { summaryText: parsedBody.summaryText }),
+        ...(typeof args.body === 'string' && args.body.trim() !== '' ? {
+          bodySha256: createHash('sha256').update(args.body, 'utf8').digest('hex'),
+          bodyLen: Buffer.byteLength(args.body, 'utf8'),
+        } : {}),
+      }
+      store.summary = summary
+      try {
+        writeMeetingStore(store)
+      } catch (error) {
+        return meetingError(error)
+      }
+      safeCall(() => audit?.({ action: 'meeting_finalize', meetingId, ok: true, decisions: decisions.length, actions: actions.length, caller: resolveAuditCaller(exec) }), () => {})
+      return { ok: true, alreadyFinalized: false, meeting, summary, decisions, actions, participants, participantIds: participants.map(participant => participant.sessionId) }
+    },
+  })
 
   ctx.tools.register({
     name: 'workspace_agents_init',
