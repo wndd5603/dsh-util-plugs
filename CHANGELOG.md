@@ -3,6 +3,8 @@
 - **Bulletin board / task board (new row `bulletin-board`)**: shared SQLite boards and tasks with statuses, workspace/assignee association, dependencies, atomic claim and digest queries.
 - **Local LLM worker (new row `local-worker`)**: bounded `local_llm_health` / `local_task_plan` / `local_task_transform` / `local_task_validate` tools backed by an OpenAI-compatible local model; proposals only, strict JSON, timeout/token limits.
 - **Cross-permission guard**: `crossPermissionGuard` (default true) blocks confined senders from messaging danger-full-access targets via direct id, alias, header or autoResume.
+- **Agent Network panel**: the former plugin console is now labeled “智能体网络/Agent Network”; it adds a live bulletin-board/task section (boards, task counts by status) above the existing plugin cards/configuration. The bulletin-board host exposes a read-only `bulletinBoard` Remote.
+- **Subagent progress**: `agent_progress` reads `team/progress/<sessionId>.json` heartbeats plus the live agent roster and classifies starting/running/stalled/inactive/failed; documented in the `subagent-progress` skill.
 - Bundle is now 10 rows; existing rows remain switchable and zero npm dependencies.
 
 ## 2026.11.5-9

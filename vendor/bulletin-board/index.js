@@ -1,8 +1,19 @@
 // DSH bulletin board / task board host plugin. One SQLite board shared by all
 // sessions; every write records the caller session as actor.
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { createStore, STATUSES } from './src/store.js'
 
-export const inject = ['tools']
+export const inject = ['tools', 'agents']
+
+const REMOTE_SERVICE_KEY = 'bulletinBoardRemote'
+const REMOTE_NAMESPACE = 'bulletinBoard'
+const REMOTE_METHOD_DESCRIPTOR_KEY = '@deepseek-ai/dsh-typert-protocol/remote-methods'
+const REMOTE_METHODS = Object.freeze([
+  Object.freeze({ method: 'overview', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'boards', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'tasks', invocation: Object.freeze({ kind: 'direct' }) }),
+])
 
 const jsonOutput = {
   schema: { type: 'object', additionalProperties: true },
@@ -22,6 +33,31 @@ const statusProp = { type: 'string', enum: STATUSES, description: 'Task/board st
 const actor = exec => {
   const session = exec?.agent?.session
   return { session: session?.id ?? null, alias: session?.header?.alias ?? null, cwd: session?.header?.cwd ?? null }
+}
+const fileTime = file => {
+  try { return statSync(file).mtimeMs } catch { return 0 }
+}
+const readProgress = (dir) => {
+  const out = []
+  let names = []
+  try { names = readdirSync(dir).filter(name => name.endsWith('.json')) } catch { return out }
+  for (const name of names) {
+    const file = join(dir, name)
+    try {
+      const raw = JSON.parse(readFileSync(file, 'utf8'))
+      out.push({ file, ...raw })
+    } catch { /* ignore malformed progress */ }
+  }
+  return out
+}
+const classifyProgress = ({ progress, live, now, staleMs }) => {
+  if (progress === undefined) return live ? 'starting' : 'unknown'
+  if (progress.state === 'failed') return 'failed'
+  if (progress.state === 'completed' || progress.state === 'done') return 'completed'
+  const updatedAt = Date.parse(progress.heartbeatAt ?? progress.updatedAt ?? '') || fileTime(progress.file)
+  if (updatedAt > 0 && now - updatedAt > staleMs) return 'stalled'
+  if (live) return 'running'
+  return 'inactive'
 }
 
 export function apply(ctx) {
@@ -86,4 +122,70 @@ export function apply(ctx) {
     const a = actor(exec)
     return { tasks: store.digest({ session: args.session ?? a.session, alias: args.alias ?? a.alias, workspace: args.workspace ?? a.cwd }) }
   })
+
+  // Heartbeat read model for Lead orchestration: subagents write
+  // team/progress/<sessionId>.json periodically; this tool combines it with the
+  // live agent roster and a stale threshold so "silent but working" is not
+  // mistaken for "stuck".
+  register(describe('agent_progress', 'Classify subagents as starting/running/stalled/inactive/failed from live agents + team/progress heartbeat files.', {
+    workspace: str('Workspace root; progress files are read from <workspace>/team/progress/*.json.'),
+    sessionId: str('Optional single session id filter.'),
+    staleMs: num('No-heartbeat threshold in ms (default 300000).'),
+  }), async (args, exec) => {
+    const a = actor(exec)
+    const root = args.workspace ?? a.cwd
+    const now = Date.now()
+    const staleMs = Number.isFinite(Number(args.staleMs)) ? Math.max(1000, Number(args.staleMs)) : 300000
+    let agents = []
+    try {
+      const service = ctx.get?.('agents')
+      agents = typeof service?.list === 'function' ? service.list() : []
+    } catch { agents = [] }
+    const live = new Map(agents.map(agent => [agent?.session?.id, agent?.status ?? 'running']))
+    const progress = root === null || root === undefined ? [] : readProgress(join(root, 'team', 'progress'))
+    const bySession = new Map(progress.filter(p => typeof p.sessionId === 'string').map(p => [p.sessionId, p]))
+    const ids = new Set([...live.keys(), ...bySession.keys()])
+    if (typeof args.sessionId === 'string' && args.sessionId !== '') ids.add(args.sessionId)
+    const items = [...ids].filter(Boolean).map(sessionId => {
+      const p = bySession.get(sessionId)
+      const state = classifyProgress({ progress: p, live: live.has(sessionId), now, staleMs })
+      return {
+        sessionId,
+        state,
+        live: live.has(sessionId),
+        agentStatus: live.get(sessionId) ?? null,
+        phase: p?.phase ?? null,
+        step: p?.step ?? null,
+        note: p?.note ?? null,
+        heartbeatAt: p?.heartbeatAt ?? p?.updatedAt ?? null,
+        progressFile: p?.file ?? null,
+      }
+    })
+    return { ok: true, workspace: root, staleMs, items, counts: Object.fromEntries(['running', 'starting', 'stalled', 'inactive', 'failed', 'completed', 'unknown'].map(state => [state, items.filter(i => i.state === state).length])) }
+  })
+
+  // Read-only Web Remote for the Agent Network console section.
+  class BulletinBoardRemote {
+    overview() {
+      const tasks = store.listTasks({ limit: 500 })
+      return {
+        boards: store.listBoards({ limit: 100 }),
+        tasks,
+        counts: Object.fromEntries(STATUSES.map(s => [s, tasks.filter(t => t.status === s).length])),
+      }
+    }
+    boards(query) { return { boards: store.listBoards(query ?? {}) } }
+    tasks(query) { return { tasks: store.listTasks(query ?? {}) } }
+  }
+  Object.defineProperty(BulletinBoardRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
+    configurable: true, enumerable: false, value: Object.freeze({ version: 1, methods: REMOTE_METHODS }),
+  })
+  const remote = new BulletinBoardRemote()
+  Object.defineProperty(remote, 'typertRemote', {
+    configurable: false, enumerable: true, writable: false,
+    value: Object.freeze({ service: remote, serviceKey: REMOTE_SERVICE_KEY, namespace: REMOTE_NAMESPACE }),
+  })
+  try {
+    if (typeof ctx.provide === 'function') ctx.provide(REMOTE_SERVICE_KEY, remote)
+  } catch { /* older host without provide: tools still work */ }
 }

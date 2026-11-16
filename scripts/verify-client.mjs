@@ -15,6 +15,7 @@ import { runInNewContext } from 'node:vm'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+const clientText = readFileSync(join(repoRoot, 'client.js'), 'utf8')
 const failures = []
 const check = (ok, message) => { if (!ok) failures.push(message) }
 
@@ -96,6 +97,8 @@ check(consolePanel !== undefined, 'plugin console must register the sidebar.pane
 check(consolePage !== undefined, 'plugin console must register the main plugin-console page')
 check(seen.remotes.includes('dsh-message-bus'), 'message center must mount its messageBus Remote contribution')
 check(seen.remotes.includes('dsh-host-relaunch'), 'restart button must mount its relaunch Remote contribution')
+check(seen.remotes.includes('dsh-bulletin-board'), 'plugin console must mount the bulletin-board Remote contribution')
+check(clientText.includes('data-agent-network'), 'plugin console must render the agent-network section')
 for (const service of ['slots', 'locale', 'remote', 'remoteAccess']) {
   check(moduleExports.inject.includes(service), 'client inject must include ' + service)
 }

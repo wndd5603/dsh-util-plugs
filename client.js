@@ -2003,9 +2003,14 @@ function createContributionRegistry(onError) {
  */
 
 const zh = {
-  panel: '插件控制台',
-  title: '插件控制台',
-  subtitle: '统一查看已安装插件的配置、状态与快捷入口。',
+  panel: '智能体网络',
+  title: '智能体网络',
+  subtitle: '公告栏、任务板与已安装插件：查看网络状态、任务依赖与插件配置。',
+  networkTitle: '公告栏 / 任务板',
+  networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建任务板。',
+  networkBoards: '任务板 {count}',
+  networkTasks: '任务 {count}',
+  networkOpen: '在任务板中查看',
   refresh: '刷新',
   openManager: '打开插件管理器',
   searchPlaceholder: '搜索插件、包名或功能…',
@@ -2069,9 +2074,14 @@ const zh = {
 }
 
 const en = {
-  panel: 'Plugin Console',
-  title: 'Plugin Console',
-  subtitle: 'One place for installed plugins: configuration, status, and shortcuts.',
+  panel: 'Agent Network',
+  title: 'Agent Network',
+  subtitle: 'Bulletin board, task board, and installed plugins: network state, task dependencies, and configuration.',
+  networkTitle: 'Bulletin board / task board',
+  networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
+  networkBoards: 'Boards {count}',
+  networkTasks: 'Tasks {count}',
+  networkOpen: 'Open task board',
   refresh: 'Refresh',
   openManager: 'Open plugin manager',
   searchPlaceholder: 'Search plugins, packages, or features…',
@@ -2138,6 +2148,27 @@ const inject = [
   'slots', 'locale', 'remote', 'remote.pluginInventory', 'remote.pluginManager',
   'configForms', 'layout', 'remoteAccess',
 ]
+
+const BOARD_REMOTE_METHODS = [
+  { method: 'overview', invocation: { kind: 'direct' } },
+  { method: 'boards', invocation: { kind: 'direct' } },
+  { method: 'tasks', invocation: { kind: 'direct' } },
+]
+const boardResultCodec = name => ({ mode: 'strict', typeSymbol: `dsh-bulletin-board#${name}:result`, create: () => ({ parse: value => value }) })
+function createBoardRemoteContribution() {
+  return {
+    package: 'dsh-bulletin-board',
+    descriptors: BOARD_REMOTE_METHODS.map(entry => ({
+      id: `dsh-bulletin-board/bulletinBoard/${entry.method}`,
+      service: 'bulletinBoardRemote',
+      namespace: 'bulletinBoard',
+      method: entry.method,
+      invocation: { kind: 'direct' },
+      parameters: [],
+      result: boardResultCodec(entry.method),
+    })),
+  }
+}
 
 const panel = React.createElement
 
@@ -2521,9 +2552,30 @@ function Pager(props) {
         PAGE_SIZES.map(size => panel('option', { key: size, value: String(size) }, String(size))))))
 }
 
+function NetworkSection(props) {
+  const { t, network } = props
+  if (network === undefined || network === null) return null
+  const boards = Array.isArray(network.boards) ? network.boards : []
+  const tasks = Array.isArray(network.tasks) ? network.tasks : []
+  const counts = network.counts ?? {}
+  return panel('section', { 'data-agent-network': '', style: { ...style.section, marginBottom: '14px' } },
+    panel('div', { style: { ...style.metaRow, justifyContent: 'space-between' } },
+      panel('h3', { style: style.sectionTitle }, t('networkTitle')),
+      panel('span', { style: style.mono }, t('networkBoards', { count: String(boards.length) }) + ' · ' + t('networkTasks', { count: String(tasks.length) }))),
+    boards.length === 0 ? panel('p', { style: style.notice }, t('networkEmpty')) : panel('div', null,
+      boards.slice(0, 5).map(board => panel('div', { key: board.id, style: { padding: '6px 0', borderBottom: '1px solid rgba(127,127,127,0.12)' } },
+        panel('span', { style: style.mono }, board.id),
+        panel('span', { style: { ...style.mono, marginLeft: '8px' } }, board.title),
+        panel('span', { style: { ...style.mono, marginLeft: '8px', opacity: 0.7 } }, board.workspace ?? ''),
+        panel('span', { style: { ...style.mono, marginLeft: '8px' } }, board.status))),
+      tasks.length > 0 ? panel('div', { style: { ...style.metaRow, marginTop: '8px' } },
+        ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated'].map(status => panel('span', { key: status, style: style.mono }, `${status}: ${String(counts[status] ?? 0)}`))) : null))
+}
+
 function ConsolePage(props) {
   const { t, useConsole, store, contributions, openManager } = props
   const state = useConsole(snapshot => snapshot)
+  const network = state.network
   const pageRoot = React.useRef(null)
   const pendingScroll = React.useRef(undefined)
   const [query, setQuery] = React.useState('')
@@ -2590,6 +2642,7 @@ function ConsolePage(props) {
         panel('button', { type: 'button', style: style.button, disabled: state.status === 'refreshing', onClick: refresh }, state.status === 'refreshing' ? '…' : t('refresh')),
         panel('button', { type: 'button', style: style.buttonPrimary, onClick: openManager }, t('openManager')))),
     state.status === 'error' ? panel('div', { style: style.errorBox }, t('refreshFailed', { error: state.error ?? 'unknown' })) : null,
+    panel(NetworkSection, { t, network }),
     selected === undefined ? panel('div', null,
       panel('div', { style: style.toolbar },
         panel('input', { type: 'search', value: query, placeholder: t('searchPlaceholder'), style: style.search, onChange: event => changeQuery(event.target.value), 'aria-label': t('searchPlaceholder') }),
@@ -2650,6 +2703,7 @@ class ConsoleStore {
     this.bundles = []
     this.servedNamespaces = []
     this.writable = false
+    this.network = undefined
     this.networkLoaded = false
     this.cachedAt = undefined
     this.pendingNewReset = false
@@ -2694,6 +2748,10 @@ class ConsoleStore {
         if (generation !== this.generation) return
         this.inventory = inventory.value
         this.bundles = bundles.value
+        try {
+          const board = this.ctx.remote?.bulletinBoard
+          if (board !== undefined && typeof board.overview === 'function') this.network = await board.overview()
+        } catch { this.network = undefined }
         this.networkLoaded = true
         this.publish({ status: 'ready', computeNew: true })
       } catch (error) {
@@ -2753,6 +2811,7 @@ class ConsoleStore {
       model,
       detailKey: previous.detailKey,
       writable: model.writable,
+      network: this.network,
       fromCache: options.fromCache === true,
       cachedAt: this.cachedAt,
     })
@@ -2801,6 +2860,9 @@ function apply(ctx) {
   ctx.provide('pluginConsoleContributions', contributions)
   store.contributions = contributions
   store.renderSlot = undefined
+  ctx.plugin(async function mountAgentNetworkRemote(owner) {
+    try { await owner.remote.$mount(createBoardRemoteContribution()) } catch { /* bulletin board row may be absent */ }
+  })
   const openManager = card => {
     const navigation = ctx.get('pluginNavigation')
     if (navigation !== undefined) {
