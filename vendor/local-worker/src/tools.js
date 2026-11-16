@@ -93,8 +93,8 @@ function checkPromptBudget(messages) {
  * implementation; no shell, filesystem, or Cordis service is used.
  * @param {Record<string, unknown>} [rawConfig]
  */
-export function createToolHandlers(rawConfig = {}) {
-  const client = createLocalClient(rawConfig)
+export function createToolHandlers(rawConfig = {}, clientOverride = undefined) {
+  const client = clientOverride ?? createLocalClient(rawConfig)
   const config = client.config
 
   async function localLlmHealth() {

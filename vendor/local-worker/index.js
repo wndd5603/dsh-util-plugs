@@ -8,13 +8,17 @@
  * - all requests are bounded by timeoutMs/maxTokens and compact prompts.
  */
 import { normalizeConfig } from './src/client.js'
+import { createDshProviderClient } from './src/provider-client.js'
 import { createToolHandlers } from './src/tools.js'
 import { number, objectSchema, string } from './lib/standard-schema.js'
 
 /** @type {readonly string[]} */
-export const inject = ['tools']
+export const inject = ['tools', 'llm', 'agentDefaultModel']
 
 export const Config = objectSchema({
+  mode: string('local-endpoint', {
+    description: "local-endpoint | dsh-provider. dsh-provider uses ctx.llm + agentDefaultModel.currentSelection(); endpoint/model below are ignored.",
+  }),
   endpoint: string('http://127.0.0.1:11435/v1', {
     description: 'OpenAI-compatible base URL, e.g. http://127.0.0.1:11435/v1. A root or /chat/completions URL is normalized to /v1.',
   }),
@@ -87,7 +91,16 @@ const validateOutput = outputDefinition({
  */
 export function apply(ctx, config) {
   const cfg = normalizeConfig(config)
-  const handlers = createToolHandlers(cfg)
+  const useDshProvider = config?.mode === 'dsh-provider'
+  const providerClient = useDshProvider
+    ? createDshProviderClient({
+      llm: ctx.get('llm'),
+      agentDefaultModel: ctx.get('agentDefaultModel'),
+      rawConfig: cfg,
+    })
+    : undefined
+  const handlers = createToolHandlers(cfg, providerClient)
+  const source = useDshProvider ? 'dsh-provider' : 'local-endpoint'
   const toolTimeoutMs = cfg.timeoutMs + 5_000
 
   ctx.tools.register({
