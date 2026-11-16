@@ -42,6 +42,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'delete', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'send', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'tasksPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'taskDetail', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
@@ -269,6 +270,10 @@ function taskPageRow(row) {
     dependsOn: safeJsonArray(row.depends_on),
     relatedTasks: safeJsonArray(row.related_tasks),
     blockedReason: row.blocked_reason,
+    metadata: row.metadata,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    revision: row.revision,
     updatedAt: row.updated_at,
   }
 }
@@ -314,6 +319,29 @@ function readTasksPage(rawArgs) {
     return { tasks: rows.map(taskPageRow), total, counts, offset, limit }
   } catch {
     return emptyTasksPage(offset, limit)
+  } finally {
+    closeSnapshotDb(db)
+  }
+}
+
+function readTaskDetail(rawArgs) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : {}
+  const id = typeof args.id === 'string' ? args.id.trim() : ''
+  if (id === '') return { ok: false, error: 'id is required' }
+  const db = openSnapshotDb(bulletinDbPath())
+  if (db === null) return { ok: false, error: 'board database not found' }
+  try {
+    const row = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
+    if (row === undefined) return { ok: false, error: 'task not found', id }
+    const events = db.prepare("SELECT * FROM events WHERE entity='task' AND entity_id=? ORDER BY id DESC LIMIT 100").all(id)
+    return {
+      ok: true,
+      task: taskPageRow(row),
+      metadata: row.metadata,
+      events: events.map(event => ({ id: event.id, at: event.at, actor: event.actor, action: event.action, detail: event.detail })),
+    }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) }
   } finally {
     closeSnapshotDb(db)
   }
@@ -1564,7 +1592,7 @@ export function apply(ctx, config) {
       const row = store.getMessage(messageId)
       if (row === undefined || row === null) return { ok: false, gone: true, id: messageId }
       const readBy = readByOf(args.readBy)
-      const shouldMark = args.markRead !== false
+      const shouldMark = args.markRead === true
       let readAt = readBy === null ? null : store.getReadAt(readBy, messageId)
       if (readBy !== null && shouldMark && readAt === null) {
         readAt = store.markRead(readBy, messageId)
@@ -1620,6 +1648,7 @@ export function apply(ctx, config) {
       delete(messageId, confirm) { return remoteDeleteTask(messageId, confirm) }
       send(to, subject, body, from) { return remoteSendTask(to, subject, body, from) }
       tasksPage(query) { return readTasksPage(query) }
+      taskDetail(query) { return readTaskDetail(query) }
       memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query) }
       meetingsPage(query) { return readMeetingsPage(query) }

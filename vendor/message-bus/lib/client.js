@@ -90,6 +90,15 @@ function createRemoteContribution() {
         result: identityCodec('dsh-message-bus#messageBus/tasksPage:result'),
       },
       {
+        id: 'dsh-message-bus/messageBus/taskDetail',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'taskDetail',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/taskDetail:result'),
+      },
+      {
         id: 'dsh-message-bus/messageBus/memoryPage',
         service: REMOTE_SERVICE,
         namespace: REMOTE_NAMESPACE,
@@ -768,6 +777,7 @@ function NetworkSection(props) {
   const [taskPage, setTaskPage] = React.useState(0)
   const [serverPage, setServerPage] = React.useState(undefined)
   const [taskLoading, setTaskLoading] = React.useState(false)
+  const [taskDetailData, setTaskDetailData] = React.useState(undefined)
   const taskPageSize = 20
   const activeBoard = boards.find(board => board.id === selectedBoardId) ?? boards[0]
   const boardTasks = activeBoard === undefined ? [] : tasks.filter(task => (task.boardId ?? task.board_id) === activeBoard.id)
@@ -788,6 +798,10 @@ function NetworkSection(props) {
   const pageTasks = Array.isArray(pageData?.tasks) ? pageData.tasks : localPageTasks
   const selectedTask = pageTasks.find(task => task.id === selectedTaskId) ?? tasks.find(task => task.id === selectedTaskId)
   const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined); setTaskPage(0); setServerPage(undefined) }
+  const openTaskDetail = async id => {
+    if (typeof api?.taskDetail !== 'function') return
+    try { setTaskDetailData(unwrapRemote(await api.taskDetail({ id }))) } catch (caught) { setTaskDetailData({ ok: false, error: errorTextOf(caught) }) }
+  }
 
   React.useEffect(() => {
     if (activeBoard === undefined || typeof api?.tasksPage !== 'function') { setServerPage(undefined); return }
@@ -841,7 +855,7 @@ function NetworkSection(props) {
       type: 'button',
       className: 'mb-task',
       'data-active': selectedTask?.id === task.id ? 'true' : 'false',
-      onClick: () => setSelectedTaskId(current => current === task.id ? undefined : task.id),
+      onClick: () => { setSelectedTaskId(current => current === task.id ? undefined : task.id); void openTaskDetail(task.id) },
     },
     panel('div', { className: 'mb-taskTitle' },
       panel('span', null, task.title),
@@ -860,7 +874,14 @@ function NetworkSection(props) {
     panel('p', { className: 'mb-muted' }, `${t('assignee')}: ${selectedTask.assigneeAlias || selectedTask.assigneeSession || '—'}`),
     selectedTask.dependsOn?.length ? panel('p', null, `${t('dependencies')}: ${selectedTask.dependsOn.join(', ')}`) : null,
     selectedTask.relatedTasks?.length ? panel('p', null, `${t('related')}: ${selectedTask.relatedTasks.join(', ')}`) : null,
-    selectedTask.blockedReason ? panel('p', null, `${t('blockedReason')}: ${selectedTask.blockedReason}`) : null)
+    selectedTask.blockedReason ? panel('p', null, `${t('blockedReason')}: ${selectedTask.blockedReason}`) : null,
+    taskDetailData?.task?.metadata ? panel('details', null,
+      panel('summary', { className: 'mb-muted' }, 'metadata'),
+      panel('pre', { style: { whiteSpace: 'pre-wrap', maxHeight: '28vh', overflow: 'auto', fontSize: 11.5 } }, taskDetailData.task.metadata)) : null,
+    Array.isArray(taskDetailData?.events) && taskDetailData.events.length > 0 ? panel('details', null,
+      panel('summary', { className: 'mb-muted' }, `events (${taskDetailData.events.length})`),
+      panel('ul', { style: { maxHeight: '32vh', overflow: 'auto', fontSize: 11.5 } },
+        taskDetailData.events.slice(0, 50).map(event => panel('li', { key: event.id }, `${event.at} · ${event.actor ?? ''} · ${event.action} · ${event.detail ?? ''}`)))) : null)
 
   const taskPanel = activeBoard === undefined ? null : panel('div', { style: { marginTop: 12 } },
     panel('div', { className: 'mb-cardSub', style: { marginBottom: 4 } }, `${t('boardTasks')} · ${activeBoard.title}`),
@@ -1014,6 +1035,8 @@ function MemoryRow(props) {
       : null,
     panel('div', { className: 'mb-taskMeta' },
       panel('span', null, memoryRow.updated_at ?? ''),
+      memoryRow.source_session ? panel('span', null, 'source: ' + memoryRow.source_session) : null,
+      memoryRow.created_at ? panel('span', null, 'created: ' + memoryRow.created_at) : null,
       (memoryRow.tags ?? []).map(tag => panel('span', { key: tag, className: 'mb-pill' }, tag)),
       pendingDelete === memoryRow.id
         ? panel('span', null,
@@ -1048,6 +1071,7 @@ function MemorySection(props) {
       },
       panel('option', { value: '' }, t('memoryScopeAll')),
       panel('option', { value: 'project' }, 'project'),
+      panel('option', { value: 'team' }, 'team'),
       panel('option', { value: 'agent' }, 'agent'),
       panel('option', { value: 'global' }, 'global'))),
     panel('div', { className: 'mb-actionRow' },
@@ -1608,6 +1632,7 @@ function apply(ctx) {
         apartmentRestore: from => scope.remote.agentApartment.restore(from),
         apartmentVerify: () => scope.remote.agentApartment.verify(),
         tasksPage: query => scope.remote.messageBus.tasksPage(query),
+        taskDetail: query => scope.remote.messageBus.taskDetail(query),
         memoryPage: query => scope.remote.messageBus.memoryPage(query),
         memoryForget: query => scope.remote.messageBus.memoryForget(query),
         meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
