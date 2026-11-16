@@ -232,14 +232,21 @@ const zh = {
   title: '智能体网络',
   subtitle: '公告栏/任务板与跨会话消息：查看任务状态、依赖和消息。',
   networkTitle: '公告栏 / 任务板',
+  networkSubtitle: '共享任务、依赖与状态；点击状态可快速定位当前工作。',
+  networkLive: 'LIVE',
+  boardsLabel: '公告栏',
+  tasksLabel: '任务',
   networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建。',
   apartmentTitle: '智能体公寓 / 存储',
+  apartmentSubtitle: '集中管理 Agent 主目录、租约、备份与根目录迁移。',
+  apartmentStats: 'STORAGE',
   apartmentRootPlaceholder: '/path/to/apartment（当前根目录）',
   apartmentSaveRoot: '保存目录',
   apartmentMigrate: '迁移到此目录',
   apartmentBackup: '立即备份',
   apartmentRestore: '从目录恢复',
   apartmentVerify: '验证',
+  working: '处理中…',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
   loading: '正在加载消息…',
@@ -299,14 +306,21 @@ const en = {
   title: 'Agent Network',
   subtitle: 'Bulletin board/task board and cross-session messages: task status, dependencies, and messages.',
   networkTitle: 'Bulletin board / task board',
+  networkSubtitle: 'Shared tasks, dependencies and state; status pills show where work stands.',
+  networkLive: 'LIVE',
+  boardsLabel: 'Boards',
+  tasksLabel: 'Tasks',
   networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
   apartmentTitle: 'Agent Apartment / storage',
+  apartmentSubtitle: 'Central agent homes, leases, backups and root migration.',
+  apartmentStats: 'STORAGE',
   apartmentRootPlaceholder: '/path/to/apartment (current root)',
   apartmentSaveRoot: 'Save root',
   apartmentMigrate: 'Migrate here',
   apartmentBackup: 'Backup now',
   apartmentRestore: 'Restore from dir',
   apartmentVerify: 'Verify',
+  working: 'Working…',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',
   loading: 'Loading messages…',
@@ -392,6 +406,33 @@ body[data-ds-dark-theme="false"] .mb-dialog { background: rgb(250,250,250); }
 .mb-disabled { opacity: 0.5; cursor: default; }
 .mb-field { margin-top: 12px; }
 .mb-field label { display: block; font-size: 12.5px; opacity: 0.8; margin-bottom: 5px; }
+.mb-hero { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border: 1px solid rgba(79,140,255,0.28); border-radius: 14px; background: linear-gradient(135deg, rgba(79,140,255,0.13), rgba(79,140,255,0.02) 60%, transparent); margin-bottom: 14px; }
+.mb-heroIcon { width: 40px; height: 40px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(79,140,255,0.18); color: rgb(120,170,255); flex: 0 0 auto; }
+.mb-heroBody { min-width: 0; flex: 1 1 auto; }
+.mb-titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mb-kicker { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+.mb-card { margin-bottom: 14px; padding: 14px 16px; border: 1px solid rgba(127,127,127,0.22); border-radius: 12px; background: rgba(127,127,127,0.045); }
+.mb-cardHead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.mb-cardTitle { margin: 0; font-size: 15px; font-weight: 650; }
+.mb-cardSub { margin: 3px 0 0; font-size: 12px; opacity: .62; }
+.mb-statRow { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px; }
+.mb-stat { display: inline-flex; align-items: baseline; gap: 5px; padding: 5px 9px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.22); background: rgba(127,127,127,0.08); font-size: 12px; }
+.mb-stat strong { font-size: 13px; font-weight: 650; }
+.mb-boardGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.mb-board { min-width: 0; padding: 10px 11px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.2); background: rgba(127,127,127,0.06); }
+.mb-boardTop { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.mb-boardTitle { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-boardPath { margin-top: 6px; font-size: 11.5px; opacity: .58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-pill { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.25); font-size: 11px; white-space: nowrap; }
+.mb-pill[data-status="completed"] { color: rgb(100,190,120); border-color: rgba(63,185,80,0.45); }
+.mb-pill[data-status="blocked"] { color: rgb(235,145,120); border-color: rgba(248,81,73,0.45); }
+.mb-pill[data-status="in_progress"] { color: rgb(120,170,255); border-color: rgba(79,140,255,0.45); }
+.mb-actionRow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.mb-feedback { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mb-feedback[data-tone="danger"] { border: 1px solid rgba(248,81,73,0.45); background: rgba(248,81,73,0.10); }
+.mb-feedback[data-tone="ok"] { border: 1px solid rgba(63,185,80,0.40); background: rgba(63,185,80,0.08); }
+.mb-inlineInput { flex: 1 1 260px; min-width: 0; padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(127,127,127,0.3); background: rgba(127,127,127,0.08); color: inherit; }
+.mb-busy { opacity: .65; }
 `
 
 const style = {
@@ -422,9 +463,13 @@ function buttonStyle(tone, disabled) {
 
 function MessageBusIcon(props) {
   const size = typeof props.size === 'number' ? props.size : 18
-  return panel('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true', className: SIDEBAR_CLASS },
-    panel('rect', { x: 3, y: 5, width: 18, height: 14, rx: 2.5 }),
-    panel('path', { d: 'M4 7l8 6 8-6' }))
+  return panel('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true', className: SIDEBAR_CLASS },
+    panel('circle', { cx: 12, cy: 12, r: 2.4 }),
+    panel('circle', { cx: 5, cy: 6, r: 2 }),
+    panel('circle', { cx: 19, cy: 6, r: 2 }),
+    panel('circle', { cx: 5, cy: 18, r: 2 }),
+    panel('circle', { cx: 19, cy: 18, r: 2 }),
+    panel('path', { d: 'M7 7.2l3 3.2M17 7.2l-3 3.2M7 16.8l3-3.2M17 16.8l-3-3.2' }))
 }
 
 function errorTextOf(error) {
@@ -581,37 +626,67 @@ function NetworkSection(props) {
   const boards = Array.isArray(network.boards) ? network.boards : []
   const tasks = Array.isArray(network.tasks) ? network.tasks : []
   const counts = network.counts ?? {}
-  return panel('section', { 'data-agent-network': '', style: { marginBottom: '14px', padding: '10px 12px', border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px' } },
-    panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
-      panel('h2', { style: { margin: 0, fontSize: '15px' } }, t('networkTitle')),
-      panel('span', { style: { opacity: 0.7, fontSize: '12px' } }, `boards ${boards.length} · tasks ${tasks.length}`)),
-    boards.length === 0 ? panel('p', { style: { opacity: 0.7, fontSize: '12.5px' } }, t('networkEmpty')) : panel('div', null,
-      boards.slice(0, 5).map(board => panel('div', { key: board.id, style: { padding: '5px 0', borderBottom: '1px solid rgba(127,127,127,0.12)', fontSize: '12.5px' } },
-        panel('code', null, board.id), ' ',
-        panel('strong', null, board.title), ' ',
-        panel('span', { style: { opacity: 0.7 } }, board.workspace ?? ''), ' ',
-        panel('span', null, board.status))),
-      panel('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '8px', fontSize: '12.5px', opacity: 0.8 } },
-        ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated'].map(status => panel('span', { key: status }, `${status}: ${String(counts[status] ?? 0)}`)))))
+  const statuses = ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated']
+  return panel('section', { 'data-agent-network': '', className: 'mb-card' },
+    panel('div', { className: 'mb-cardHead' },
+      panel('div', null,
+        panel('h2', { className: 'mb-cardTitle' }, t('networkTitle')),
+        panel('p', { className: 'mb-cardSub' }, t('networkSubtitle'))),
+      panel('span', { className: 'mb-kicker' }, t('networkLive'))),
+    panel('div', { className: 'mb-statRow' },
+      panel('span', { className: 'mb-stat' }, t('boardsLabel'), ' ', panel('strong', null, boards.length)),
+      panel('span', { className: 'mb-stat' }, t('tasksLabel'), ' ', panel('strong', null, tasks.length))),
+    boards.length === 0
+      ? panel('p', { className: 'mb-muted' }, t('networkEmpty'))
+      : panel('div', { className: 'mb-boardGrid' },
+        boards.slice(0, 6).map(board => panel('article', { key: board.id, className: 'mb-board' },
+          panel('div', { className: 'mb-boardTop' },
+            panel('span', { className: 'mb-boardTitle', title: board.title }, board.title),
+            panel('span', { className: 'mb-pill', 'data-status': board.status }, board.status)),
+          panel('div', { className: 'mb-boardPath' }, board.workspace || board.id)))),
+    tasks.length === 0 ? null : panel('div', { className: 'mb-statRow', style: { marginBottom: 0 } },
+      statuses.map(status => panel('span', {
+        key: status,
+        className: 'mb-pill',
+        'data-status': status,
+        style: { opacity: counts[status] ? 1 : 0.5 },
+      }, status, ' ', String(counts[status] ?? 0)))))
 }
 
 function ApartmentSection(props) {
   const { t, apartment, rootInput, setRootInput, busy, message, onSetRoot, onMigrate, onBackup, onRestore, onVerify } = props
   if (apartment === undefined || apartment === null) return null
-  const counts = apartment
-  return panel('section', { 'data-apartment': '', style: { marginBottom: '14px', padding: '10px 12px', border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px' } },
-    panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
-      panel('h2', { style: { margin: 0, fontSize: '15px' } }, t('apartmentTitle')),
-      panel('span', { style: { opacity: 0.7, fontSize: '12px' } }, `agents ${counts.agents ?? 0} · teams ${counts.teams ?? 0} · leases ${counts.leases ?? 0}`)),
-    panel('p', { style: { fontSize: '12.5px', opacity: 0.8, wordBreak: 'break-all' } }, counts.root ?? ''),
-    panel('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' } },
-      panel('input', { type: 'text', value: rootInput, placeholder: t('apartmentRootPlaceholder'), style: { flex: '1 1 260px', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(127,127,127,0.3)', background: 'transparent', color: 'inherit' }, onChange: event => setRootInput(event.target.value) }),
-      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onSetRoot }, t('apartmentSaveRoot')),
-      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onMigrate }, t('apartmentMigrate')),
-      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onBackup }, t('apartmentBackup')),
-      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onRestore }, t('apartmentRestore')),
-      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onVerify }, t('apartmentVerify'))),
-    message === undefined ? null : panel('p', { style: { fontSize: '12.5px' } }, message))
+  const feedback = message !== null && typeof message === 'object' ? message : (message === undefined ? undefined : { text: String(message), tone: 'ok' })
+  return panel('section', { 'data-apartment': '', className: 'mb-card' },
+    panel('div', { className: 'mb-cardHead' },
+      panel('div', null,
+        panel('h2', { className: 'mb-cardTitle' }, t('apartmentTitle')),
+        panel('p', { className: 'mb-cardSub' }, t('apartmentSubtitle'))),
+      panel('span', { className: 'mb-kicker' }, t('apartmentStats'))),
+    panel('div', { className: 'mb-statRow' },
+      panel('span', { className: 'mb-stat' }, 'agents ', panel('strong', null, apartment.agents ?? 0)),
+      panel('span', { className: 'mb-stat' }, 'teams ', panel('strong', null, apartment.teams ?? 0)),
+      panel('span', { className: 'mb-stat' }, 'leases ', panel('strong', null, apartment.leases ?? 0))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('input', {
+        type: 'text',
+        value: rootInput,
+        placeholder: t('apartmentRootPlaceholder'),
+        className: 'mb-inlineInput',
+        'aria-label': t('apartmentRootPlaceholder'),
+        onChange: event => setRootInput(event.target.value),
+      }),
+      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: onSetRoot }, t('apartmentSaveRoot')),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onMigrate }, t('apartmentMigrate')),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onBackup }, t('apartmentBackup')),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onRestore }, t('apartmentRestore')),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onVerify }, t('apartmentVerify'))),
+    feedback === undefined ? null : panel('p', {
+      className: 'mb-feedback',
+      'data-tone': feedback.tone === 'danger' ? 'danger' : 'ok',
+      role: 'status',
+      'aria-live': 'polite',
+    }, feedback.text))
 }
 
 function MessageCenterPage(props) {
@@ -703,7 +778,7 @@ function MessageCenterPage(props) {
   const apartmentAction = async (kind) => {
     if (apartmentBusy) return
     setApartmentBusy(true)
-    setApartmentMessage(undefined)
+    setApartmentMessage({ text: t('working'), tone: 'ok' })
     try {
       const root = rootInput.trim()
       if ((kind === 'setRoot' || kind === 'migrate') && root === '') throw new Error('root path is required')
@@ -713,11 +788,16 @@ function MessageCenterPage(props) {
       else if (kind === 'backup') result = await api.apartmentBackup?.('manual-ui')
       else if (kind === 'restore') result = await api.apartmentRestore?.(root)
       else result = await api.apartmentVerify?.()
-      setApartmentMessage(JSON.stringify(result ?? { ok: true }))
+      const text = kind === 'backup'
+        ? `备份完成${result?.backup ? '：' + result.backup : ''}`
+        : kind === 'verify'
+          ? (result?.ok === false ? '验证发现问题' : '验证通过')
+          : JSON.stringify(result ?? { ok: true })
+      setApartmentMessage({ text, tone: result?.ok === false ? 'danger' : 'ok' })
       const status = await api.apartmentStatus?.()
       if (status !== undefined && status !== null) { setApartment(status); setRootInput(status.root ?? root) }
     } catch (caught) {
-      setApartmentMessage(errorTextOf(caught))
+      setApartmentMessage({ text: errorTextOf(caught), tone: 'danger' })
     } finally {
       setApartmentBusy(false)
     }
@@ -822,15 +902,21 @@ function MessageCenterPage(props) {
   const pageNumber = Math.floor(offset / limit) + 1
 
   return panel('div', { className: PAGE_CLASS, 'data-message-bus-page': '' },
-    panel('div', { style: style.header },
-      panel('div', null,
-        panel('h1', { style: style.title }, t('title')),
+    panel('div', { className: 'mb-hero' },
+      panel('div', { className: 'mb-heroIcon' }, panel(MessageBusIcon, { size: 24 })),
+      panel('div', { className: 'mb-heroBody' },
+        panel('div', { className: 'mb-titleRow' },
+          panel('h1', { style: style.title }, t('title')),
+          panel('span', {
+            className: 'mb-pill',
+            'data-message-strict-mode': strictMode ? 'on' : 'off',
+            style: { fontSize: 11.5 },
+          }, strictMode ? t('strictModeOn') : t('strictModeOff'))),
         panel('p', { style: style.subtitle }, t('subtitle')),
-        panel('p', { style: style.subtitle, 'data-message-strict-mode': strictMode ? 'on' : 'off' },
-          strictMode ? t('strictModeOn') : t('strictModeOff'))),
-      panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+        panel('div', { className: 'mb-kicker', style: { marginTop: 6 } }, t('networkLive'))),
+      panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
-        panel('button', { type: 'button', style: style.button, onClick: () => { void load({ offset }) } }, t('refresh')))),
+        panel('button', { type: 'button', style: buttonStyle('default', loading), onClick: () => { void load({ offset }) }, disabled: loading }, loading ? t('loading') : t('refresh')))),
     panel(NetworkSection, { t, network }),
     panel(ApartmentSection, {
       t, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
