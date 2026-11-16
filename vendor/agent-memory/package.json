@@ -1,0 +1,12 @@
+{
+  "name": "dsh-agent-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent SQLite memory for DSH agents: remember/search/list/forget/status.",
+  "license": "MIT",
+  "main": "./index.js",
+  "exports": { ".": "./index.js" },
+  "files": ["index.js", "README.md"],
+  "engines": { "node": ">=24" }
+}

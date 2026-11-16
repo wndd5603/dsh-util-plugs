@@ -20,6 +20,8 @@
       name: dsh-util-plugs/plugins/bulletin-board
     - id: agent-apartment
       name: dsh-util-plugs/plugins/agent-apartment
+    - id: agent-memory
+      name: dsh-util-plugs/plugins/agent-memory
     - id: local-worker
       name: dsh-util-plugs/plugins/local-worker
       config:

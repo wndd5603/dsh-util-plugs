@@ -240,6 +240,16 @@ const zh = {
   networkLive: 'LIVE',
   boardsLabel: '公告栏',
   tasksLabel: '任务',
+  allTasks: '全部',
+  noTasks: '这个公告栏还没有任务。',
+  boardTasks: '任务列表',
+  taskDetail: '任务详情',
+  closeTask: '收起',
+  assignee: '负责人',
+  dependencies: '依赖',
+  related: '关联',
+  priorityLabel: '优先级',
+  blockedReason: '阻塞原因',
   networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建。',
   apartmentTitle: '智能体公寓 / 存储',
   apartmentSubtitle: '集中管理 Agent 主目录、租约、备份与根目录迁移。',
@@ -314,6 +324,16 @@ const en = {
   networkLive: 'LIVE',
   boardsLabel: 'Boards',
   tasksLabel: 'Tasks',
+  allTasks: 'All',
+  noTasks: 'No tasks on this board yet.',
+  boardTasks: 'Tasks',
+  taskDetail: 'Task detail',
+  closeTask: 'Collapse',
+  assignee: 'Assignee',
+  dependencies: 'Depends on',
+  related: 'Related',
+  priorityLabel: 'Priority',
+  blockedReason: 'Blocked reason',
   networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
   apartmentTitle: 'Agent Apartment / storage',
   apartmentSubtitle: 'Central agent homes, leases, backups and root migration.',
@@ -427,6 +447,20 @@ body[data-ds-dark-theme="false"] .mb-dialog { background: rgb(250,250,250); }
 .mb-boardTop { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
 .mb-boardTitle { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-boardPath { margin-top: 6px; font-size: 11.5px; opacity: .58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-board[data-active="true"] { border-color: rgba(79,140,255,0.55); background: rgba(79,140,255,0.10); }
+.mb-board { cursor: pointer; text-align: left; color: inherit; }
+.mb-board:focus-visible { outline: 2px solid rgba(79,140,255,0.8); outline-offset: 1px; }
+.mb-taskList { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
+.mb-task { width: 100%; text-align: left; color: inherit; background: transparent; border: 1px solid rgba(127,127,127,0.16); border-radius: 8px; padding: 7px 9px; cursor: pointer; }
+.mb-task:hover { background: rgba(127,127,127,0.10); }
+.mb-task[data-active="true"] { border-color: rgba(79,140,255,0.5); }
+.mb-taskTitle { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 12.5px; }
+.mb-taskMeta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 11px; opacity: .65; }
+.mb-detail { margin-top: 8px; padding: 9px 10px; border-left: 2px solid rgba(79,140,255,0.5); background: rgba(79,140,255,0.06); border-radius: 0 8px 8px 0; font-size: 12px; line-height: 1.55; }
+.mb-detail p { margin: 4px 0; }
+.mb-chipRow { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+.mb-chipButton { appearance: none; border: 1px solid rgba(127,127,127,0.22); background: transparent; color: inherit; border-radius: 999px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+.mb-chipButton[data-active="true"] { border-color: rgba(79,140,255,0.65); background: rgba(79,140,255,0.14); }
 .mb-pill { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.25); font-size: 11px; white-space: nowrap; }
 .mb-pill[data-status="completed"] { color: rgb(100,190,120); border-color: rgba(63,185,80,0.45); }
 .mb-pill[data-status="blocked"] { color: rgb(235,145,120); border-color: rgba(248,81,73,0.45); }
@@ -626,11 +660,89 @@ function createApartmentRemoteContribution() {
 
 function NetworkSection(props) {
   const { t, network } = props
-  if (network === undefined || network === null) return null
   const boards = Array.isArray(network.boards) ? network.boards : []
   const tasks = Array.isArray(network.tasks) ? network.tasks : []
   const counts = network.counts ?? {}
   const statuses = ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated']
+  const [selectedBoardId, setSelectedBoardId] = React.useState(boards[0]?.id)
+  const [statusFilter, setStatusFilter] = React.useState('all')
+  const [selectedTaskId, setSelectedTaskId] = React.useState(undefined)
+  const activeBoard = boards.find(board => board.id === selectedBoardId) ?? boards[0]
+  const boardTasks = activeBoard === undefined ? [] : tasks.filter(task => (task.boardId ?? task.board_id) === activeBoard.id)
+  const visibleTasks = statusFilter === 'all' ? boardTasks : boardTasks.filter(task => task.status === statusFilter)
+  const selectedTask = visibleTasks.find(task => task.id === selectedTaskId)
+  const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined) }
+
+  const boardGrid = panel('div', { className: 'mb-boardGrid' }, boards.slice(0, 8).map(board => {
+    const active = activeBoard?.id === board.id
+    return panel('article', {
+      key: board.id,
+      className: 'mb-board',
+      role: 'button',
+      tabIndex: 0,
+      'data-active': active ? 'true' : 'false',
+      'aria-label': board.title,
+      onClick: () => selectBoard(board.id),
+      onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectBoard(board.id) } },
+    },
+    panel('div', { className: 'mb-boardTop' },
+      panel('span', { className: 'mb-boardTitle', title: board.title }, board.title),
+      panel('span', { className: 'mb-pill', 'data-status': board.status }, board.status)),
+    panel('div', { className: 'mb-boardPath' }, board.workspace || board.id))
+  }))
+
+  const taskChips = panel('div', { className: 'mb-chipRow' }, ['all', ...statuses].map(status => panel('button', {
+    key: status,
+    type: 'button',
+    className: 'mb-chipButton',
+    'data-active': statusFilter === status ? 'true' : 'false',
+    onClick: () => setStatusFilter(status),
+  }, status === 'all' ? t('allTasks') : status, ' ', String(status === 'all' ? boardTasks.length : boardTasks.filter(task => task.status === status).length))))
+
+  const taskList = visibleTasks.length === 0
+    ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('noTasks'))
+    : panel('div', { className: 'mb-taskList' }, visibleTasks.map(task => panel('button', {
+      key: task.id,
+      type: 'button',
+      className: 'mb-task',
+      'data-active': selectedTask?.id === task.id ? 'true' : 'false',
+      onClick: () => setSelectedTaskId(current => current === task.id ? undefined : task.id),
+    },
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', null, task.title),
+      panel('span', { className: 'mb-pill', 'data-status': task.status }, task.status)),
+    panel('div', { className: 'mb-taskMeta' },
+      task.assigneeAlias || task.assigneeSession ? panel('span', null, `${t('assignee')}: ${task.assigneeAlias || task.assigneeSession}`) : null,
+      task.priority ? panel('span', null, `${t('priorityLabel')} ${task.priority}`) : null,
+      Array.isArray(task.dependsOn) && task.dependsOn.length > 0 ? panel('span', null, `${t('dependencies')} ${task.dependsOn.length}`) : null,
+      task.blockedReason ? panel('span', null, t('blockedReason')) : null))))
+
+  const taskDetail = selectedTask === undefined ? null : panel('div', { className: 'mb-detail' },
+    panel('div', { className: 'mb-taskTitle' },
+      panel('strong', null, selectedTask.title),
+      panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => setSelectedTaskId(undefined) }, t('closeTask'))),
+    selectedTask.description ? panel('p', null, selectedTask.description) : null,
+    panel('p', { className: 'mb-muted' }, `${t('assignee')}: ${selectedTask.assigneeAlias || selectedTask.assigneeSession || '—'}`),
+    selectedTask.dependsOn?.length ? panel('p', null, `${t('dependencies')}: ${selectedTask.dependsOn.join(', ')}`) : null,
+    selectedTask.relatedTasks?.length ? panel('p', null, `${t('related')}: ${selectedTask.relatedTasks.join(', ')}`) : null,
+    selectedTask.blockedReason ? panel('p', null, `${t('blockedReason')}: ${selectedTask.blockedReason}`) : null)
+
+  const taskPanel = activeBoard === undefined ? null : panel('div', { style: { marginTop: 12 } },
+    panel('div', { className: 'mb-cardSub', style: { marginBottom: 4 } }, `${t('boardTasks')} · ${activeBoard.title}`),
+    taskChips, taskList, taskDetail)
+
+  const content = boards.length === 0
+    ? panel('p', { className: 'mb-muted' }, t('networkEmpty'))
+    : panel('div', null, boardGrid, taskPanel)
+
+  const countsRow = tasks.length === 0 ? null : panel('div', { className: 'mb-statRow', style: { marginBottom: 0 } },
+    statuses.map(status => panel('span', {
+      key: status,
+      className: 'mb-pill',
+      'data-status': status,
+      style: { opacity: counts[status] ? 1 : 0.5 },
+    }, status, ' ', String(counts[status] ?? 0))))
+
   return panel('section', { 'data-agent-network': '', className: 'mb-card' },
     panel('div', { className: 'mb-cardHead' },
       panel('div', null,
@@ -640,21 +752,8 @@ function NetworkSection(props) {
     panel('div', { className: 'mb-statRow' },
       panel('span', { className: 'mb-stat' }, t('boardsLabel'), ' ', panel('strong', null, boards.length)),
       panel('span', { className: 'mb-stat' }, t('tasksLabel'), ' ', panel('strong', null, tasks.length))),
-    boards.length === 0
-      ? panel('p', { className: 'mb-muted' }, t('networkEmpty'))
-      : panel('div', { className: 'mb-boardGrid' },
-        boards.slice(0, 6).map(board => panel('article', { key: board.id, className: 'mb-board' },
-          panel('div', { className: 'mb-boardTop' },
-            panel('span', { className: 'mb-boardTitle', title: board.title }, board.title),
-            panel('span', { className: 'mb-pill', 'data-status': board.status }, board.status)),
-          panel('div', { className: 'mb-boardPath' }, board.workspace || board.id)))),
-    tasks.length === 0 ? null : panel('div', { className: 'mb-statRow', style: { marginBottom: 0 } },
-      statuses.map(status => panel('span', {
-        key: status,
-        className: 'mb-pill',
-        'data-status': status,
-        style: { opacity: counts[status] ? 1 : 0.5 },
-      }, status, ' ', String(counts[status] ?? 0)))))
+    content,
+    countsRow)
 }
 
 function ApartmentSection(props) {
@@ -921,7 +1020,7 @@ function MessageCenterPage(props) {
       panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
         panel('button', { type: 'button', style: buttonStyle('default', loading), onClick: () => { void load({ offset }) }, disabled: loading }, loading ? t('loading') : t('refresh')))),
-    panel(NetworkSection, { t, network }),
+    network === undefined ? null : panel(NetworkSection, { t, network }),
     panel(ApartmentSection, {
       t, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
       onSetRoot: () => { void apartmentAction('setRoot') },

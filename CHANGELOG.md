@@ -1,3 +1,8 @@
+## 2026.11.16-3 (dev)
+
+- **Agent Memory (new row `agent-memory`)**: persistent SQLite memory (`$DSH_HOME/memory/memory.sqlite`) with `memory_remember/search/list/forget/status`, scope/key upsert, tags and source session.
+- **Bulletin board interaction**: board selection, per-board status filters, task list with assignee/priority/dependency/blocked state and expandable task detail; message-list snapshots now carry full task fields.
+
 ## 2026.11.16-2 (dev)
 
 - **Agent Apartment (new row `agent-apartment`)**: centralized agent homes/AGENTS.md/skills/tools, workspace leases, many-to-many teams/memberships, task-role bindings, experience records, legacy `team/members` import, root pointer + backup/migration/restore tools (`apartment_set_root`, `apartment_migrate`, `apartment_backup`, `apartment_restore`, `apartment_lease_reap`, `apartment_verify`); destructive root operations require danger-full-access; Agent Network panel has storage/migrate/backup/restore/verify buttons.
