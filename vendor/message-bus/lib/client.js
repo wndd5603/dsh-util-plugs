@@ -1079,14 +1079,13 @@ function MessageCenterPage(props) {
       } else missing = true
     } catch { missing = true }
     if (missing && attempt < 6) setTimeout(() => { void loadAux(attempt + 1) }, 300)
-    if (!missing) { void loadMemory(); void loadMeetings() }
   }, [api])
 
   const loadMemory = React.useCallback(async (options = {}) => {
     if (memoryBusy || typeof api.memoryPage !== 'function') return
     const page = Number.isInteger(options.page) ? options.page : memoryPage
     setMemoryBusy(true)
-    setMemoryMessage(undefined)
+    if (!options.preserveMessage) setMemoryMessage(undefined)
     try {
       const result = await api.memoryPage({
         query: options.query ?? memoryQuery,
@@ -1161,6 +1160,7 @@ function MessageCenterPage(props) {
   }, [api, keyword, limit, offset, readBy, loadAux])
 
   React.useEffect(() => { void load({ offset: 0 }) }, []) // initial load
+  React.useEffect(() => { void loadMemory({ page: 0 }); void loadMeetings({ page: 0 }) }, [])
 
   const apartmentAction = async (kind) => {
     if (apartmentBusy) return
@@ -1198,7 +1198,7 @@ function MessageCenterPage(props) {
       if (result?.ok === false) throw new Error(result.error ?? 'delete failed')
       setMemoryDeleteId(undefined)
       setMemoryMessage({ text: t('memoryDeleted'), tone: 'ok' })
-      await loadMemory({ page: memoryPage })
+      await loadMemory({ page: memoryPage, preserveMessage: true })
     } catch (caught) {
       setMemoryMessage({ text: t('memoryFailed', { error: errorTextOf(caught) }), tone: 'danger' })
     } finally {

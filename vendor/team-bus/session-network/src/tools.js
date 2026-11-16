@@ -1,4 +1,4 @@
-/** Tool registration for dsh-session-network (P0/P1 skeleton; modules are injected lazily). */
+﻿/** Tool registration for dsh-session-network (P0/P1 skeleton; modules are injected lazily). */
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -1057,7 +1057,24 @@ export function registerTools(ctx, deps) {
           }
         }
       }
-      if (readMeetingStore(meetingId) !== null) return meetingInvalid(`meeting already exists: ${meetingId}`, 'MEETING_EXISTS')
+      const existingState = loadMeetingState(meetingId)
+      if (existingState.ok) {
+        if (readMeetingStore(meetingId) === null) {
+          try { writeMeetingStore(existingState.store) } catch (error) { return meetingError(error) }
+        }
+        const existingParticipants = existingState.participants.map(participantView)
+        const existingMessages = mergeMeetingMessages(existingState.store, existingState.messages)
+        return {
+          ok: true,
+          duplicate: true,
+          existingMeetingId: meetingId,
+          meeting: meetingView(existingState.meeting, existingState.store, existingParticipants, existingMessages),
+          participants: existingParticipants,
+          participantIds: existingParticipants.map(participant => participant.sessionId),
+          messages: existingMessages,
+        }
+      }
+      if (existingState.notFound !== true) return meetingError(existingState.error)
       const title = firstString(args.title) ?? null
       const convener = resolveMeetingAuthor(exec)
       const workspaceDir = resolveMeetingWorkspace(exec)
@@ -1350,12 +1367,6 @@ export function registerTools(ctx, deps) {
       const decisions = parsedBody.decisions.length > 0 ? parsedBody.decisions : existingDecisions
       const actions = parsedBody.actions.length > 0 ? parsedBody.actions : existingActions
       const atIso = new Date().toISOString()
-      const statusWrite = withWriteDb(() => {
-        const changed = modules.db.setMeetingStatus(meetingId, 'final')
-        return { changed, meeting: modules.db.getMeeting(meetingId) }
-      })
-      if (!statusWrite.ok) return meetingError(statusWrite.error)
-      if (statusWrite.value.changed !== true) return meetingNotFound(meetingId)
       const store = {
         ...state.store,
         status: 'finalized',
@@ -1366,7 +1377,7 @@ export function registerTools(ctx, deps) {
         summaryText: parsedBody.summaryText,
       }
       const messages = mergeMeetingMessages(store, state.messages)
-      const meeting = meetingView(statusWrite.value.meeting, store, participants, messages)
+      const meeting = meetingView(state.meeting, store, participants, messages)
       const summary = {
         meetingId,
         title: meeting.title,
@@ -1393,8 +1404,15 @@ export function registerTools(ctx, deps) {
       } catch (error) {
         return meetingError(error)
       }
+      const statusWrite = withWriteDb(() => {
+        const changed = modules.db.setMeetingStatus(meetingId, 'final')
+        return { changed, meeting: modules.db.getMeeting(meetingId) }
+      })
+      if (!statusWrite.ok) return meetingError(statusWrite.error)
+      if (statusWrite.value.changed !== true) return meetingNotFound(meetingId)
+      const finalMeeting = meetingView(statusWrite.value.meeting, store, participants, messages)
       safeCall(() => audit?.({ action: 'meeting_finalize', meetingId, ok: true, decisions: decisions.length, actions: actions.length, caller: resolveAuditCaller(exec) }), () => {})
-      return { ok: true, alreadyFinalized: false, meeting, summary, decisions, actions, participants, participantIds: participants.map(participant => participant.sessionId) }
+      return { ok: true, alreadyFinalized: false, meeting: finalMeeting, summary, decisions, actions, participants, participantIds: participants.map(participant => participant.sessionId) }
     },
   })
 

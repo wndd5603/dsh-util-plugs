@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Universal session message bus for DeepSeek Harness.
  *
  * Project-agnostic: messages live in one SQLite database (default
@@ -141,6 +141,12 @@ export function isPriorityMessage(subject, body) {
 function dshHomeDir() {
   return process.env.DSH_HOME && process.env.DSH_HOME.length > 0 ? process.env.DSH_HOME : join(homedir(), '.dsh')
 }
+const envPath = (name, fallback) => {
+  const value = process.env[name]
+  return typeof value === 'string' && value.trim() !== '' ? resolve(value.trim()) : fallback
+}
+const bulletinDbPath = () => envPath('DSH_BULLETIN_DB', join(dshHomeDir(), 'bulletin-board', 'board.sqlite'))
+const memoryDbPath = () => envPath('DSH_MEMORY_DB', join(dshHomeDir(), 'memory', 'memory.sqlite'))
 const safeJsonArray = value => {
   try { const parsed = JSON.parse(value ?? '[]'); return Array.isArray(parsed) ? parsed : [] } catch { return [] }
 }
@@ -246,6 +252,7 @@ function taskPageRow(row) {
     id: row.id,
     boardId: row.board_id,
     title: row.title,
+    description: row.description,
     status: row.status,
     assigneeAlias: row.assignee_alias,
     assigneeSession: row.assignee_session,
@@ -286,7 +293,7 @@ function readTasksPage(rawArgs) {
     values.push(like, like, like, like, like, like)
   }
   const whereSql = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
-  const db = openSnapshotDb(join(dshHomeDir(), 'bulletin-board', 'board.sqlite'))
+  const db = openSnapshotDb(bulletinDbPath())
   if (db === null) return emptyTasksPage(offset, limit)
   try {
     const total = Number(db.prepare('SELECT COUNT(*) AS n FROM tasks' + whereSql).get(...values)?.n ?? 0)
@@ -335,7 +342,7 @@ function readMemoryPage(rawArgs) {
     values.push(like, like, like)
   }
   const whereSql = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
-  const db = openSnapshotDb(join(dshHomeDir(), 'memory', 'memory.sqlite'))
+  const db = openSnapshotDb(memoryDbPath())
   if (db === null) return emptyMemoriesPage(offset, limit)
   try {
     const total = Number(db.prepare('SELECT COUNT(*) AS n FROM memories' + whereSql).get(...values)?.n ?? 0)
@@ -357,7 +364,7 @@ function forgetMemory(rawArgs) {
   if (args.confirm !== 'DELETE') return { ok: false, error: 'memoryForget requires confirm:"DELETE"' }
   const id = typeof args.id === 'string' ? args.id.trim() : ''
   if (id === '') return { ok: false, error: 'id is required' }
-  const path = join(dshHomeDir(), 'memory', 'memory.sqlite')
+  const path = memoryDbPath()
   if (!existsSync(path)) return { ok: false, gone: true, error: 'memory database not found' }
   let db
   try {
@@ -375,22 +382,28 @@ function forgetMemory(rawArgs) {
 
 function readMeetingsPage(rawQuery) {
   const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
-  const profilesDir = join(dshHomeDir(), 'profiles')
-  let names = []
-  try { names = readdirSync(profilesDir) } catch { return { meetings: [], total: 0, counts: {}, offset: 0, limit: 20 } }
-  let dbPath
-  let latest = -1
-  for (const name of names) {
-    const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
-    if (!existsSync(candidate)) continue
-    const mtime = statSync(candidate).mtimeMs
-    if (mtime > latest) { latest = mtime; dbPath = candidate }
-  }
-  if (dbPath === undefined) return { meetings: [], total: 0, counts: {}, offset: 0, limit: 20 }
   const limit = Number.isFinite(Number(query.limit)) ? Math.min(100, Math.max(1, Math.trunc(Number(query.limit)))) : 20
   const offset = Number.isFinite(Number(query.offset)) ? Math.max(0, Math.trunc(Number(query.offset))) : 0
   const keyword = typeof query.query === 'string' ? query.query.trim() : ''
   const status = typeof query.status === 'string' && query.status !== '' ? query.status : null
+  let dbPath = process.env.DSH_TEAM_NETWORK_DB && process.env.DSH_TEAM_NETWORK_DB.trim() !== ''
+    ? resolve(process.env.DSH_TEAM_NETWORK_DB.trim())
+    : (process.env.DSH_TEAM_DATA_DIR && process.env.DSH_TEAM_DATA_DIR.trim() !== ''
+      ? join(resolve(process.env.DSH_TEAM_DATA_DIR.trim()), 'network.db')
+      : undefined)
+  if (dbPath === undefined) {
+    const profilesDir = join(dshHomeDir(), 'profiles')
+    let names = []
+    try { names = readdirSync(profilesDir) } catch { return { meetings: [], total: 0, counts: {}, offset, limit } }
+    let latest = -1
+    for (const name of names) {
+      const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
+      if (!existsSync(candidate)) continue
+      const mtime = statSync(candidate).mtimeMs
+      if (mtime > latest) { latest = mtime; dbPath = candidate }
+    }
+  }
+  if (dbPath === undefined || !existsSync(dbPath)) return { meetings: [], total: 0, counts: {}, offset, limit }
   let db
   try {
     db = new DatabaseSync(dbPath, { readOnly: true })
@@ -398,8 +411,8 @@ function readMeetingsPage(rawQuery) {
     const values = []
     if (status !== null) { where.push('m.status = ?'); values.push(status) }
     if (keyword !== '') {
-      where.push('(m.meeting_id LIKE ? OR m.title LIKE ? OR m.convener LIKE ?)')
-      const like = '%' + keyword + '%'
+      where.push("(m.meeting_id LIKE ? ESCAPE '\\' OR m.title LIKE ? ESCAPE '\\' OR m.convener LIKE ? ESCAPE '\\')")
+      const like = likePattern(keyword)
       values.push(like, like, like)
     }
     const clause = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
@@ -409,13 +422,17 @@ function readMeetingsPage(rawQuery) {
       (SELECT COUNT(*) FROM messages x WHERE x.meeting_id=m.meeting_id) AS messages
       FROM meetings m` + clause + ' ORDER BY m.updated_at DESC, m.created_at DESC LIMIT ? OFFSET ?').all(...values, limit, offset)
     const counts = {}
-    for (const row of db.prepare('SELECT status, COUNT(*) AS n FROM meetings GROUP BY status').all()) counts[row.status] = row.n
+    for (const row of db.prepare('SELECT m.status, COUNT(*) AS n FROM meetings m' + clause + ' GROUP BY m.status').all(...values)) counts[row.status] = row.n
+    const iso = value => {
+      if (value === null || value === undefined) return null
+      const parsed = new Date(value)
+      return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null
+    }
     return {
       meetings: rows.map(row => ({
         meetingId: row.meeting_id, title: row.title, status: row.status, convener: row.convener,
         participants: row.participants, messages: row.messages,
-        deadline: row.deadline === null ? null : new Date(row.deadline).toISOString(),
-        createdAt: new Date(row.created_at).toISOString(), updatedAt: row.updated_at === null ? null : new Date(row.updated_at).toISOString(),
+        deadline: iso(row.deadline), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at),
       })),
       total, counts, offset, limit,
     }
