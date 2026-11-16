@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, renameSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const args = process.argv.slice(2)
 const opt = name => {
@@ -20,7 +21,7 @@ const opt = name => {
   return i >= 0 ? args[i + 1] : undefined
 }
 const flag = name => args.includes(name)
-const repoRoot = resolve(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const tag = opt('--tag')
 const notesPath = opt('--notes')
 const force = flag('--force')
