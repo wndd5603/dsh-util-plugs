@@ -2,6 +2,7 @@
 // task-role bindings, experience and root backup/migration.
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { createApartment, getActiveRoot, setActiveRoot } from './src/store.js'
 import { boolean, number, objectSchema, string } from './lib/standard-schema.js'
 
@@ -64,14 +65,45 @@ export function apply(ctx, config) {
     const from = apartment.root
     const to = resolve(toArg)
     if (to === from) throw new Error('target equals current apartment root')
-    mkdirSync(to, { recursive: true })
-    apartment.checkpoint?.()
-    for (const dir of ['agents', 'work', 'manifests', 'backups']) {
-      if (existsSync(join(from, dir))) cpSync(join(from, dir), join(to, dir), { recursive: true })
+    const source = apartment.status()
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const staging = `${to}.staging-${stamp}`
+    mkdirSync(staging, { recursive: true })
+    const countDb = (dir) => {
+      const file = join(dir, 'apartment.sqlite')
+      if (!existsSync(file)) return { agents: 0, teams: 0 }
+      const db = new DatabaseSync(file, { readOnly: true })
+      try {
+        const count = table => {
+          try { return Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n) } catch { return 0 }
+        }
+        return { agents: count('agents'), teams: count('teams') }
+      } finally { db.close() }
     }
-    if (existsSync(join(from, 'apartment.sqlite'))) cpSync(join(from, 'apartment.sqlite'), join(to, 'apartment.sqlite'))
-    setActiveRoot(to)
-    return { from, to, restartRequired: true, verify: apartment.verify() }
+    try {
+      apartment.checkpoint?.()
+      for (const dir of ['agents', 'work', 'manifests', 'backups']) {
+        if (existsSync(join(from, dir))) cpSync(join(from, dir), join(staging, dir), { recursive: true })
+      }
+      if (existsSync(join(from, 'apartment.sqlite'))) cpSync(join(from, 'apartment.sqlite'), join(staging, 'apartment.sqlite'))
+      const staged = countDb(staging)
+      if (source.agents > 0 && staged.agents < source.agents) throw new Error(`migration verify failed: agents ${staged.agents}/${source.agents}`)
+      if (source.teams > 0 && staged.teams < source.teams) throw new Error(`migration verify failed: teams ${staged.teams}/${source.teams}`)
+      mkdirSync(to, { recursive: true })
+      for (const dir of ['agents', 'work', 'manifests', 'backups']) {
+        if (existsSync(join(staging, dir))) cpSync(join(staging, dir), join(to, dir), { recursive: true })
+      }
+      if (existsSync(join(staging, 'apartment.sqlite'))) cpSync(join(staging, 'apartment.sqlite'), join(to, 'apartment.sqlite'))
+      const copied = countDb(to)
+      if (copied.agents < source.agents || copied.teams < source.teams) throw new Error(`migration verify failed at target: ${JSON.stringify(copied)}`)
+      const targetApartment = createApartment({ root: to })
+      const verify = targetApartment.verify()
+      targetApartment.close()
+      setActiveRoot(to)
+      return { from, to, counts: copied, sourceCounts: { agents: source.agents, teams: source.teams }, restartRequired: true, verify }
+    } finally {
+      try { rmSync(staging, { recursive: true, force: true }) } catch { /* best effort */ }
+    }
   }
 
   register(desc('apartment_status', 'Read apartment root, counts and verify summary.'), async () => ({ ...apartment.status(), verify: apartment.verify() }))

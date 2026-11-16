@@ -305,6 +305,8 @@ const zh = {
   memoryConfirmDelete: '确认删除',
   memoryCancel: '取消',
   memoryDeleted: '记忆已删除。',
+  memoryExpand: '展开详情',
+  memoryCollapse: '收起详情',
   memoryFailed: '记忆操作失败：{error}',
   memoryTotal: '共 {total} 条',
   memoryScopeAll: '全部 scope',
@@ -412,6 +414,8 @@ const en = {
   memoryConfirmDelete: 'Confirm delete',
   memoryCancel: 'Cancel',
   memoryDeleted: 'Memory deleted.',
+  memoryExpand: 'Show details',
+  memoryCollapse: 'Hide details',
   memoryFailed: 'Memory operation failed: {error}',
   memoryTotal: '{total} entries',
   memoryScopeAll: 'All scopes',
@@ -924,6 +928,35 @@ function ApartmentSection(props) {
     }, feedback.text))
 }
 
+function MemoryRow(props) {
+  const { t, memoryRow, pendingDelete, onAskDelete, onCancelDelete, onConfirmDelete } = props
+  const [expanded, setExpanded] = React.useState(false)
+  const content = typeof memoryRow.content === 'string' ? memoryRow.content : ''
+  const long = content.length > 280
+  const visible = expanded || !long ? content : content.slice(0, 280) + '…'
+  return panel('article', { key: memoryRow.id, className: 'mb-task', 'data-memory-row': memoryRow.id },
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', null, memoryRow.key || memoryRow.id),
+      panel('span', { className: 'mb-pill' }, memoryRow.scope)),
+    panel('p', { style: { margin: '6px 0', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, 'data-memory-content': expanded ? 'expanded' : 'collapsed' }, visible),
+    long
+      ? panel('button', {
+        type: 'button', className: 'mb-chipButton', 'data-memory-toggle': '',
+        'aria-expanded': expanded ? 'true' : 'false',
+        onClick: () => setExpanded(value => !value),
+      }, expanded ? t('memoryCollapse') : t('memoryExpand'))
+      : null,
+    panel('div', { className: 'mb-taskMeta' },
+      panel('span', null, memoryRow.updated_at ?? ''),
+      (memoryRow.tags ?? []).map(tag => panel('span', { key: tag, className: 'mb-pill' }, tag)),
+      pendingDelete === memoryRow.id
+        ? panel('span', null,
+          panel('button', { type: 'button', className: 'mb-chipButton', onClick: onCancelDelete }, t('memoryCancel')),
+          ' ',
+          panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onConfirmDelete(memoryRow.id) }, t('memoryConfirmDelete')))
+        : panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onAskDelete(memoryRow.id) }, t('memoryDelete'))))
+}
+
 function MemorySection(props) {
   const { t, memory, query, scope, setQuery, setScope, page, pageCount, busy, message, pendingDelete, onSearch, onPage, onAskDelete, onCancelDelete, onConfirmDelete } = props
   if (memory === undefined || memory === null) return null
@@ -956,20 +989,10 @@ function MemorySection(props) {
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: () => onPage(0) }, t('clear'))),
     memories.length === 0
       ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('memoryEmpty'))
-      : panel('div', { className: 'mb-taskList' }, memories.map(memoryRow => panel('article', { key: memoryRow.id, className: 'mb-task' },
-        panel('div', { className: 'mb-taskTitle' },
-          panel('span', null, memoryRow.key || memoryRow.id),
-          panel('span', { className: 'mb-pill' }, memoryRow.scope)),
-        panel('p', { style: { margin: '6px 0', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, memoryRow.content),
-        panel('div', { className: 'mb-taskMeta' },
-          panel('span', null, memoryRow.updated_at ?? ''),
-          (memoryRow.tags ?? []).map(tag => panel('span', { key: tag, className: 'mb-pill' }, tag)),
-          pendingDelete === memoryRow.id
-            ? panel('span', null,
-              panel('button', { type: 'button', className: 'mb-chipButton', onClick: onCancelDelete }, t('memoryCancel')),
-              ' ',
-              panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onConfirmDelete(memoryRow.id) }, t('memoryConfirmDelete')))
-            : panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onAskDelete(memoryRow.id) }, t('memoryDelete')))))),
+      : panel('div', { className: 'mb-taskList' }, memories.map(memoryRow => panel(MemoryRow, {
+        key: memoryRow.id, t, memoryRow, pendingDelete,
+        onAskDelete, onCancelDelete, onConfirmDelete,
+      }))),
     panel('div', { className: 'mb-actionRow' },
       panel('span', { className: 'mb-muted' }, t('pageInfo', { page: page + 1, pages: pageCount, total: memory.total ?? memories.length })),
       panel('button', { type: 'button', className: 'mb-chipButton', disabled: page <= 0, onClick: () => onPage(page - 1) }, t('prevPage')),
