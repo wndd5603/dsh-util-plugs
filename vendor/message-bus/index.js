@@ -11,7 +11,7 @@
  * message_routes / message_route_register, plus legacy pipe2_* aliases.
  */
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -44,6 +44,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'tasksPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
 ])
 
 /**
@@ -369,6 +370,59 @@ function forgetMemory(rawArgs) {
     return { ok: false, error: String(error?.message ?? error) }
   } finally {
     closeSnapshotDb(db)
+  }
+}
+
+function readMeetingsPage(rawQuery) {
+  const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
+  const profilesDir = join(dshHomeDir(), 'profiles')
+  let names = []
+  try { names = readdirSync(profilesDir) } catch { return { meetings: [], total: 0, counts: {}, offset: 0, limit: 20 } }
+  let dbPath
+  let latest = -1
+  for (const name of names) {
+    const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
+    if (!existsSync(candidate)) continue
+    const mtime = statSync(candidate).mtimeMs
+    if (mtime > latest) { latest = mtime; dbPath = candidate }
+  }
+  if (dbPath === undefined) return { meetings: [], total: 0, counts: {}, offset: 0, limit: 20 }
+  const limit = Number.isFinite(Number(query.limit)) ? Math.min(100, Math.max(1, Math.trunc(Number(query.limit)))) : 20
+  const offset = Number.isFinite(Number(query.offset)) ? Math.max(0, Math.trunc(Number(query.offset))) : 0
+  const keyword = typeof query.query === 'string' ? query.query.trim() : ''
+  const status = typeof query.status === 'string' && query.status !== '' ? query.status : null
+  let db
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+    const where = []
+    const values = []
+    if (status !== null) { where.push('m.status = ?'); values.push(status) }
+    if (keyword !== '') {
+      where.push('(m.meeting_id LIKE ? OR m.title LIKE ? OR m.convener LIKE ?)')
+      const like = '%' + keyword + '%'
+      values.push(like, like, like)
+    }
+    const clause = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
+    const total = db.prepare('SELECT COUNT(*) AS n FROM meetings m' + clause).get(...values).n
+    const rows = db.prepare(`SELECT m.*,
+      (SELECT COUNT(*) FROM meeting_participants p WHERE p.meeting_id=m.meeting_id) AS participants,
+      (SELECT COUNT(*) FROM messages x WHERE x.meeting_id=m.meeting_id) AS messages
+      FROM meetings m` + clause + ' ORDER BY m.updated_at DESC, m.created_at DESC LIMIT ? OFFSET ?').all(...values, limit, offset)
+    const counts = {}
+    for (const row of db.prepare('SELECT status, COUNT(*) AS n FROM meetings GROUP BY status').all()) counts[row.status] = row.n
+    return {
+      meetings: rows.map(row => ({
+        meetingId: row.meeting_id, title: row.title, status: row.status, convener: row.convener,
+        participants: row.participants, messages: row.messages,
+        deadline: row.deadline === null ? null : new Date(row.deadline).toISOString(),
+        createdAt: new Date(row.created_at).toISOString(), updatedAt: row.updated_at === null ? null : new Date(row.updated_at).toISOString(),
+      })),
+      total, counts, offset, limit,
+    }
+  } catch {
+    return { meetings: [], total: 0, counts: {}, offset, limit }
+  } finally {
+    try { db?.close() } catch { /* ignore */ }
   }
 }
 
@@ -1465,6 +1519,7 @@ export function apply(ctx, config) {
       tasksPage(query) { return readTasksPage(query) }
       memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query) }
+      meetingsPage(query) { return readMeetingsPage(query) }
     }
     Object.defineProperty(MessageBusWebRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
       configurable: true,
