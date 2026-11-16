@@ -647,7 +647,14 @@ function readMessageAudit(store, rawArgs) {
     const readState = db.prepare('SELECT session_id, read_at FROM read_state WHERE message_id = ? ORDER BY read_at DESC').all(messageId)
     const envelopes = db.prepare('SELECT to_session, delivered_at, consumed_at FROM envelope_state WHERE message_id = ?'
       + ' ORDER BY delivered_at ASC').all(messageId)
-    const routes = db.prepare('SELECT alias, session_id, display_name FROM routes ORDER BY alias ASC LIMIT 200').all()
+    // Only routes that actually resolve this message's target session belong in
+    // the audit; the full alias table is exposed by message_routes instead of
+    // dumping up to 200 unrelated global routes into one message's audit.
+    const routes = db.prepare('SELECT alias, session_id, display_name FROM routes'
+      + ' WHERE session_id = ? ORDER BY alias ASC').all(row.to_session)
+    const scopedRoutes = routes.map(route => ({
+      alias: route.alias, sessionId: route.session_id, displayName: route.display_name,
+    }))
     return {
       ok: true,
       message: {
@@ -664,7 +671,8 @@ function readMessageAudit(store, rawArgs) {
       envelopes: envelopes.map(envelope => ({
         toSession: envelope.to_session, deliveredAt: envelope.delivered_at, consumedAt: envelope.consumed_at,
       })),
-      routes: routes.map(route => ({ alias: route.alias, sessionId: route.session_id, displayName: route.display_name })),
+      routes: scopedRoutes,
+      routesScope: scopedRoutes.length === 0 ? 'none' : 'session',
       total, limit, offset,
     }
   } catch (error) {

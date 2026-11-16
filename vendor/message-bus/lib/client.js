@@ -1035,10 +1035,14 @@ function createApartmentRemoteContribution() {
 }
 
 function NetworkSection(props) {
-  const { t, network, api } = props
+  const { t, network: networkValue, api } = props
+  // The bulletin-board snapshot is optional: a clean profile has no board DB,
+  // but the session/alias directory must still render. Boards/tasks then keep
+  // their explicit empty state instead of hiding the whole section.
+  const network = networkValue !== null && typeof networkValue === 'object' ? networkValue : {}
   const boards = Array.isArray(network.boards) ? network.boards : []
   const tasks = Array.isArray(network.tasks) ? network.tasks : []
-  const counts = network.counts ?? {}
+  const counts = network.counts !== null && typeof network.counts === 'object' ? network.counts : {}
   const statuses = ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated']
   const [selectedBoardId, setSelectedBoardId] = React.useState(boards[0]?.id)
   const [statusFilter, setStatusFilter] = React.useState('all')
@@ -1877,7 +1881,7 @@ function MessageCenterPage(props) {
       panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
         panel('button', { type: 'button', style: buttonStyle('default', loading), onClick: () => { void load({ offset }) }, disabled: loading }, loading ? t('loading') : t('refresh')))),
-    network === undefined ? null : panel(NetworkSection, { t, network, api }),
+    panel(NetworkSection, { t, network, api }),
     panel(ApartmentSection, {
       t, api, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
       onSetRoot: path => { void apartmentAction('setRoot', path) },
