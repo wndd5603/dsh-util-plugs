@@ -25,6 +25,7 @@
     - id: local-worker
       name: dsh-util-plugs/plugins/local-worker
       config:
+        mode: dsh-provider
         endpoint: http://127.0.0.1:11435/v1
         model: qwen2.5-coder:0.5b
     - id: team-bus
