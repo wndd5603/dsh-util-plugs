@@ -719,6 +719,7 @@ const APARTMENT_REMOTE_METHODS = [
   { method: 'backup', invocation: { kind: 'direct' }, parameters: ['label'] },
   { method: 'restore', invocation: { kind: 'direct' }, parameters: ['from'] },
   { method: 'verify', invocation: { kind: 'direct' }, parameters: [] },
+  { method: 'data', invocation: { kind: 'direct' }, parameters: ['query'] },
 ]
 const apartmentParameter = name => ({
   name,
@@ -902,10 +903,41 @@ function NetworkSection(props) {
 }
 
 function ApartmentSection(props) {
-  const { t, rootInput, setRootInput, busy, message, onSetRoot, onMigrate, onBackup, onRestore, onVerify } = props
+  const { t, api, rootInput, setRootInput, busy, message, onSetRoot, onMigrate, onBackup, onRestore, onVerify } = props
+  const [section, setSection] = React.useState('agents')
+  const [detailQuery, setDetailQuery] = React.useState('')
+  const [detailPage, setDetailPage] = React.useState(0)
+  const [detail, setDetail] = React.useState(undefined)
+  const [detailBusy, setDetailBusy] = React.useState(false)
   const apartment = unwrapRemote(props.apartment)
+  const loadDetail = async (next = {}) => {
+    if (typeof api?.apartmentData !== 'function') return
+    const targetSection = next.section ?? section
+    const targetPage = next.page ?? detailPage
+    const targetQuery = next.query ?? detailQuery
+    setDetailBusy(true)
+    try {
+      const raw = await api.apartmentData({ section: targetSection, query: targetQuery, limit: 10, offset: targetPage * 10 })
+      const value = unwrapRemote(raw)
+      setDetail(value ?? { items: [], total: 0, limit: 10, offset: 0 })
+      setSection(targetSection)
+      setDetailPage(targetPage)
+    } catch (caught) {
+      setDetail({ items: [], total: 0, error: errorTextOf(caught) })
+    } finally { setDetailBusy(false) }
+  }
+  React.useEffect(() => { void loadDetail({ section: 'agents', page: 0, query: '' }) }, [])
   if (apartment === undefined || apartment === null) return null
   const feedback = message !== null && typeof message === 'object' ? message : (message === undefined ? undefined : { text: String(message), tone: 'ok' })
+  const sections = [['agents', 'Agent'], ['teams', 'Teams'], ['leases', 'Leases'], ['roles', 'Roles'], ['experiences', 'Experience'], ['backups', 'Backups']]
+  const items = Array.isArray(detail?.items) ? detail.items : []
+  const pages = Math.max(1, Math.ceil((detail?.total ?? 0) / 10))
+  const rowText = item => section === 'agents' ? `${item.name ?? item.id} · ${item.status ?? ''} · ${item.home ?? ''}`
+    : section === 'teams' ? `${item.name ?? item.id} · ${item.purpose ?? ''}`
+      : section === 'leases' ? `${item.agent_id ?? ''} · ${item.workspace ?? ''} · ${item.state ?? ''}`
+        : section === 'roles' ? `${item.task_id ?? ''} · ${item.agent_id ?? item.team_id ?? ''} · ${item.role ?? ''}`
+          : section === 'experiences' ? `${item.agent_id ?? ''} · ${item.summary ?? ''}`
+            : `${item.name ?? item.path ?? ''} · files ${item.files ?? 0}`
   return panel('section', { 'data-apartment': '', className: 'mb-card' },
     panel('div', { className: 'mb-cardHead' },
       panel('div', null,
@@ -915,7 +947,9 @@ function ApartmentSection(props) {
     panel('div', { className: 'mb-statRow' },
       panel('span', { className: 'mb-stat' }, 'agents ', panel('strong', null, apartment.agents ?? 0)),
       panel('span', { className: 'mb-stat' }, 'teams ', panel('strong', null, apartment.teams ?? 0)),
-      panel('span', { className: 'mb-stat' }, 'leases ', panel('strong', null, apartment.leases ?? 0))),
+      panel('span', { className: 'mb-stat' }, 'leases ', panel('strong', null, apartment.leases ?? 0)),
+      panel('span', { className: 'mb-stat' }, 'roles ', panel('strong', null, apartment.taskRoles ?? 0)),
+      panel('span', { className: 'mb-stat' }, 'experience ', panel('strong', null, apartment.experiences ?? 0))),
     panel('div', { className: 'mb-actionRow' },
       panel('input', {
         type: 'text',
@@ -930,6 +964,23 @@ function ApartmentSection(props) {
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onBackup }, t('apartmentBackup')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onRestore }, t('apartmentRestore')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onVerify }, t('apartmentVerify'))),
+    panel('div', { className: 'mb-actionRow', 'data-apartment-sections': '' },
+      sections.map(([id, label]) => panel('button', {
+        key: id, type: 'button', className: 'mb-chipButton', 'data-active': section === id ? 'true' : 'false',
+        onClick: () => { void loadDetail({ section: id, page: 0 }) },
+      }, label))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('input', {
+        type: 'search', value: detailQuery, className: 'mb-inlineInput', placeholder: '搜索当前列表',
+        'aria-label': '搜索当前列表', onChange: event => setDetailQuery(event.target.value),
+      }),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: detailBusy, onClick: () => { void loadDetail({ page: 0 }) } }, t('search')),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: detailBusy || detailPage <= 0, onClick: () => { void loadDetail({ page: detailPage - 1 }) } }, t('prevPage')),
+      panel('span', { className: 'mb-muted' }, t('pageInfo', { page: detailPage + 1, pages, total: detail?.total ?? 0 })),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: detailBusy || detailPage >= pages - 1, onClick: () => { void loadDetail({ page: detailPage + 1 }) } }, t('nextPage'))),
+    detail?.error ? panel('p', { className: 'mb-feedback', 'data-tone': 'danger' }, detail.error) : null,
+    items.length === 0 ? panel('p', { className: 'mb-muted' }, '暂无数据') : panel('div', { className: 'mb-taskList' }, items.map((item, index) => panel('article', { key: item.id ?? item.name ?? index, className: 'mb-task' },
+      panel('p', { style: { margin: 0, fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, rowText(item))))),
     feedback === undefined ? null : panel('p', {
       className: 'mb-feedback',
       'data-tone': feedback.tone === 'danger' ? 'danger' : 'ok',
@@ -1360,7 +1411,7 @@ function MessageCenterPage(props) {
         panel('button', { type: 'button', style: buttonStyle('default', loading), onClick: () => { void load({ offset }) }, disabled: loading }, loading ? t('loading') : t('refresh')))),
     network === undefined ? null : panel(NetworkSection, { t, network, api }),
     panel(ApartmentSection, {
-      t, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
+      t, api, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
       onSetRoot: () => { void apartmentAction('setRoot') },
       onMigrate: () => { void apartmentAction('migrate') },
       onBackup: () => { void apartmentAction('backup') },
@@ -1495,6 +1546,7 @@ function apply(ctx) {
         delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
         send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
         apartmentStatus: () => scope.remote.agentApartment.status(),
+        apartmentData: query => scope.remote.agentApartment.data(query),
         apartmentSetRoot: root => scope.remote.agentApartment.setRoot(root),
         apartmentMigrate: to => scope.remote.agentApartment.migrate(to),
         apartmentBackup: label => scope.remote.agentApartment.backup(label),

@@ -91,7 +91,7 @@ export function createApartment({ root, dbPath } = {}) {
       mkdirSync(join(home, 'skills'), { recursive: true })
       mkdirSync(join(home, 'tools'), { recursive: true })
       db.prepare(`INSERT INTO agents (id,name,home,status,capabilities,created_at,updated_at) VALUES (?,?,?,'active',?,?,?)
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at`).run(agentId, name, home, JSON.stringify(capabilities), now(), now())
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name, home=excluded.home, updated_at=excluded.updated_at`).run(agentId, name, home, JSON.stringify(capabilities), now(), now())
       return db.prepare('SELECT * FROM agents WHERE id=?').get(agentId)
     },
     listAgents() { return db.prepare('SELECT * FROM agents ORDER BY name').all() },
@@ -150,10 +150,13 @@ export function createApartment({ root, dbPath } = {}) {
     },
     backup(label = 'manual') {
       const stamp = now().replace(/[:.]/g, '-')
-      const dir = join(resolvedRoot, 'backups', `${stamp}-${label}`)
+      const safeLabel = String(label).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[._-]+/, '').slice(0, 64) || 'manual'
+      const dir = join(resolvedRoot, 'backups', `${stamp}-${safeLabel}`)
       mkdirSync(dir, { recursive: true })
       cpSync(join(resolvedRoot, 'agents'), join(dir, 'agents'), { recursive: true })
       cpSync(join(resolvedRoot, 'work'), join(dir, 'work'), { recursive: true })
+      this.checkpoint?.()
+      if (existsSync(join(resolvedRoot, 'apartment.sqlite'))) cpSync(join(resolvedRoot, 'apartment.sqlite'), join(dir, 'apartment.sqlite'))
       const manifest = { id: stamp, at: now(), root: resolvedRoot, files: [] }
       const walk = (base, prefix = '') => {
         for (const entry of readdirSync(base)) {
@@ -176,6 +179,18 @@ export function createApartment({ root, dbPath } = {}) {
         if (existsSync(join(from, dir))) cpSync(join(from, dir), join(resolvedRoot, dir), { recursive: true })
       }
       return { restoredFrom: from, safetyBackup: safety.backup, restartRequired: true }
+    },
+    listBackups() {
+      const dir = join(resolvedRoot, 'backups')
+      if (!existsSync(dir)) return []
+      return readdirSync(dir).filter(name => {
+        try { return statSync(join(dir, name)).isDirectory() } catch { return false }
+      }).map(name => {
+        const path = join(dir, name)
+        let manifest = null
+        try { manifest = JSON.parse(readFileSync(join(path, 'manifest.json'), 'utf8')) } catch { /* ignore */ }
+        return { name, path, at: manifest?.at ?? null, files: Array.isArray(manifest?.files) ? manifest.files.length : 0 }
+      }).sort((a, b) => String(b.name).localeCompare(String(a.name)))
     },
     verify() {
       const issues = []

@@ -18,6 +18,7 @@ const REMOTE_METHODS = [
   { method: 'backup', invocation: { kind: 'direct' } },
   { method: 'restore', invocation: { kind: 'direct' } },
   { method: 'verify', invocation: { kind: 'direct' } },
+  { method: 'data', invocation: { kind: 'direct' } },
 ]
 
 export const Config = objectSchema({
@@ -61,6 +62,15 @@ export function apply(ctx, config) {
       throw error
     }
   }
+  const assertRemoteOperator = () => {
+    let mode
+    try { mode = ctx.get?.('sandboxPolicy')?.resolve?.({})?.mode } catch { mode = undefined }
+    if (mode !== 'danger-full-access') {
+      const error = new Error('apartment: remote mutation requires a danger-full-access operator session')
+      error.code = 'APARTMENT_OPERATOR_REQUIRED'
+      throw error
+    }
+  }
   const migrate = (toArg) => {
     const from = apartment.root
     const to = resolve(toArg)
@@ -86,6 +96,15 @@ export function apply(ctx, config) {
         if (existsSync(join(from, dir))) cpSync(join(from, dir), join(staging, dir), { recursive: true })
       }
       if (existsSync(join(from, 'apartment.sqlite'))) cpSync(join(from, 'apartment.sqlite'), join(staging, 'apartment.sqlite'))
+      const stagedDbPath = join(staging, 'apartment.sqlite')
+      if (existsSync(stagedDbPath)) {
+        const stagedDb = new DatabaseSync(stagedDbPath)
+        try {
+          const rows = stagedDb.prepare('SELECT id FROM agents').all()
+          const update = stagedDb.prepare('UPDATE agents SET home=? WHERE id=?')
+          for (const row of rows) update.run(join(to, 'agents', row.id), row.id)
+        } finally { stagedDb.close() }
+      }
       const staged = countDb(staging)
       if (source.agents > 0 && staged.agents < source.agents) throw new Error(`migration verify failed: agents ${staged.agents}/${source.agents}`)
       if (source.teams > 0 && staged.teams < source.teams) throw new Error(`migration verify failed: teams ${staged.teams}/${source.teams}`)
@@ -150,11 +169,27 @@ export function apply(ctx, config) {
 
   class AgentApartmentRemote {
     status() { return { ...apartment.status(), verify: apartment.verify() } }
-    setRoot(root) { const next = setActiveRoot(root); return { ...next, restartRequired: true } }
-    migrate(to) { return migrate(to) }
+    setRoot(root) { assertRemoteOperator(); const next = setActiveRoot(root); return { ...next, restartRequired: true } }
+    migrate(to) { assertRemoteOperator(); return migrate(to) }
     backup(label) { return apartment.backup(label ?? 'manual') }
-    restore(from) { return apartment.restoreFrom(from) }
+    restore(from) { assertRemoteOperator(); return apartment.restoreFrom(from) }
     verify() { return apartment.verify() }
+    data(query) {
+      const section = typeof query?.section === 'string' ? query.section : 'agents'
+      const q = typeof query?.query === 'string' ? query.query.trim().toLowerCase() : ''
+      const limit = Number.isFinite(Number(query?.limit)) ? Math.max(1, Math.min(100, Math.trunc(Number(query.limit)))) : 20
+      const offset = Number.isFinite(Number(query?.offset)) ? Math.max(0, Math.trunc(Number(query.offset))) : 0
+      const match = value => q === '' || String(value ?? '').toLowerCase().includes(q)
+      let rows
+      if (section === 'agents') rows = apartment.listAgents().filter(row => match(row.id) || match(row.name) || match(row.home) || match(row.status))
+      else if (section === 'teams') rows = apartment.listTeams().filter(row => match(row.id) || match(row.name) || match(row.purpose))
+      else if (section === 'leases') rows = apartment.listLeases().filter(row => match(row.agent_id) || match(row.workspace) || match(row.state))
+      else if (section === 'roles') rows = apartment.listTaskRoles().filter(row => match(row.task_id) || match(row.agent_id) || match(row.role))
+      else if (section === 'experiences') rows = apartment.listExperiences().filter(row => match(row.agent_id) || match(row.summary) || match(row.outcome))
+      else if (section === 'backups') rows = apartment.listBackups?.() ?? []
+      else rows = []
+      return { section, items: rows.slice(offset, offset + limit), total: rows.length, limit, offset, counts: apartment.status(), verify: apartment.verify() }
+    }
   }
   Object.defineProperty(AgentApartmentRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
     configurable: true, enumerable: false, value: Object.freeze({ version: 1, methods: REMOTE_METHODS }),
