@@ -45,6 +45,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'meetingDetail', invocation: Object.freeze({ kind: 'direct' }) }),
 ])
 
 /**
@@ -445,6 +446,84 @@ function readMeetingsPage(rawQuery) {
     }
   } catch {
     return { meetings: [], total: 0, counts: {}, offset, limit }
+  } finally {
+    try { db?.close() } catch { /* ignore */ }
+  }
+}
+
+function readMeetingDetail(rawQuery) {
+  const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
+  const meetingId = typeof query.meetingId === 'string' ? query.meetingId.trim() : ''
+  if (meetingId === '') return { ok: false, error: 'meetingId is required' }
+  let dbPath = process.env.DSH_TEAM_NETWORK_DB && process.env.DSH_TEAM_NETWORK_DB.trim() !== ''
+    ? resolve(process.env.DSH_TEAM_NETWORK_DB.trim())
+    : (process.env.DSH_TEAM_DATA_DIR && process.env.DSH_TEAM_DATA_DIR.trim() !== ''
+      ? join(resolve(process.env.DSH_TEAM_DATA_DIR.trim()), 'network.db')
+      : undefined)
+  if (dbPath === undefined) {
+    const profilesDir = join(dshHomeDir(), 'profiles')
+    let names = []
+    try { names = readdirSync(profilesDir) } catch { names = [] }
+    let latest = -1
+    for (const name of names) {
+      const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
+      if (!existsSync(candidate)) continue
+      const mtime = statSync(candidate).mtimeMs
+      if (mtime > latest) { latest = mtime; dbPath = candidate }
+    }
+  }
+  if (dbPath === undefined || !existsSync(dbPath)) return { ok: false, error: 'meeting database not found' }
+  let db
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+    const row = db.prepare('SELECT * FROM meetings WHERE meeting_id=?').get(meetingId)
+    if (row === undefined) return { ok: false, error: 'meeting not found', meetingId }
+    const participants = db.prepare('SELECT session_id, role, ack_state FROM meeting_participants WHERE meeting_id=?').all(meetingId)
+    const dbMessages = db.prepare('SELECT * FROM messages WHERE meeting_id=? ORDER BY at ASC').all(meetingId)
+    const raw = String(meetingId)
+    const digest = createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 12)
+    const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '_').slice(0, 48) || 'meeting'
+    const sidecarPath = join(dirname(dbPath), 'meetings', `${safe}-${digest}.json`)
+    let sidecar = {}
+    try { sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8')) } catch { sidecar = {} }
+    const posts = new Map((Array.isArray(sidecar.posts) ? sidecar.posts : []).map(post => [String(post.msgId), post]))
+    const messages = dbMessages.map(message => {
+      const post = posts.get(String(message.msg_id)) ?? {}
+      return {
+        msgId: message.msg_id,
+        round: post.round ?? null,
+        from: message.from_alias,
+        to: message.to_alias,
+        subject: post.subject ?? null,
+        body: typeof post.body === 'string' ? post.body : null,
+        bodySha256: message.body_sha256,
+        bodyLen: message.body_len,
+        at: typeof message.at === 'number' ? new Date(message.at).toISOString() : message.at,
+      }
+    })
+    const iso = value => {
+      if (value === null || value === undefined) return null
+      const date = new Date(value)
+      return Number.isFinite(date.getTime()) ? date.toISOString() : null
+    }
+    return {
+      ok: true,
+      meeting: {
+        meetingId: row.meeting_id, title: row.title,
+        status: row.status === 'final' ? 'finalized' : row.status,
+        convener: row.convener, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at),
+        deadline: iso(row.deadline), dirPath: row.dir_path,
+      },
+      participants: participants.map(participant => ({ sessionId: participant.session_id, role: participant.role, ackState: participant.ack_state })),
+      messages,
+      decisions: Array.isArray(sidecar.decisions) ? sidecar.decisions : [],
+      actions: Array.isArray(sidecar.actions) ? sidecar.actions : [],
+      summary: sidecar.summary ?? null,
+      summaryText: sidecar.summaryText ?? null,
+      bodyAvailable: sidecarPath !== null,
+    }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) }
   } finally {
     try { db?.close() } catch { /* ignore */ }
   }
@@ -1544,6 +1623,7 @@ export function apply(ctx, config) {
       memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query) }
       meetingsPage(query) { return readMeetingsPage(query) }
+      meetingDetail(query) { return readMeetingDetail(query) }
     }
     Object.defineProperty(MessageBusWebRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
       configurable: true,

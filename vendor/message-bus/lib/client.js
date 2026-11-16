@@ -116,6 +116,15 @@ function createRemoteContribution() {
         parameters: [jsonParameter('query')],
         result: identityCodec('dsh-message-bus#messageBus/meetingsPage:result'),
       },
+      {
+        id: 'dsh-message-bus/messageBus/meetingDetail',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'meetingDetail',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/meetingDetail:result'),
+      },
     ],
   }
 }
@@ -1057,8 +1066,37 @@ function MemorySection(props) {
     message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text))
 }
 
+function MeetingDetailDialog(props) {
+  const { t, detail, busy, onClose } = props
+  return panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) onClose() } },
+    panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': '会议详情', 'data-meeting-detail': '' },
+      panel('div', { className: 'mb-actionRow', style: { justifyContent: 'space-between' } },
+        panel('h3', { style: { margin: 0 } }, detail?.meeting?.title ?? '会议详情'),
+        panel('button', { type: 'button', className: 'mb-chipButton', onClick: onClose }, '关闭')),
+      busy ? panel('p', { className: 'mb-muted' }, t('loading')) : null,
+      detail?.error ? panel('p', { className: 'mb-feedback', 'data-tone': 'danger' }, detail.error) : null,
+      detail?.meeting ? panel('div', { className: 'mb-taskMeta' },
+        panel('span', null, detail.meeting.meetingId),
+        panel('span', { className: 'mb-pill' }, detail.meeting.status),
+        detail.meeting.convener ? panel('span', null, detail.meeting.convener) : null,
+        detail.meeting.updatedAt ? panel('span', null, detail.meeting.updatedAt) : null) : null,
+      detail?.summaryText ? panel('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, detail.summaryText) : null,
+      Array.isArray(detail?.participants) && detail.participants.length > 0 ? panel('p', { className: 'mb-muted' }, 'Participants: ' + detail.participants.map(p => p.sessionId).join(', ')) : null,
+      Array.isArray(detail?.messages) ? panel('div', { className: 'mb-taskList' }, detail.messages.map(message => panel('article', { key: message.msgId, className: 'mb-task' },
+        panel('div', { className: 'mb-taskTitle' },
+          panel('span', null, message.round ?? 'note'),
+          panel('span', { className: 'mb-pill' }, message.from ?? '')),
+        panel('p', { style: { margin: '6px 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '36vh', overflow: 'auto' } }, message.body ?? '(body unavailable)')))) : null,
+      Array.isArray(detail?.decisions) && detail.decisions.length > 0 ? panel('div', null,
+        panel('h4', null, 'Decisions'),
+        panel('ul', null, detail.decisions.map((decision, index) => panel('li', { key: decision.id ?? index }, decision.text ?? JSON.stringify(decision))))) : null,
+      Array.isArray(detail?.actions) && detail.actions.length > 0 ? panel('div', null,
+        panel('h4', null, 'Actions'),
+        panel('ul', null, detail.actions.map((action, index) => panel('li', { key: action.id ?? index }, `${action.text ?? ''} · ${action.owner ?? ''} · ${action.status ?? ''}`)))) : null))
+}
+
 function MeetingsSection(props) {
-  const { t, meetings, query, status, setQuery, setStatus, page, pageCount, busy, message, onSearch, onPage } = props
+  const { t, meetings, query, status, setQuery, setStatus, page, pageCount, busy, message, onSearch, onPage, onOpen } = props
   if (meetings === undefined || meetings === null) return null
   const items = Array.isArray(meetings.meetings) ? meetings.meetings : []
   return panel('section', { 'data-agent-meetings': '', className: 'mb-card' },
@@ -1090,7 +1128,8 @@ function MeetingsSection(props) {
           panel('span', null, item.meetingId),
           panel('span', null, `${t('meetingParticipants')} ${item.participants ?? 0}`),
           panel('span', null, `${t('meetingMessages')} ${item.messages ?? 0}`),
-          item.convener ? panel('span', null, item.convener) : null)))),
+          item.convener ? panel('span', null, item.convener) : null,
+          typeof onOpen === 'function' ? panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onOpen(item.meetingId) }, '详情') : null)))),
     panel('div', { className: 'mb-actionRow' },
       panel('span', { className: 'mb-muted' }, t('pageInfo', { page: page + 1, pages: pageCount, total: meetings.total ?? items.length })),
       panel('button', { type: 'button', className: 'mb-chipButton', disabled: page <= 0, onClick: () => onPage(page - 1) }, t('prevPage')),
@@ -1129,6 +1168,8 @@ function MessageCenterPage(props) {
   const [meetingPage, setMeetingPage] = React.useState(0)
   const [meetingBusy, setMeetingBusy] = React.useState(false)
   const [meetingMessage, setMeetingMessage] = React.useState(undefined)
+  const [meetingDetail, setMeetingDetail] = React.useState(undefined)
+  const [meetingDetailBusy, setMeetingDetailBusy] = React.useState(false)
   const [apartmentBusy, setApartmentBusy] = React.useState(false)
   const [apartmentMessage, setApartmentMessage] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
@@ -1205,6 +1246,18 @@ function MessageCenterPage(props) {
       setMeetingBusy(false)
     }
   }, [api, meetingBusy, meetingPage, meetingQuery, meetingStatus, t])
+
+  const openMeetingDetail = async meetingId => {
+    if (meetingDetailBusy || typeof api.meetingDetail !== 'function') return
+    setMeetingDetailBusy(true)
+    setMeetingDetail({})
+    try {
+      const raw = await api.meetingDetail({ meetingId })
+      setMeetingDetail(unwrapRemote(raw))
+    } catch (caught) {
+      setMeetingDetail({ error: errorTextOf(caught) })
+    } finally { setMeetingDetailBusy(false) }
+  }
 
   const load = React.useCallback(async (options = {}) => {
     const nextOffset = options.offset ?? offset
@@ -1428,6 +1481,7 @@ function MessageCenterPage(props) {
       page: meetingPage, pageCount: meetingPages, busy: meetingBusy, message: meetingMessage,
       onSearch: () => { void loadMeetings({ page: 0 }) },
       onPage: next => { void loadMeetings({ page: Math.max(0, Math.min(meetingPages - 1, next)) }) },
+      onOpen: id => { void openMeetingDetail(id) },
     }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
@@ -1482,8 +1536,13 @@ function MessageCenterPage(props) {
         onClick: () => { void load({ offset: offset + limit }) },
         'data-message-next': '',
       }, t('nextPage'))),
-    detail === undefined ? null : panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) { setSelected(undefined); setDetail(undefined) } } },
-      panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('detailTitle'), 'data-message-detail': '' },
+    meetingDetail === undefined ? null : panel(MeetingDetailDialog, {
+      t,
+      detail: meetingDetail,
+      busy: meetingDetailBusy,
+      onClose: () => setMeetingDetail(undefined),
+    }),
+    detail === undefined ? null : panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) { setSelected(undefined); setDetail(undefined) } } },      panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('detailTitle'), 'data-message-detail': '' },
         panel(MessageDetail, {
           t,
           item: detail,
@@ -1552,6 +1611,7 @@ function apply(ctx) {
         memoryPage: query => scope.remote.messageBus.memoryPage(query),
         memoryForget: query => scope.remote.messageBus.memoryForget(query),
         meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
+        meetingDetail: query => scope.remote.messageBus.meetingDetail(query),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',
