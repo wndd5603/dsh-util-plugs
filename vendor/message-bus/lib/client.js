@@ -2018,44 +2018,50 @@ function apply(ctx) {
   })
   ctx.inject(['remote.messageBus'], scope => {
     const apartmentRemote = scope.remote?.agentApartment
-    scope.remoteAccess.whenAccess('messageBus/list', function* () {
-      const t = scope.locale.bind(LOCALE_NS)
-      const api = {
-        list: (keyword, limit, offset, readBy) => scope.remote.messageBus.list(keyword, limit, offset, readBy),
-        search: (keyword, limit, offset, readBy) => scope.remote.messageBus.search(keyword, limit, offset, readBy),
-        get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
-        delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
-        send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
-        apartmentStatus: () => apartmentRemote?.status?.(),
-        apartmentData: query => apartmentRemote?.data?.(query),
-        apartmentSetRoot: root => apartmentRemote?.setRoot?.(root),
-        apartmentMigrate: to => apartmentRemote?.migrate?.(to),
-        apartmentBackup: label => apartmentRemote?.backup?.(label),
-        apartmentRestore: from => apartmentRemote?.restore?.(from),
-        apartmentVerify: () => apartmentRemote?.verify?.(),
-        tasksPage: query => scope.remote.messageBus.tasksPage(query),
-        taskDetail: query => scope.remote.messageBus.taskDetail(query),
-        memoryPage: query => scope.remote.messageBus.memoryPage(query),
-        memoryForget: query => scope.remote.messageBus.memoryForget(query),
-        meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
-        meetingDetail: query => scope.remote.messageBus.meetingDetail(query),
-        networkPage: query => scope.remote.messageBus.networkPage(query),
-        messageAudit: query => scope.remote.messageBus.messageAudit(query),
-      }
-      yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
+    const t = scope.locale.bind(LOCALE_NS)
+    const api = {
+      list: (keyword, limit, offset, readBy) => scope.remote.messageBus.list(keyword, limit, offset, readBy),
+      search: (keyword, limit, offset, readBy) => scope.remote.messageBus.search(keyword, limit, offset, readBy),
+      get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
+      delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
+      send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
+      apartmentStatus: () => apartmentRemote?.status?.(),
+      apartmentData: query => apartmentRemote?.data?.(query),
+      apartmentSetRoot: root => apartmentRemote?.setRoot?.(root),
+      apartmentMigrate: to => apartmentRemote?.migrate?.(to),
+      apartmentBackup: label => apartmentRemote?.backup?.(label),
+      apartmentRestore: from => apartmentRemote?.restore?.(from),
+      apartmentVerify: () => apartmentRemote?.verify?.(),
+      tasksPage: query => scope.remote.messageBus.tasksPage(query),
+      taskDetail: query => scope.remote.messageBus.taskDetail(query),
+      memoryPage: query => scope.remote.messageBus.memoryPage(query),
+      memoryForget: query => scope.remote.messageBus.memoryForget(query),
+      meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
+      meetingDetail: query => scope.remote.messageBus.meetingDetail(query),
+      networkPage: query => scope.remote.messageBus.networkPage(query),
+      messageAudit: query => scope.remote.messageBus.messageAudit(query),
+    }
+    // Register the panel even while no conversation is selected; individual
+    // Remote calls still enforce their own access checks when a panel is used.
+    ctx.effect(() => {
+      const disposeSidebar = scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',
         id: PANEL_ID,
         order: 2,
         locale: LOCALE_NS,
         label: () => t('panel'),
       }, MessageBusIcon))
-      yield scope.slots.inject('main', () => scope.slots.register({
+      const disposeMain = scope.slots.inject('main', () => scope.slots.register({
         name: 'main',
         key: PANEL_ID,
         locale: LOCALE_NS,
         inject: () => ({ api }),
       }, MessageCenterPage))
-    })
+      return () => {
+        if (typeof disposeMain === 'function') disposeMain()
+        if (typeof disposeSidebar === 'function') disposeSidebar()
+      }
+    }, 'message-bus client: panels')
   })
 }
 
