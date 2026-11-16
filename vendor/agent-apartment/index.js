@@ -63,6 +63,11 @@ export function apply(ctx, config) {
     }
   }
   const assertRemoteOperator = () => {
+    if (process.env.DSH_APARTMENT_ALLOW_WEB_MUTATION !== 'true') {
+      const error = new Error('apartment: Web mutation is read-only by default; use apartment_* tools or set DSH_APARTMENT_ALLOW_WEB_MUTATION=true')
+      error.code = 'APARTMENT_WEB_READ_ONLY'
+      throw error
+    }
     let mode
     try { mode = ctx.get?.('sandboxPolicy')?.resolve?.({})?.mode } catch { mode = undefined }
     if (mode !== 'danger-full-access') {

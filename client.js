@@ -2020,7 +2020,8 @@ function apply(ctx) {
     try { await owner.remote.$mount(createApartmentRemoteContribution()) } catch { /* apartment row may be absent */ }
     await owner.remote.$mount(createRemoteContribution())
   })
-  ctx.inject(['remote.messageBus', 'remote.agentApartment'], scope => {
+  ctx.inject(['remote.messageBus'], scope => {
+    const apartmentRemote = scope.remote?.agentApartment
     scope.remoteAccess.whenAccess('messageBus/list', function* () {
       const t = scope.locale.bind(LOCALE_NS)
       const api = {
@@ -2029,13 +2030,13 @@ function apply(ctx) {
         get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
         delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
         send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
-        apartmentStatus: () => scope.remote.agentApartment.status(),
-        apartmentData: query => scope.remote.agentApartment.data(query),
-        apartmentSetRoot: root => scope.remote.agentApartment.setRoot(root),
-        apartmentMigrate: to => scope.remote.agentApartment.migrate(to),
-        apartmentBackup: label => scope.remote.agentApartment.backup(label),
-        apartmentRestore: from => scope.remote.agentApartment.restore(from),
-        apartmentVerify: () => scope.remote.agentApartment.verify(),
+        apartmentStatus: () => apartmentRemote?.status?.(),
+        apartmentData: query => apartmentRemote?.data?.(query),
+        apartmentSetRoot: root => apartmentRemote?.setRoot?.(root),
+        apartmentMigrate: to => apartmentRemote?.migrate?.(to),
+        apartmentBackup: label => apartmentRemote?.backup?.(label),
+        apartmentRestore: from => apartmentRemote?.restore?.(from),
+        apartmentVerify: () => apartmentRemote?.verify?.(),
         tasksPage: query => scope.remote.messageBus.tasksPage(query),
         taskDetail: query => scope.remote.messageBus.taskDetail(query),
         memoryPage: query => scope.remote.messageBus.memoryPage(query),

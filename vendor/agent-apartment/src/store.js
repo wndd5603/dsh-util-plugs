@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS experiences (
 `
 export function createApartment({ root, dbPath } = {}) {
   const resolvedRoot = ensureLayout(resolve(root || defaultRoot()))
+  const pendingDb = join(resolvedRoot, 'apartment.sqlite.restore-pending')
+  if (existsSync(pendingDb)) {
+    try { renameSync(pendingDb, join(resolvedRoot, 'apartment.sqlite')) } catch { /* keep pending for manual recovery */ }
+  }
   const db = new DatabaseSync(dbPath || join(resolvedRoot, 'apartment.sqlite'))
   db.exec(schema)
   const reapExpired = () => {
@@ -173,12 +177,26 @@ export function createApartment({ root, dbPath } = {}) {
     },
     restoreFrom(source) {
       const from = resolve(source)
-      if (!existsSync(join(from, 'manifest.json'))) throw new Error('backup manifest not found: ' + from)
+      const manifestPath = join(from, 'manifest.json')
+      if (!existsSync(manifestPath)) throw new Error('backup manifest not found: ' + from)
+      const manifest = readJson(manifestPath, null)
+      if (manifest === null || !Array.isArray(manifest.files)) throw new Error('backup manifest invalid: ' + from)
+      for (const entry of manifest.files) {
+        if (entry === null || typeof entry.path !== 'string' || typeof entry.sha256 !== 'string') throw new Error('backup manifest entry invalid')
+        const file = resolve(from, entry.path)
+        if (file !== from && !file.startsWith(from + sep)) throw new Error('backup path escapes root: ' + entry.path)
+        if (!existsSync(file) || sha256(readFileSync(file)) !== entry.sha256) throw new Error('backup hash mismatch: ' + entry.path)
+      }
       const safety = this.backup('pre-restore')
-      for (const dir of ['agents', 'work']) {
+      for (const dir of ['agents', 'work', 'manifests']) {
         if (existsSync(join(from, dir))) cpSync(join(from, dir), join(resolvedRoot, dir), { recursive: true })
       }
-      return { restoredFrom: from, safetyBackup: safety.backup, restartRequired: true }
+      let pendingDb = null
+      if (existsSync(join(from, 'apartment.sqlite'))) {
+        pendingDb = join(resolvedRoot, 'apartment.sqlite.restore-pending')
+        cpSync(join(from, 'apartment.sqlite'), pendingDb)
+      }
+      return { restoredFrom: from, safetyBackup: safety.backup, pendingDb, restartRequired: true }
     },
     listBackups() {
       const dir = join(resolvedRoot, 'backups')
