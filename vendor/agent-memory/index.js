@@ -79,10 +79,10 @@ export function apply(ctx) {
     const query = String(args.query ?? '').trim()
     const scope = typeof args.scope === 'string' && args.scope !== '' ? args.scope : null
     const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(100, Number(args.limit))) : 20
-    const like = '%' + query + '%'
+    const like = '%' + query.replace(/[\\%_]/g, '\\$&') + '%'
     const rows = scope === null
-      ? db.prepare('SELECT * FROM memories WHERE content LIKE ? OR key LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?').all(like, like, like, limit)
-      : db.prepare('SELECT * FROM memories WHERE scope=? AND (content LIKE ? OR key LIKE ? OR tags LIKE ?) ORDER BY updated_at DESC LIMIT ?').all(scope, like, like, like, limit)
+      ? db.prepare("SELECT * FROM memories WHERE content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?").all(like, like, like, limit)
+      : db.prepare("SELECT * FROM memories WHERE scope=? AND (content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT ?").all(scope, like, like, like, limit)
     return { ok: true, memories: rows.map(row => ({ ...row, tags: safeTags(row.tags) })) }
   })
 
