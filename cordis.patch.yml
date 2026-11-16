@@ -22,12 +22,6 @@
       name: dsh-util-plugs/plugins/agent-apartment
     - id: agent-memory
       name: dsh-util-plugs/plugins/agent-memory
-    - id: local-worker
-      name: dsh-util-plugs/plugins/local-worker
-      config:
-        mode: dsh-provider
-        endpoint: http://127.0.0.1:11435/v1
-        model: qwen2.5-coder:0.5b
     - id: team-bus
       name: dsh-util-plugs/plugins/team-bus
     - id: agent-workflows

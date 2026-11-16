@@ -1,7 +1,10 @@
+## 2026.11.16-4 (dev)
+
+- **Removed `local-worker` row/tools**: local models now use DSH's own provider selection (`llm-pi-ai` Local Ollama) with `subagent` or a new session; no separate worker plugin. Bundle is 11 rows.
+
 ## 2026.11.16-3 (dev)
 
 - **Panel naming**: the former Agent Network entry is now **协作网络 / Agent Hub** with page title **智能体协作网络 / Agent Collaboration Network**, covering boards/tasks, apartment storage and messages; technical row ids remain stable.
-- **Local-worker DSH provider mode**: `mode: dsh-provider` routes `local_*` proposals through `ctx.llm` + `agentDefaultModel.currentSelection()` (streaming), instead of the fixed Ollama endpoint; `local-endpoint` remains the explicit fallback.
 - **Agent Memory (new row `agent-memory`)**: persistent SQLite memory (`$DSH_HOME/memory/memory.sqlite`) with `memory_remember/search/list/forget/status`, scope/key upsert, tags and source session.
 - **Bulletin board interaction**: board selection, per-board status filters, task list with assignee/priority/dependency/blocked state and expandable task detail; message-list snapshots now carry full task fields.
 
@@ -10,7 +13,6 @@
 - **Agent Apartment (new row `agent-apartment`)**: centralized agent homes/AGENTS.md/skills/tools, workspace leases, many-to-many teams/memberships, task-role bindings, experience records, legacy `team/members` import, root pointer + backup/migration/restore tools (`apartment_set_root`, `apartment_migrate`, `apartment_backup`, `apartment_restore`, `apartment_lease_reap`, `apartment_verify`); destructive root operations require danger-full-access; Agent Network panel has storage/migrate/backup/restore/verify buttons.
 - **Agent Network UI polish**: network-node sidebar icon, hero header, bulletin-board card grid/status pills, apartment action bar with busy/disabled state and success/danger feedback; fixed apartment Remote parameter descriptors (`backup(label)` etc.) and embedded read-only network snapshots for race-free rendering.
 - **Bulletin board / task board (new row `bulletin-board`)**: shared SQLite boards and tasks with statuses, workspace/assignee association, dependencies, atomic claim and digest queries.
-- **Local LLM worker (new row `local-worker`)**: bounded `local_llm_health` / `local_task_plan` / `local_task_transform` / `local_task_validate` tools backed by an OpenAI-compatible local model; proposals only, strict JSON, timeout/token limits.
 - **Cross-permission guard**: `crossPermissionGuard` (default true) blocks confined senders from messaging danger-full-access targets via direct id, alias, header or autoResume.
 - **Agent Network panel**: the former “跨会话消息 / Cross-session messages” panel is now “智能体网络 / Agent Network”; it adds a live bulletin-board/task section (boards, task counts by status) above the existing message-center tools. **The plugin console remains a separate panel** with its original cards/configuration/status/extensions. The bulletin-board host exposes a read-only `bulletinBoard` Remote.
 - **Subagent progress**: `agent_progress` reads `team/progress/<sessionId>.json` heartbeats plus the live agent roster and classifies starting/running/stalled/inactive/failed; documented in the `subagent-progress` skill.

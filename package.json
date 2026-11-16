@@ -1,8 +1,8 @@
 {
   "name": "dsh-util-plugs",
-  "version": "2026.11.16-3",
+  "version": "2026.11.16-4",
   "private": true,
-  "description": "Self-contained DeepSeek Harness bundle with context sentinel, message/team buses, bulletin-board task board, agent apartment, persistent agent memory, local LLM worker, agent workflows, workbench, auto backup, safe host relaunch and a unified plugin console (twelve switchable rows).",
+  "description": "Self-contained DeepSeek Harness bundle with context sentinel, message/team buses, bulletin-board task board, agent apartment, persistent agent memory, agent workflows, workbench, auto backup, safe host relaunch and a unified plugin console (eleven switchable rows).",
   "author": "wndd5603 <2863689939@qq.com>",
   "license": "MIT",
   "type": "module",
@@ -34,7 +34,6 @@
     "./plugins/bulletin-board": "./plugins/bulletin-board.js",
     "./plugins/agent-apartment": "./plugins/agent-apartment.js",
     "./plugins/agent-memory": "./plugins/agent-memory.js",
-    "./plugins/local-worker": "./plugins/local-worker.js",
     "./plugins/team-bus": "./plugins/team-bus.js",
     "./plugins/agent-workflows": "./plugins/agent-workflows.js",
     "./plugins/workbench-bundle": "./plugins/workbench-bundle.js",
