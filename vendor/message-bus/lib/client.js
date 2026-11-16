@@ -1094,7 +1094,8 @@ function MessageCenterPage(props) {
         offset: page * 20,
         limit: 20,
       })
-      setMemory(result ?? { memories: [], total: 0 })
+      const value = result?.ok === true && result.value !== undefined ? result.value : result
+      setMemory(value ?? { memories: [], total: 0 })
       setMemoryPage(page)
     } catch (caught) {
       setMemoryMessage({ text: t('memoryFailed', { error: errorTextOf(caught) }), tone: 'danger' })
