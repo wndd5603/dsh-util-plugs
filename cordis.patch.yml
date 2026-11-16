@@ -1,6 +1,6 @@
-# dsh-util-plugs — one bundle, eight switchable rows
+# dsh-util-plugs — one bundle, ten switchable rows
 #
-# Self-contained: all eight runtime modules live inside this package under
+# Self-contained: all ten runtime modules live inside this package under
 # plugins/ and vendor/. No unpublished npm package, workspace resolution or
 # network registry is required at install time.
 - insert:
@@ -16,6 +16,13 @@
       name: dsh-util-plugs/plugins/message-bus
       config:
         strictMode: true
+    - id: bulletin-board
+      name: dsh-util-plugs/plugins/bulletin-board
+    - id: local-worker
+      name: dsh-util-plugs/plugins/local-worker
+      config:
+        endpoint: http://127.0.0.1:11435/v1
+        model: qwen2.5-coder:0.5b
     - id: team-bus
       name: dsh-util-plugs/plugins/team-bus
     - id: agent-workflows

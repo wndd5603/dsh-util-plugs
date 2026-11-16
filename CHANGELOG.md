@@ -1,3 +1,10 @@
+## 2026.11.16-1 (dev)
+
+- **Bulletin board / task board (new row `bulletin-board`)**: shared SQLite boards and tasks with statuses, workspace/assignee association, dependencies, atomic claim and digest queries.
+- **Local LLM worker (new row `local-worker`)**: bounded `local_llm_health` / `local_task_plan` / `local_task_transform` / `local_task_validate` tools backed by an OpenAI-compatible local model; proposals only, strict JSON, timeout/token limits.
+- **Cross-permission guard**: `crossPermissionGuard` (default true) blocks confined senders from messaging danger-full-access targets via direct id, alias, header or autoResume.
+- Bundle is now 10 rows; existing rows remain switchable and zero npm dependencies.
+
 ## 2026.11.5-9
 
 - Host-relaunch config is now exposed in the plugin console: `allowRealRestart` is marked volatile and the restart schema emits Schemastery-compatible `{uid,refs}` JSON for the settings form.

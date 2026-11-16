@@ -63,6 +63,10 @@ export const Config = objectSchema({
     description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval in confined modes; set false to allow direct ids. Auto-bypassed under danger-full-access (no approval answerer). Alias/join is always unaffected.',
     volatile: true,
   }),
+  crossPermissionGuard: boolean(true, {
+    description: '跨权限保护/Cross-permission guard (default true): a confined sender may not deliver to a danger-full-access session (direct, alias, header or autoResume), preventing indirect privilege escalation. Disable only for a deliberate trusted bridge.',
+    volatile: true,
+  }),
   autoResume: boolean(true, {
     description: '自动恢复 inactive 会话后投递/Auto-resume inactive targets (default true): resume + preset mount before delivery; failures leave the message stored in the queue.',
   }),
@@ -148,6 +152,7 @@ function normalizeConfig(config) {
   return {
     enabled: merged.enabled !== false,
     strictMode: merged.strictMode !== false,
+    crossPermissionGuard: merged.crossPermissionGuard !== false,
     autoResume: merged.autoResume !== false,
     autoResumeRateLimitPerMinute: Math.max(1, Math.min(120, Math.trunc(num(merged.autoResumeRateLimitPerMinute, 12)))),
     resumeModel: merged.resumeModel !== null && typeof merged.resumeModel === 'object'
@@ -242,6 +247,47 @@ export function apply(ctx, config) {
       return typeof resolved?.mode === 'string' ? resolved.mode : undefined
     } catch {
       return undefined
+    }
+  }
+  const sandboxModeOfAgent = (agent) => {
+    try {
+      const policy = safeCtxGet(ctx, 'sandboxPolicy')
+      const resolved = policy?.resolve?.({ session: agent?.session })
+      return typeof resolved?.mode === 'string' ? resolved.mode : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const observedSandboxMode = async (sessionId) => {
+    try {
+      const query = safeCtxGet(ctx, 'sessionQuery')
+      if (query === undefined || typeof query.observeSession !== 'function') return undefined
+      const observation = await query.observeSession(sessionId)
+      try {
+        const mode = observation?.projections?.values?.sandboxMode
+        return typeof mode === 'string' ? mode : undefined
+      } finally {
+        try { observation?.[Symbol.dispose]?.() } catch { /* already disposed */ }
+      }
+    } catch {
+      return undefined
+    }
+  }
+  let crossPermissionBlocked = 0
+  /** Refuse a confined sender when the target runs with danger-full-access. */
+  const assertCrossPermission = async (exec, target) => {
+    if (cfg.crossPermissionGuard !== true) return
+    const senderMode = sandboxModeOf(exec)
+    if (senderMode === 'danger-full-access') return
+    const targetMode = target.agent === undefined
+      ? await observedSandboxMode(target.sessionId)
+      : sandboxModeOfAgent(target.agent)
+    if (targetMode === 'danger-full-access') {
+      crossPermissionBlocked++
+      logger.warn('[message-bus] blocked cross-permission delivery from ' + String(senderMode ?? 'unknown')
+        + ' to ' + target.sessionId + ' (danger-full-access)')
+      throw codedError('CROSS_PERMISSION_DENIED',
+        'cross-permission delivery blocked: only a danger-full-access sender may deliver to a danger-full-access target')
     }
   }
   /**
@@ -560,6 +606,7 @@ export function apply(ctx, config) {
     if (body.trim().length === 0) throw new Error('body must not be empty')
     if (cfg.strictMode && sandboxModeOf(exec) !== 'danger-full-access' && SESSION_ID_RE.test(to)) await requestDirectSessionIdApproval(exec, to)
     const target = resolveTarget(to, { allowInactive: true })
+    await assertCrossPermission(exec, target)
     let agent = target.agent
     if (agent !== undefined && agent.status !== undefined && agent.status !== 'idle' && agent.status !== 'running') {
       agent = undefined
@@ -917,6 +964,8 @@ export function apply(ctx, config) {
         version: PLUGIN_VERSION,
         enabled: cfg.enabled,
         strictMode: cfg.strictMode,
+        crossPermissionGuard: cfg.crossPermissionGuard,
+        crossPermissionBlocked,
         autoResume: cfg.autoResume,
         resumedCount: resumedHandles.size,
         autoResumeRateLimitPerMinute: cfg.autoResumeRateLimitPerMinute,
