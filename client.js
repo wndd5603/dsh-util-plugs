@@ -601,6 +601,10 @@ function errorTextOf(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
+function unwrapRemote(value) {
+  return value !== null && typeof value === 'object' && value.ok === true && value.value !== undefined ? value.value : value
+}
+
 function messageText(item) {
   return item.from || item.fromSession || 'unknown'
 }
@@ -898,7 +902,8 @@ function NetworkSection(props) {
 }
 
 function ApartmentSection(props) {
-  const { t, apartment, rootInput, setRootInput, busy, message, onSetRoot, onMigrate, onBackup, onRestore, onVerify } = props
+  const { t, rootInput, setRootInput, busy, message, onSetRoot, onMigrate, onBackup, onRestore, onVerify } = props
+  const apartment = unwrapRemote(props.apartment)
   if (apartment === undefined || apartment === null) return null
   const feedback = message !== null && typeof message === 'object' ? message : (message === undefined ? undefined : { text: String(message), tone: 'ok' })
   return panel('section', { 'data-apartment': '', className: 'mb-card' },
@@ -1100,7 +1105,8 @@ function MessageCenterPage(props) {
   const loadAux = React.useCallback(async (attempt = 0) => {
     let missing = false
     try {
-      const status = await api.apartmentStatus?.()
+      const rawStatus = await api.apartmentStatus?.()
+      const status = unwrapRemote(rawStatus)
       if (status !== undefined && status !== null) {
         setApartment(status)
         setRootInput(current => current === '' ? (status.root ?? '') : current)
@@ -1203,13 +1209,15 @@ function MessageCenterPage(props) {
       else if (kind === 'backup') result = await api.apartmentBackup?.('manual-ui')
       else if (kind === 'restore') result = await api.apartmentRestore?.(root)
       else result = await api.apartmentVerify?.()
+      result = unwrapRemote(result)
       const text = kind === 'backup'
         ? `备份完成${result?.backup ? '：' + result.backup : ''}`
         : kind === 'verify'
           ? (result?.ok === false ? '验证发现问题' : '验证通过')
           : JSON.stringify(result ?? { ok: true })
       setApartmentMessage({ text, tone: result?.ok === false ? 'danger' : 'ok' })
-      const status = await api.apartmentStatus?.()
+      const rawStatus = await api.apartmentStatus?.()
+      const status = unwrapRemote(rawStatus)
       if (status !== undefined && status !== null) { setApartment(status); setRootInput(status.root ?? root) }
     } catch (caught) {
       setApartmentMessage({ text: errorTextOf(caught), tone: 'danger' })
