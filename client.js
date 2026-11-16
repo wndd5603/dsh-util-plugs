@@ -653,11 +653,6 @@ function MessageCenterPage(props) {
   const loadAux = React.useCallback(async (attempt = 0) => {
     let missing = false
     try {
-      const overview = await api.overview?.()
-      if (overview !== undefined && overview !== null) setNetwork(overview)
-      else missing = true
-    } catch { missing = true }
-    try {
       const status = await api.apartmentStatus?.()
       if (status !== undefined && status !== null) {
         setApartment(status)
@@ -946,7 +941,7 @@ function apply(ctx) {
     try { await owner.remote.$mount(createApartmentRemoteContribution()) } catch { /* apartment row may be absent */ }
     await owner.remote.$mount(createRemoteContribution())
   })
-  ctx.inject(['remote.messageBus'], scope => {
+  ctx.inject(['remote.messageBus', 'remote.agentApartment'], scope => {
     scope.remoteAccess.whenAccess('messageBus/list', function* () {
       const t = scope.locale.bind(LOCALE_NS)
       const api = {
@@ -955,13 +950,12 @@ function apply(ctx) {
         get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
         delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
         send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
-        overview: () => ctx.remote.bulletinBoard?.overview?.(),
-        apartmentStatus: () => ctx.remote.agentApartment?.status?.(),
-        apartmentSetRoot: root => ctx.remote.agentApartment?.setRoot?.(root),
-        apartmentMigrate: to => ctx.remote.agentApartment?.migrate?.(to),
-        apartmentBackup: label => ctx.remote.agentApartment?.backup?.(label),
-        apartmentRestore: from => ctx.remote.agentApartment?.restore?.(from),
-        apartmentVerify: () => ctx.remote.agentApartment?.verify?.(),
+        apartmentStatus: () => scope.remote.agentApartment.status(),
+        apartmentSetRoot: root => scope.remote.agentApartment.setRoot(root),
+        apartmentMigrate: to => scope.remote.agentApartment.migrate(to),
+        apartmentBackup: label => scope.remote.agentApartment.backup(label),
+        apartmentRestore: from => scope.remote.agentApartment.restore(from),
+        apartmentVerify: () => scope.remote.agentApartment.verify(),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',
