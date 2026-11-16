@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, renameSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const args = process.argv.slice(2)
@@ -64,8 +64,8 @@ if (!skipGit) {
 const temp = mkdtempSync(join(tmpdir(), 'dsh-release-'))
 let assetPath
 try {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const out = run(npm, ['pack', '--pack-destination', temp], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const npmCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const out = run(process.execPath, [npmCli, 'pack', '--pack-destination', temp], { stdio: ['ignore', 'pipe', 'pipe'] })
   const packed = out.trim().split(/\r?\n/).filter(Boolean).pop()
   if (!packed) throw new Error('npm pack produced no filename')
   assetPath = join(temp, `dsh-util-plugs-${tag}.tgz`)
