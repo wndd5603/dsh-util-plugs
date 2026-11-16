@@ -554,9 +554,9 @@ function createContributionRegistry(onError) {
  */
 
 const zh = {
-  panel: '智能体网络',
-  title: '智能体网络',
-  subtitle: '公告栏、任务板与已安装插件：查看网络状态、任务依赖与插件配置。',
+  panel: '插件控制台',
+  title: '插件控制台',
+  subtitle: '统一查看已安装插件的配置、状态与快捷入口。',
   networkTitle: '公告栏 / 任务板',
   networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建任务板。',
   networkBoards: '任务板 {count}',
@@ -625,9 +625,9 @@ const zh = {
 }
 
 const en = {
-  panel: 'Agent Network',
-  title: 'Agent Network',
-  subtitle: 'Bulletin board, task board, and installed plugins: network state, task dependencies, and configuration.',
+  panel: 'Plugin Console',
+  title: 'Plugin Console',
+  subtitle: 'One place for installed plugins: configuration, status, and shortcuts.',
   networkTitle: 'Bulletin board / task board',
   networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
   networkBoards: 'Boards {count}',
@@ -1193,7 +1193,6 @@ function ConsolePage(props) {
         panel('button', { type: 'button', style: style.button, disabled: state.status === 'refreshing', onClick: refresh }, state.status === 'refreshing' ? '…' : t('refresh')),
         panel('button', { type: 'button', style: style.buttonPrimary, onClick: openManager }, t('openManager')))),
     state.status === 'error' ? panel('div', { style: style.errorBox }, t('refreshFailed', { error: state.error ?? 'unknown' })) : null,
-    panel(NetworkSection, { t, network }),
     selected === undefined ? panel('div', null,
       panel('div', { style: style.toolbar },
         panel('input', { type: 'search', value: query, placeholder: t('searchPlaceholder'), style: style.search, onChange: event => changeQuery(event.target.value), 'aria-label': t('searchPlaceholder') }),
@@ -1411,9 +1410,6 @@ function apply(ctx) {
   ctx.provide('pluginConsoleContributions', contributions)
   store.contributions = contributions
   store.renderSlot = undefined
-  ctx.plugin(async function mountAgentNetworkRemote(owner) {
-    try { await owner.remote.$mount(createBoardRemoteContribution()) } catch { /* bulletin board row may be absent */ }
-  })
   const openManager = card => {
     const navigation = ctx.get('pluginNavigation')
     if (navigation !== undefined) {

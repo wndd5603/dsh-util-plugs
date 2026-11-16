@@ -226,9 +226,11 @@ function canDelete(typed) {
  */
 
 const zh = {
-  panel: '跨会话消息',
-  title: '跨会话消息',
-  subtitle: '查看跨会话消息总线：搜索、详情、删除与可选发送。',
+  panel: '智能体网络',
+  title: '智能体网络',
+  subtitle: '公告栏/任务板与跨会话消息：查看任务状态、依赖和消息。',
+  networkTitle: '公告栏 / 任务板',
+  networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建。',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
   loading: '正在加载消息…',
@@ -284,9 +286,11 @@ const zh = {
 }
 
 const en = {
-  panel: 'Cross-session messages',
-  title: 'Cross-session messages',
-  subtitle: 'Browse the cross-session message bus: search, detail, delete and optional send.',
+  panel: 'Agent Network',
+  title: 'Agent Network',
+  subtitle: 'Bulletin board/task board and cross-session messages: task status, dependencies, and messages.',
+  networkTitle: 'Bulletin board / task board',
+  networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',
   loading: 'Loading messages…',
@@ -513,6 +517,47 @@ function MessageRow(props) {
   panel('div', { className: 'mb-muted', style: style.rowText }, item.snippet))
 }
 
+const BOARD_REMOTE_METHODS = [
+  { method: 'overview', invocation: { kind: 'direct' } },
+  { method: 'boards', invocation: { kind: 'direct' } },
+  { method: 'tasks', invocation: { kind: 'direct' } },
+]
+const boardResultCodec = name => ({ mode: 'strict', typeSymbol: `dsh-bulletin-board#${name}:result`, create: () => ({ parse: value => value }) })
+function createBoardRemoteContribution() {
+  return {
+    package: 'dsh-bulletin-board',
+    descriptors: BOARD_REMOTE_METHODS.map(entry => ({
+      id: `dsh-bulletin-board/bulletinBoard/${entry.method}`,
+      service: 'bulletinBoardRemote',
+      namespace: 'bulletinBoard',
+      method: entry.method,
+      invocation: { kind: 'direct' },
+      parameters: [],
+      result: boardResultCodec(entry.method),
+    })),
+  }
+}
+
+function NetworkSection(props) {
+  const { t, network } = props
+  if (network === undefined || network === null) return null
+  const boards = Array.isArray(network.boards) ? network.boards : []
+  const tasks = Array.isArray(network.tasks) ? network.tasks : []
+  const counts = network.counts ?? {}
+  return panel('section', { 'data-agent-network': '', style: { marginBottom: '14px', padding: '10px 12px', border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px' } },
+    panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
+      panel('h2', { style: { margin: 0, fontSize: '15px' } }, t('networkTitle')),
+      panel('span', { style: { opacity: 0.7, fontSize: '12px' } }, `boards ${boards.length} · tasks ${tasks.length}`)),
+    boards.length === 0 ? panel('p', { style: { opacity: 0.7, fontSize: '12.5px' } }, t('networkEmpty')) : panel('div', null,
+      boards.slice(0, 5).map(board => panel('div', { key: board.id, style: { padding: '5px 0', borderBottom: '1px solid rgba(127,127,127,0.12)', fontSize: '12.5px' } },
+        panel('code', null, board.id), ' ',
+        panel('strong', null, board.title), ' ',
+        panel('span', { style: { opacity: 0.7 } }, board.workspace ?? ''), ' ',
+        panel('span', null, board.status))),
+      panel('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '8px', fontSize: '12.5px', opacity: 0.8 } },
+        ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated'].map(status => panel('span', { key: status }, `${status}: ${String(counts[status] ?? 0)}`)))))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -528,6 +573,7 @@ function MessageCenterPage(props) {
   const [allowSend, setAllowSend] = React.useState(false)
   const [strictMode, setStrictMode] = React.useState(true)
   const [counts, setCounts] = React.useState({})
+  const [network, setNetwork] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
   const [detail, setDetail] = React.useState(undefined)
   const [deleteOpen, setDeleteOpen] = React.useState(false)
@@ -566,6 +612,10 @@ function MessageCenterPage(props) {
         setAllowSend(normalized.allowSend)
         setStrictMode(normalized.strictMode)
         setCounts(normalized.counts)
+        try {
+          const overview = await api.overview?.()
+          if (overview !== undefined && overview !== null) setNetwork(overview)
+        } catch { /* bulletin board row may be absent */ }
       }
     } catch (caught) {
       setError(errorTextOf(caught))
@@ -684,6 +734,7 @@ function MessageCenterPage(props) {
       panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
         panel('button', { type: 'button', style: style.button, onClick: () => { void load({ offset }) } }, t('refresh')))),
+    panel(NetworkSection, { t, network }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
         type: 'search',
@@ -782,6 +833,7 @@ function apply(ctx) {
   }, 'message-bus client: styles')
   ctx.plugin(async function mountMessageBusRemote(owner) {
     await owner.remote.$mount(createRemoteContribution())
+    try { await owner.remote.$mount(createBoardRemoteContribution()) } catch { /* bulletin-board row may be absent */ }
   })
   ctx.inject(['remote.messageBus'], scope => {
     scope.remoteAccess.whenAccess('messageBus/list', function* () {
@@ -792,6 +844,7 @@ function apply(ctx) {
         get: (messageId, readBy, markRead) => scope.remote.messageBus.get(messageId, readBy, markRead),
         delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
         send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
+        overview: () => scope.remote.bulletinBoard?.overview?.(),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',
