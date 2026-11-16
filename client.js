@@ -545,7 +545,8 @@ body[data-ds-dark-theme="false"] .mb-dialog { background: rgb(250,250,250); }
 .mb-detail { margin-top: 8px; padding: 9px 10px; border-left: 2px solid rgba(79,140,255,0.5); background: rgba(79,140,255,0.06); border-radius: 0 8px 8px 0; font-size: 12px; line-height: 1.55; }
 .mb-detail p { margin: 4px 0; }
 .mb-chipRow { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
-.mb-chipButton { appearance: none; border: 1px solid rgba(127,127,127,0.22); background: transparent; color: inherit; border-radius: 999px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+.mb-chipButton { appearance: none; border: 1px solid rgba(127,127,127,0.55); background: rgba(127,127,127,0.16); color: inherit; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.mb-chipButton:hover { background: rgba(127,127,127,0.26); border-color: rgba(127,127,127,0.75); }
 .mb-chipButton[data-active="true"] { border-color: rgba(79,140,255,0.65); background: rgba(79,140,255,0.14); }
 .mb-pill { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.25); font-size: 11px; white-space: nowrap; }
 .mb-pill[data-status="completed"] { color: rgb(100,190,120); border-color: rgba(63,185,80,0.45); }
@@ -566,9 +567,9 @@ const style = {
   toolbar: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '18px' },
   input: { padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.35)', background: 'rgba(127,127,127,0.10)', color: 'inherit', minWidth: '200px', flex: '1 1 260px' },
   narrow: { maxWidth: '240px', minWidth: '160px' },
-  button: { appearance: 'none', border: '1px solid rgba(127,127,127,0.4)', background: 'rgba(127,127,127,0.12)', color: 'inherit', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', cursor: 'pointer' },
-  primary: { appearance: 'none', border: '1px solid rgba(79,140,255,0.7)', background: 'rgba(79,140,255,0.2)', color: 'inherit', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', cursor: 'pointer' },
-  danger: { appearance: 'none', border: '1px solid rgba(248,81,73,0.65)', background: 'rgba(248,81,73,0.18)', color: 'inherit', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', cursor: 'pointer' },
+  button: { appearance: 'none', border: '1px solid rgba(127,127,127,0.72)', background: 'rgba(127,127,127,0.24)', color: 'inherit', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' },
+  primary: { appearance: 'none', border: '1px solid rgba(79,140,255,0.95)', background: 'rgba(79,140,255,0.40)', color: 'inherit', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' },
+  danger: { appearance: 'none', border: '1px solid rgba(248,81,73,0.85)', background: 'rgba(248,81,73,0.30)', color: 'inherit', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' },
   meta: { display: 'flex', gap: '14px', flexWrap: 'wrap', marginTop: '12px', fontSize: '12.5px', opacity: 0.75 },
   errorBox: { marginTop: '12px', padding: '9px 11px', borderRadius: '9px', border: '1px solid rgba(248,81,73,0.5)', background: 'rgba(248,81,73,0.12)', fontSize: '12.5px' },
   okBox: { marginTop: '12px', padding: '9px 11px', borderRadius: '9px', border: '1px solid rgba(63,185,80,0.45)', background: 'rgba(63,185,80,0.10)', fontSize: '12.5px' },

@@ -192,7 +192,14 @@ function readApartmentSnapshot() {
   if (!existsSync(dbPath)) return { root, agents: 0, teams: 0, leases: 0, taskRoles: 0, experiences: 0 }
   let db
   try {
-    db = new DatabaseSync(dbPath, { readOnly: true })
+    try {
+      db = new DatabaseSync(dbPath, { readOnly: true })
+    } catch {
+      // WAL/shm can make a read-only open fail on Windows; fall back to a
+      // query-only connection so the dashboard still shows real counts.
+      db = new DatabaseSync(dbPath)
+      db.exec('PRAGMA query_only = ON')
+    }
     const count = table => {
       try { return db.prepare('SELECT COUNT(*) AS n FROM ' + table).get().n } catch { return 0 }
     }
