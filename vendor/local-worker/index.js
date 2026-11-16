@@ -16,7 +16,7 @@ import { number, objectSchema, string } from './lib/standard-schema.js'
 export const inject = ['tools', 'llm', 'agentDefaultModel']
 
 export const Config = objectSchema({
-  mode: string('local-endpoint', {
+  mode: string('dsh-provider', {
     description: "local-endpoint | dsh-provider. dsh-provider uses ctx.llm + agentDefaultModel.currentSelection(); endpoint/model below are ignored.",
   }),
   endpoint: string('http://127.0.0.1:11435/v1', {
@@ -91,16 +91,23 @@ const validateOutput = outputDefinition({
  */
 export function apply(ctx, config) {
   const cfg = normalizeConfig(config)
-  const useDshProvider = config?.mode === 'dsh-provider'
-  const providerClient = useDshProvider
-    ? createDshProviderClient({
-      llm: ctx.get('llm'),
-      agentDefaultModel: ctx.get('agentDefaultModel'),
-      rawConfig: cfg,
-    })
-    : undefined
+  const useDshProvider = config?.mode !== 'local-endpoint'
+  let providerClient
+  try {
+    providerClient = useDshProvider
+      ? createDshProviderClient({
+        llm: ctx.get('llm'),
+        agentDefaultModel: ctx.get('agentDefaultModel'),
+        rawConfig: cfg,
+      })
+      : undefined
+  } catch (error) {
+    ctx.logger?.warn?.('[dsh-local-worker] dsh-provider unavailable, falling back to local endpoint: ' + String(error?.message ?? error))
+    providerClient = undefined
+  }
+  const effectiveProvider = providerClient !== undefined
   const handlers = createToolHandlers(cfg, providerClient)
-  const source = useDshProvider ? 'dsh-provider' : 'local-endpoint'
+  const source = effectiveProvider ? 'dsh-provider' : 'local-endpoint'
   const toolTimeoutMs = cfg.timeoutMs + 5_000
 
   ctx.tools.register({
