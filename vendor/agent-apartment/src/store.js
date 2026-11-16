@@ -60,20 +60,28 @@ export function createApartment({ root, dbPath } = {}) {
   const resolvedRoot = ensureLayout(resolve(root || defaultRoot()))
   const db = new DatabaseSync(dbPath || join(resolvedRoot, 'apartment.sqlite'))
   db.exec(schema)
-  const status = () => ({
-    root: resolvedRoot,
-    agents: db.prepare('SELECT COUNT(*) AS n FROM agents').get().n,
-    teams: db.prepare('SELECT COUNT(*) AS n FROM teams').get().n,
-    leases: db.prepare("SELECT COUNT(*) AS n FROM leases WHERE state='active'").get().n,
-    taskRoles: db.prepare('SELECT COUNT(*) AS n FROM task_roles').get().n,
-    experiences: db.prepare('SELECT COUNT(*) AS n FROM experiences').get().n,
-  })
+  const reapExpired = () => {
+    const result = db.prepare("UPDATE leases SET state='expired' WHERE state='active' AND expires_at IS NOT NULL AND expires_at < ?").run(now())
+    return { expired: result.changes }
+  }
+  const status = () => {
+    reapExpired()
+    return {
+      root: resolvedRoot,
+      agents: db.prepare('SELECT COUNT(*) AS n FROM agents').get().n,
+      teams: db.prepare('SELECT COUNT(*) AS n FROM teams').get().n,
+      leases: db.prepare("SELECT COUNT(*) AS n FROM leases WHERE state='active'").get().n,
+      taskRoles: db.prepare('SELECT COUNT(*) AS n FROM task_roles').get().n,
+      experiences: db.prepare('SELECT COUNT(*) AS n FROM experiences').get().n,
+    }
+  }
   return {
     root: resolvedRoot,
     dbPath: join(resolvedRoot, 'apartment.sqlite'),
     checkpoint: () => db.exec('PRAGMA wal_checkpoint(FULL)'),
     close: () => db.close(),
     status,
+    reapExpired,
     registerAgent({ id, name, capabilities = [] }) {
       const agentId = id || 'agent-' + randomUUID().slice(0, 8)
       const home = safeJoin(resolvedRoot, 'agents', agentId)
@@ -103,6 +111,7 @@ export function createApartment({ root, dbPath } = {}) {
     listTeams() { return db.prepare('SELECT * FROM teams ORDER BY name').all() },
     listMemberships(teamId) { return teamId === undefined ? db.prepare('SELECT * FROM memberships').all() : db.prepare('SELECT * FROM memberships WHERE team_id=?').all(teamId) },
     claimLease({ agentId, workspace, taskId = null, ttlMs = 3600000 }) {
+      reapExpired()
       const id = 'lease-' + randomUUID().slice(0, 8)
       const workDir = safeJoin(resolvedRoot, 'work', taskId || id)
       mkdirSync(workDir, { recursive: true })
@@ -111,7 +120,7 @@ export function createApartment({ root, dbPath } = {}) {
       return db.prepare('SELECT * FROM leases WHERE id=?').get(id)
     },
     releaseLease(id) { db.prepare("UPDATE leases SET state='released' WHERE id=?").run(id); return { released: true } },
-    listLeases(agentId) { return agentId === undefined ? db.prepare('SELECT * FROM leases').all() : db.prepare('SELECT * FROM leases WHERE agent_id=?').all(agentId) },
+    listLeases(agentId) { reapExpired(); return agentId === undefined ? db.prepare('SELECT * FROM leases').all() : db.prepare('SELECT * FROM leases WHERE agent_id=?').all(agentId) },
     assignTaskRole({ taskId, agentId, teamId = null, role }) {
       db.prepare('INSERT OR REPLACE INTO task_roles (task_id,agent_id,team_id,role,created_at) VALUES (?,?,?,?,?)').run(taskId, agentId, teamId, role, now())
       return { taskId, agentId, teamId, role }
@@ -158,6 +167,15 @@ export function createApartment({ root, dbPath } = {}) {
       writeJson(join(dir, 'manifest.json'), manifest)
       writeJson(join(resolvedRoot, 'manifests', `${stamp}.json`), manifest)
       return { backup: dir, files: manifest.files.length }
+    },
+    restoreFrom(source) {
+      const from = resolve(source)
+      if (!existsSync(join(from, 'manifest.json'))) throw new Error('backup manifest not found: ' + from)
+      const safety = this.backup('pre-restore')
+      for (const dir of ['agents', 'work']) {
+        if (existsSync(join(from, dir))) cpSync(join(from, dir), join(resolvedRoot, dir), { recursive: true })
+      }
+      return { restoredFrom: from, safetyBackup: safety.backup, restartRequired: true }
     },
     verify() {
       const issues = []

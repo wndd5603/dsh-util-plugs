@@ -7,6 +7,18 @@ import { boolean, number, objectSchema, string } from './lib/standard-schema.js'
 
 export const inject = ['tools']
 
+const REMOTE_SERVICE_KEY = 'agentApartmentRemote'
+const REMOTE_NAMESPACE = 'agentApartment'
+const REMOTE_METHOD_DESCRIPTOR_KEY = '@deepseek-ai/dsh-typert-protocol/remote-methods'
+const REMOTE_METHODS = [
+  { method: 'status', invocation: { kind: 'direct' } },
+  { method: 'setRoot', invocation: { kind: 'direct' } },
+  { method: 'migrate', invocation: { kind: 'direct' } },
+  { method: 'backup', invocation: { kind: 'direct' } },
+  { method: 'restore', invocation: { kind: 'direct' } },
+  { method: 'verify', invocation: { kind: 'direct' } },
+]
+
 export const Config = objectSchema({
   enabled: boolean(true, { description: 'Register apartment tools.' }),
   root: string('', {
@@ -37,6 +49,30 @@ export function apply(ctx, config) {
   const apartment = createApartment({ root })
   const register = (descriptor, execute) => ctx.tools.register({ ...descriptor, execute })
   ctx.effect(() => () => apartment.close())
+  const assertOperator = (exec) => {
+    let mode
+    try {
+      mode = ctx.get?.('sandboxPolicy')?.resolve?.({ session: exec?.agent?.session })?.mode
+    } catch { mode = undefined }
+    if (mode !== 'danger-full-access') {
+      const error = new Error('apartment: operator-only action requires danger-full-access')
+      error.code = 'APARTMENT_OPERATOR_REQUIRED'
+      throw error
+    }
+  }
+  const migrate = (toArg) => {
+    const from = apartment.root
+    const to = resolve(toArg)
+    if (to === from) throw new Error('target equals current apartment root')
+    mkdirSync(to, { recursive: true })
+    apartment.checkpoint?.()
+    for (const dir of ['agents', 'work', 'manifests', 'backups']) {
+      if (existsSync(join(from, dir))) cpSync(join(from, dir), join(to, dir), { recursive: true })
+    }
+    if (existsSync(join(from, 'apartment.sqlite'))) cpSync(join(from, 'apartment.sqlite'), join(to, 'apartment.sqlite'))
+    setActiveRoot(to)
+    return { from, to, restartRequired: true, verify: apartment.verify() }
+  }
 
   register(desc('apartment_status', 'Read apartment root, counts and verify summary.'), async () => ({ ...apartment.status(), verify: apartment.verify() }))
   register(desc('apartment_agent_register', 'Create/update an agent home (AGENTS.md, skills, tools).', {
@@ -60,6 +96,7 @@ export function apply(ctx, config) {
   }, ['agentId', 'workspace']), async args => apartment.claimLease(args))
   register(desc('apartment_lease_release', 'Release a lease.', { leaseId: str('Lease id.') }, ['leaseId']), async args => apartment.releaseLease(args.leaseId))
   register(desc('apartment_lease_list', 'List leases.', { agentId: str('Optional agent id.') }), async args => ({ leases: apartment.listLeases(args.agentId) }))
+  register(desc('apartment_lease_reap', 'Expire leases whose TTL has passed.'), async () => apartment.reapExpired())
   register(desc('apartment_task_role_assign', 'Bind an agent/team to a role on one task.', {
     taskId: str('Task id.'), agentId: str('Agent id.'), teamId: str('Optional team id.'), role: str('Role.'),
   }, ['taskId', 'agentId', 'role']), async args => apartment.assignTaskRole(args))
@@ -70,22 +107,30 @@ export function apply(ctx, config) {
   register(desc('apartment_experience_list', 'List experience entries.', { agentId: str('Optional agent id.') }), async args => ({ experiences: apartment.listExperiences(args.agentId) }))
   register(desc('apartment_import_legacy', 'Read team/members/*/AGENTS.md into agent homes + memberships (read-only import).', { workspace: str('Workspace root.') }, ['workspace']), async args => apartment.importLegacy(args.workspace))
   register(desc('apartment_backup', 'Create a backup snapshot with manifest/sha256.', { label: str('Optional label.') }), async args => apartment.backup(args.label ?? 'manual'))
+  register(desc('apartment_restore', 'Restore agents/work from a backup directory (creates a pre-restore safety backup).', { from: str('Backup directory.') }, ['from']), async (args, exec) => { assertOperator(exec); return apartment.restoreFrom(args.from) })
   register(desc('apartment_verify', 'Verify agent homes and AGENTS.md.'), async () => apartment.verify())
-  register(desc('apartment_set_root', 'Switch apartment root pointer (empty/new root); migration should be used to copy data.', { root: str('New absolute root.') }, ['root']), async args => {
+  register(desc('apartment_set_root', 'Switch apartment root pointer (empty/new root); migration should be used to copy data.', { root: str('New absolute root.') }, ['root']), async (args, exec) => {
+    assertOperator(exec)
     const next = setActiveRoot(args.root)
     return { ...next, restartRequired: true }
   })
-  register(desc('apartment_migrate', 'Copy apartment data to a new root, write pointer; requires restart.', { to: str('Target absolute root.') }, ['to']), async args => {
-    const from = apartment.root
-    const to = resolve(args.to)
-    if (to === from) throw new Error('target equals current apartment root')
-    mkdirSync(to, { recursive: true })
-    apartment.checkpoint?.()
-    for (const dir of ['agents', 'work', 'manifests', 'backups']) {
-      if (existsSync(join(from, dir))) cpSync(join(from, dir), join(to, dir), { recursive: true })
-    }
-    if (existsSync(join(from, 'apartment.sqlite'))) cpSync(join(from, 'apartment.sqlite'), join(to, 'apartment.sqlite'))
-    setActiveRoot(to)
-    return { from, to, restartRequired: true, verify: apartment.verify() }
+  register(desc('apartment_migrate', 'Copy apartment data to a new root, write pointer; requires restart.', { to: str('Target absolute root.') }, ['to']), async (args, exec) => { assertOperator(exec); return migrate(args.to) })
+
+  class AgentApartmentRemote {
+    status() { return { ...apartment.status(), verify: apartment.verify() } }
+    setRoot(root) { const next = setActiveRoot(root); return { ...next, restartRequired: true } }
+    migrate(to) { return migrate(to) }
+    backup(label) { return apartment.backup(label ?? 'manual') }
+    restore(from) { return apartment.restoreFrom(from) }
+    verify() { return apartment.verify() }
+  }
+  Object.defineProperty(AgentApartmentRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
+    configurable: true, enumerable: false, value: Object.freeze({ version: 1, methods: REMOTE_METHODS }),
   })
+  const remote = new AgentApartmentRemote()
+  Object.defineProperty(remote, 'typertRemote', {
+    configurable: false, enumerable: true, writable: false,
+    value: Object.freeze({ service: remote, serviceKey: REMOTE_SERVICE_KEY, namespace: REMOTE_NAMESPACE }),
+  })
+  try { if (typeof ctx.provide === 'function') ctx.provide(REMOTE_SERVICE_KEY, remote) } catch { /* tools still work */ }
 }

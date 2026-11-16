@@ -1,6 +1,6 @@
 ## 2026.11.16-2 (dev)
 
-- **Agent Apartment (new row `agent-apartment`)**: centralized agent homes/AGENTS.md/skills/tools, workspace leases, many-to-many teams/memberships, task-role bindings, experience records, legacy `team/members` import, root pointer + backup/migration tools (`apartment_set_root`, `apartment_migrate`, `apartment_backup`, `apartment_verify`); Agent Network panel has storage/migrate/backup/verify buttons.
+- **Agent Apartment (new row `agent-apartment`)**: centralized agent homes/AGENTS.md/skills/tools, workspace leases, many-to-many teams/memberships, task-role bindings, experience records, legacy `team/members` import, root pointer + backup/migration/restore tools (`apartment_set_root`, `apartment_migrate`, `apartment_backup`, `apartment_restore`, `apartment_lease_reap`, `apartment_verify`); destructive root operations require danger-full-access; Agent Network panel has storage/migrate/backup/restore/verify buttons.
 - **Bulletin board / task board (new row `bulletin-board`)**: shared SQLite boards and tasks with statuses, workspace/assignee association, dependencies, atomic claim and digest queries.
 - **Local LLM worker (new row `local-worker`)**: bounded `local_llm_health` / `local_task_plan` / `local_task_transform` / `local_task_validate` tools backed by an OpenAI-compatible local model; proposals only, strict JSON, timeout/token limits.
 - **Cross-permission guard**: `crossPermissionGuard` (default true) blocks confined senders from messaging danger-full-access targets via direct id, alias, header or autoResume.
