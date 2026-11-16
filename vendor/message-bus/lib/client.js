@@ -121,6 +121,8 @@ function normalizeListResult(result) {
     allowSend: value.capabilities?.send === true,
     strictMode: value.capabilities?.strictMode === true,
     autoResume: value.capabilities?.autoResume === true,
+    network: value.network !== null && typeof value.network === 'object' ? value.network : undefined,
+    apartment: value.apartment !== null && typeof value.apartment === 'object' ? value.apartment : undefined,
   }
 }
 
@@ -681,6 +683,11 @@ function MessageCenterPage(props) {
         setAllowSend(normalized.allowSend)
         setStrictMode(normalized.strictMode)
         setCounts(normalized.counts)
+        if (normalized.network !== undefined) setNetwork(normalized.network)
+        if (normalized.apartment !== undefined) {
+          setApartment(normalized.apartment)
+          setRootInput(current => current === '' ? (normalized.apartment.root ?? '') : current)
+        }
         void loadAux()
       }
     } catch (caught) {
