@@ -80,6 +80,33 @@ function createRemoteContribution() {
         parameters: [jsonParameter('to'), jsonParameter('subject'), jsonParameter('body'), jsonParameter('from')],
         result: identityCodec('dsh-message-bus#messageBus/send:result'),
       },
+      {
+        id: 'dsh-message-bus/messageBus/tasksPage',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'tasksPage',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/tasksPage:result'),
+      },
+      {
+        id: 'dsh-message-bus/messageBus/memoryPage',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'memoryPage',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/memoryPage:result'),
+      },
+      {
+        id: 'dsh-message-bus/messageBus/memoryForget',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'memoryForget',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/memoryForget:result'),
+      },
     ],
   }
 }
@@ -261,6 +288,17 @@ const zh = {
   apartmentBackup: '立即备份',
   apartmentRestore: '从目录恢复',
   apartmentVerify: '验证',
+  memoryTitle: '智能体记忆库',
+  memorySubtitle: '查询、分页和管理跨会话持久记忆。',
+  memorySearch: '搜索记忆（内容 / key / tag）',
+  memoryEmpty: '暂无记忆。',
+  memoryDelete: '删除',
+  memoryConfirmDelete: '确认删除',
+  memoryCancel: '取消',
+  memoryDeleted: '记忆已删除。',
+  memoryFailed: '记忆操作失败：{error}',
+  memoryTotal: '共 {total} 条',
+  memoryScopeAll: '全部 scope',
   working: '处理中…',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
@@ -350,6 +388,17 @@ const en = {
   apartmentBackup: 'Backup now',
   apartmentRestore: 'Restore from dir',
   apartmentVerify: 'Verify',
+  memoryTitle: 'Agent memory',
+  memorySubtitle: 'Search, page and manage durable cross-session memory.',
+  memorySearch: 'Search memory (content / key / tag)',
+  memoryEmpty: 'No memories yet.',
+  memoryDelete: 'Delete',
+  memoryConfirmDelete: 'Confirm delete',
+  memoryCancel: 'Cancel',
+  memoryDeleted: 'Memory deleted.',
+  memoryFailed: 'Memory operation failed: {error}',
+  memoryTotal: '{total} entries',
+  memoryScopeAll: 'All scopes',
   working: 'Working…',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',
@@ -827,6 +876,59 @@ function ApartmentSection(props) {
     }, feedback.text))
 }
 
+function MemorySection(props) {
+  const { t, memory, query, scope, setQuery, setScope, page, pageCount, busy, message, pendingDelete, onSearch, onPage, onAskDelete, onCancelDelete, onConfirmDelete } = props
+  if (memory === undefined || memory === null) return null
+  const memories = Array.isArray(memory.memories) ? memory.memories : []
+  return panel('section', { 'data-agent-memory': '', className: 'mb-card' },
+    panel('div', { className: 'mb-cardHead' },
+      panel('div', null,
+        panel('h2', { className: 'mb-cardTitle' }, t('memoryTitle')),
+        panel('p', { className: 'mb-cardSub' }, t('memorySubtitle'))),
+      panel('span', { className: 'mb-kicker' }, t('memoryTotal', { total: memory.total ?? memories.length }))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('input', {
+        type: 'search', value: query, placeholder: t('memorySearch'), className: 'mb-inlineInput',
+        'aria-label': t('memorySearch'), 'data-memory-search': '',
+        onChange: event => setQuery(event.target.value),
+      }),
+      panel('select', {
+        value: scope,
+        className: 'mb-inlineInput',
+        style: { flex: '0 1 150px' },
+        'aria-label': t('memoryScopeAll'),
+        onChange: event => setScope(event.target.value),
+      },
+      panel('option', { value: '' }, t('memoryScopeAll')),
+      panel('option', { value: 'project' }, 'project'),
+      panel('option', { value: 'agent' }, 'agent'),
+      panel('option', { value: 'global' }, 'global'))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: onSearch }, t('search')),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: () => onPage(0) }, t('clear'))),
+    memories.length === 0
+      ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('memoryEmpty'))
+      : panel('div', { className: 'mb-taskList' }, memories.map(memoryRow => panel('article', { key: memoryRow.id, className: 'mb-task' },
+        panel('div', { className: 'mb-taskTitle' },
+          panel('span', null, memoryRow.key || memoryRow.id),
+          panel('span', { className: 'mb-pill' }, memoryRow.scope)),
+        panel('p', { style: { margin: '6px 0', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, memoryRow.content),
+        panel('div', { className: 'mb-taskMeta' },
+          panel('span', null, memoryRow.updated_at ?? ''),
+          (memoryRow.tags ?? []).map(tag => panel('span', { key: tag, className: 'mb-pill' }, tag)),
+          pendingDelete === memoryRow.id
+            ? panel('span', null,
+              panel('button', { type: 'button', className: 'mb-chipButton', onClick: onCancelDelete }, t('memoryCancel')),
+              ' ',
+              panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onConfirmDelete(memoryRow.id) }, t('memoryConfirmDelete')))
+            : panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => onAskDelete(memoryRow.id) }, t('memoryDelete')))))),
+    panel('div', { className: 'mb-actionRow' },
+      panel('span', { className: 'mb-muted' }, t('pageInfo', { page: page + 1, pages: pageCount, total: memory.total ?? memories.length })),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: page <= 0, onClick: () => onPage(page - 1) }, t('prevPage')),
+      panel('button', { type: 'button', className: 'mb-chipButton', disabled: page >= pageCount - 1, onClick: () => onPage(page + 1) }, t('nextPage'))),
+    message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -845,6 +947,13 @@ function MessageCenterPage(props) {
   const [network, setNetwork] = React.useState(undefined)
   const [apartment, setApartment] = React.useState(undefined)
   const [rootInput, setRootInput] = React.useState('')
+  const [memory, setMemory] = React.useState(undefined)
+  const [memoryQuery, setMemoryQuery] = React.useState('')
+  const [memoryScope, setMemoryScope] = React.useState('')
+  const [memoryPage, setMemoryPage] = React.useState(0)
+  const [memoryBusy, setMemoryBusy] = React.useState(false)
+  const [memoryMessage, setMemoryMessage] = React.useState(undefined)
+  const [memoryDeleteId, setMemoryDeleteId] = React.useState(undefined)
   const [apartmentBusy, setApartmentBusy] = React.useState(false)
   const [apartmentMessage, setApartmentMessage] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
@@ -875,7 +984,29 @@ function MessageCenterPage(props) {
       } else missing = true
     } catch { missing = true }
     if (missing && attempt < 6) setTimeout(() => { void loadAux(attempt + 1) }, 300)
+    if (!missing) void loadMemory()
   }, [api])
+
+  const loadMemory = React.useCallback(async (options = {}) => {
+    if (memoryBusy || typeof api.memoryPage !== 'function') return
+    const page = Number.isInteger(options.page) ? options.page : memoryPage
+    setMemoryBusy(true)
+    setMemoryMessage(undefined)
+    try {
+      const result = await api.memoryPage({
+        query: options.query ?? memoryQuery,
+        scope: options.scope ?? memoryScope,
+        offset: page * 20,
+        limit: 20,
+      })
+      setMemory(result ?? { memories: [], total: 0 })
+      setMemoryPage(page)
+    } catch (caught) {
+      setMemoryMessage({ text: t('memoryFailed', { error: errorTextOf(caught) }), tone: 'danger' })
+    } finally {
+      setMemoryBusy(false)
+    }
+  }, [api, memoryBusy, memoryPage, memoryQuery, memoryScope, t])
 
   const load = React.useCallback(async (options = {}) => {
     const nextOffset = options.offset ?? offset
@@ -938,6 +1069,22 @@ function MessageCenterPage(props) {
       setApartmentMessage({ text: errorTextOf(caught), tone: 'danger' })
     } finally {
       setApartmentBusy(false)
+    }
+  }
+
+  const deleteMemory = async id => {
+    if (typeof api.memoryForget !== 'function') return
+    setMemoryBusy(true)
+    try {
+      const result = await api.memoryForget({ id, confirm: 'DELETE' })
+      if (result?.ok === false) throw new Error(result.error ?? 'delete failed')
+      setMemoryDeleteId(undefined)
+      setMemoryMessage({ text: t('memoryDeleted'), tone: 'ok' })
+      await loadMemory({ page: memoryPage })
+    } catch (caught) {
+      setMemoryMessage({ text: t('memoryFailed', { error: errorTextOf(caught) }), tone: 'danger' })
+    } finally {
+      setMemoryBusy(false)
     }
   }
 
@@ -1037,6 +1184,7 @@ function MessageCenterPage(props) {
   }
 
   const pages = pageCount(total, limit)
+  const memoryPages = Math.max(1, Math.ceil((memory?.total ?? 0) / 20))
   const pageNumber = Math.floor(offset / limit) + 1
 
   return panel('div', { className: PAGE_CLASS, 'data-message-bus-page': '' },
@@ -1063,6 +1211,15 @@ function MessageCenterPage(props) {
       onBackup: () => { void apartmentAction('backup') },
       onRestore: () => { void apartmentAction('restore') },
       onVerify: () => { void apartmentAction('verify') },
+    }),
+    panel(MemorySection, {
+      t, memory, query: memoryQuery, scope: memoryScope, setQuery: setMemoryQuery, setScope: setMemoryScope,
+      page: memoryPage, pageCount: memoryPages, busy: memoryBusy, message: memoryMessage, pendingDelete: memoryDeleteId,
+      onSearch: () => { void loadMemory({ page: 0 }) },
+      onPage: next => { void loadMemory({ page: Math.max(0, Math.min(memoryPages - 1, next)) }) },
+      onAskDelete: id => setMemoryDeleteId(id),
+      onCancelDelete: () => setMemoryDeleteId(undefined),
+      onConfirmDelete: id => { void deleteMemory(id) },
     }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
@@ -1182,6 +1339,9 @@ function apply(ctx) {
         apartmentBackup: label => scope.remote.agentApartment.backup(label),
         apartmentRestore: from => scope.remote.agentApartment.restore(from),
         apartmentVerify: () => scope.remote.agentApartment.verify(),
+        tasksPage: query => scope.remote.messageBus.tasksPage(query),
+        memoryPage: query => scope.remote.messageBus.memoryPage(query),
+        memoryForget: query => scope.remote.messageBus.memoryForget(query),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',
