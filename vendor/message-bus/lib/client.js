@@ -539,13 +539,19 @@ const BOARD_REMOTE_METHODS = [
   { method: 'tasks', invocation: { kind: 'direct' } },
 ]
 const APARTMENT_REMOTE_METHODS = [
-  { method: 'status', invocation: { kind: 'direct' } },
-  { method: 'setRoot', invocation: { kind: 'direct' } },
-  { method: 'migrate', invocation: { kind: 'direct' } },
-  { method: 'backup', invocation: { kind: 'direct' } },
-  { method: 'restore', invocation: { kind: 'direct' } },
-  { method: 'verify', invocation: { kind: 'direct' } },
+  { method: 'status', invocation: { kind: 'direct' }, parameters: [] },
+  { method: 'setRoot', invocation: { kind: 'direct' }, parameters: ['root'] },
+  { method: 'migrate', invocation: { kind: 'direct' }, parameters: ['to'] },
+  { method: 'backup', invocation: { kind: 'direct' }, parameters: ['label'] },
+  { method: 'restore', invocation: { kind: 'direct' }, parameters: ['from'] },
+  { method: 'verify', invocation: { kind: 'direct' }, parameters: [] },
 ]
+const apartmentParameter = name => ({
+  name,
+  wire: name,
+  source: 'json',
+  codec: { mode: 'strict', typeSymbol: `dsh-agent-apartment#${name}:json`, create: () => ({ parse: value => value }) },
+})
 const boardResultCodec = name => ({ mode: 'strict', typeSymbol: `dsh-bulletin-board#${name}:result`, create: () => ({ parse: value => value }) })
 const apartmentResultCodec = name => ({ mode: 'strict', typeSymbol: `dsh-agent-apartment#${name}:result`, create: () => ({ parse: value => value }) })
 function remoteContribution(pkg, namespace, service, methods, codec) {
@@ -557,7 +563,7 @@ function remoteContribution(pkg, namespace, service, methods, codec) {
       namespace,
       method: entry.method,
       invocation: { kind: 'direct' },
-      parameters: [],
+      parameters: (entry.parameters ?? []).map(apartmentParameter),
       result: codec(entry.method),
     })),
   }
