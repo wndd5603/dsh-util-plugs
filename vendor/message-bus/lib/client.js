@@ -935,6 +935,8 @@ function ApartmentSection(props) {
   const [detailPage, setDetailPage] = React.useState(0)
   const [detail, setDetail] = React.useState(undefined)
   const [detailBusy, setDetailBusy] = React.useState(false)
+  const [dialog, setDialog] = React.useState(undefined)
+  const [pathInput, setPathInput] = React.useState('')
   const apartment = unwrapRemote(props.apartment)
   const loadDetail = async (next = {}) => {
     if (typeof api?.apartmentData !== 'function') return
@@ -953,6 +955,17 @@ function ApartmentSection(props) {
     } finally { setDetailBusy(false) }
   }
   React.useEffect(() => { void loadDetail({ section: 'agents', page: 0, query: '' }) }, [])
+  const openDialog = kind => {
+    setDialog(kind)
+    setPathInput(kind === 'restore' ? '' : (rootInput || apartment?.root || ''))
+  }
+  const confirmDialog = () => {
+    const path = pathInput.trim()
+    if (dialog === 'setRoot') onSetRoot(path)
+    else if (dialog === 'migrate') onMigrate(path)
+    else if (dialog === 'restore') onRestore(path)
+    setDialog(undefined)
+  }
   if (apartment === undefined || apartment === null) return null
   const feedback = message !== null && typeof message === 'object' ? message : (message === undefined ? undefined : { text: String(message), tone: 'ok' })
   const sections = [['agents', 'Agent'], ['teams', 'Teams'], ['leases', 'Leases'], ['roles', 'Roles'], ['experiences', 'Experience'], ['backups', 'Backups']]
@@ -977,18 +990,11 @@ function ApartmentSection(props) {
       panel('span', { className: 'mb-stat' }, 'roles ', panel('strong', null, apartment.taskRoles ?? 0)),
       panel('span', { className: 'mb-stat' }, 'experience ', panel('strong', null, apartment.experiences ?? 0))),
     panel('div', { className: 'mb-actionRow' },
-      panel('input', {
-        type: 'text',
-        value: rootInput,
-        placeholder: t('apartmentRootPlaceholder'),
-        className: 'mb-inlineInput',
-        'aria-label': t('apartmentRootPlaceholder'),
-        onChange: event => setRootInput(event.target.value),
-      }),
-      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: onSetRoot }, t('apartmentSaveRoot')),
-      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onMigrate }, t('apartmentMigrate')),
+      panel('span', { className: 'mb-muted', 'data-apartment-root': '' }, apartment.root ?? rootInput ?? ''),
+      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: () => openDialog('setRoot') }, '切换根目录'),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: () => openDialog('migrate') }, t('apartmentMigrate')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onBackup }, t('apartmentBackup')),
-      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onRestore }, t('apartmentRestore')),
+      panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: () => openDialog('restore') }, t('apartmentRestore')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onVerify }, t('apartmentVerify'))),
     panel('div', { className: 'mb-actionRow', 'data-apartment-sections': '' },
       sections.map(([id, label]) => panel('button', {
@@ -1007,6 +1013,19 @@ function ApartmentSection(props) {
     detail?.error ? panel('p', { className: 'mb-feedback', 'data-tone': 'danger' }, detail.error) : null,
     items.length === 0 ? panel('p', { className: 'mb-muted' }, '暂无数据') : panel('div', { className: 'mb-taskList' }, items.map((item, index) => panel('article', { key: item.id ?? item.name ?? index, className: 'mb-task' },
       panel('p', { style: { margin: 0, fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, rowText(item))))),
+    dialog === undefined ? null : panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) setDialog(undefined) } },
+      panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': '公寓目录操作', 'data-apartment-dialog': dialog },
+        panel('h3', { style: { marginTop: 0 } }, dialog === 'setRoot' ? '切换公寓根目录' : dialog === 'migrate' ? '迁移公寓到此目录' : '从备份目录恢复'),
+        panel('p', { className: 'mb-muted' }, dialog === 'migrate' ? '将复制 agents/work/manifests/backups 与 apartment.sqlite，校验通过后切换指针；需要重启宿主。' : dialog === 'restore' ? '输入备份目录（含 manifest.json），恢复前会自动创建安全备份。' : '切换指针到新的公寓根目录；不会复制数据，适合已存在的目录。'),
+        panel('input', {
+          type: 'text', value: pathInput, className: 'mb-inlineInput', style: { width: '100%', marginTop: 10 },
+          placeholder: '输入绝对路径，例如 E:\\work\\agents\\apartment', 'aria-label': '目录路径',
+          onChange: event => setPathInput(event.target.value),
+          onKeyDown: event => { if (event.key === 'Enter') confirmDialog() },
+        }),
+        panel('div', { className: 'mb-actionRow', style: { justifyContent: 'flex-end' } },
+          panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => setDialog(undefined) }, '取消'),
+          panel('button', { type: 'button', style: buttonStyle('primary', busy || pathInput.trim() === ''), disabled: busy || pathInput.trim() === '', onClick: confirmDialog }, dialog === 'restore' ? '恢复' : dialog === 'migrate' ? '迁移' : '切换')))),
     feedback === undefined ? null : panel('p', {
       className: 'mb-feedback',
       'data-tone': feedback.tone === 'danger' ? 'danger' : 'ok',
@@ -1075,7 +1094,7 @@ function MemorySection(props) {
       panel('option', { value: 'agent' }, 'agent'),
       panel('option', { value: 'global' }, 'global'))),
     panel('div', { className: 'mb-actionRow' },
-      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: onSearch }, t('search')),
+      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: () => onSearch(query) }, t('search')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: () => onPage(0) }, t('clear'))),
     memories.length === 0
       ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('memoryEmpty'))
@@ -1141,7 +1160,7 @@ function MeetingsSection(props) {
       },
       panel('option', { value: '' }, t('allTasks')),
       ['open', 'r1', 'r2', 'final', 'cancelled'].map(state => panel('option', { key: state, value: state }, state)),
-      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: onSearch }, t('search'))),
+      panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: () => onSearch(query, status) }, t('search'))),
     items.length === 0
       ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('meetingsEmpty'))
       : panel('div', { className: 'mb-taskList' }, items.map(item => panel('article', { key: item.meetingId, className: 'mb-task' },
@@ -1320,12 +1339,12 @@ function MessageCenterPage(props) {
   React.useEffect(() => { void load({ offset: 0 }) }, []) // initial load
   React.useEffect(() => { void loadMemory({ page: 0 }); void loadMeetings({ page: 0 }) }, [])
 
-  const apartmentAction = async (kind) => {
+  const apartmentAction = async (kind, pathArg) => {
     if (apartmentBusy) return
     setApartmentBusy(true)
     setApartmentMessage({ text: t('working'), tone: 'ok' })
     try {
-      const root = rootInput.trim()
+      const root = (pathArg ?? rootInput).trim()
       if ((kind === 'setRoot' || kind === 'migrate') && root === '') throw new Error('root path is required')
       let result
       if (kind === 'setRoot') result = await api.apartmentSetRoot?.(root)
@@ -1485,16 +1504,16 @@ function MessageCenterPage(props) {
     network === undefined ? null : panel(NetworkSection, { t, network, api }),
     panel(ApartmentSection, {
       t, api, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
-      onSetRoot: () => { void apartmentAction('setRoot') },
-      onMigrate: () => { void apartmentAction('migrate') },
+      onSetRoot: path => { void apartmentAction('setRoot', path) },
+      onMigrate: path => { void apartmentAction('migrate', path) },
       onBackup: () => { void apartmentAction('backup') },
-      onRestore: () => { void apartmentAction('restore') },
+      onRestore: path => { void apartmentAction('restore', path) },
       onVerify: () => { void apartmentAction('verify') },
     }),
     panel(MemorySection, {
       t, memory, query: memoryQuery, scope: memoryScope, setQuery: setMemoryQuery, setScope: setMemoryScope,
       page: memoryPage, pageCount: memoryPages, busy: memoryBusy, message: memoryMessage, pendingDelete: memoryDeleteId,
-      onSearch: () => { void loadMemory({ page: 0 }) },
+      onSearch: nextQuery => { void loadMemory({ page: 0, query: nextQuery }) },
       onPage: next => { void loadMemory({ page: Math.max(0, Math.min(memoryPages - 1, next)) }) },
       onAskDelete: id => setMemoryDeleteId(id),
       onCancelDelete: () => setMemoryDeleteId(undefined),
@@ -1503,7 +1522,7 @@ function MessageCenterPage(props) {
     panel(MeetingsSection, {
       t, meetings, query: meetingQuery, status: meetingStatus, setQuery: setMeetingQuery, setStatus: setMeetingStatus,
       page: meetingPage, pageCount: meetingPages, busy: meetingBusy, message: meetingMessage,
-      onSearch: () => { void loadMeetings({ page: 0 }) },
+      onSearch: (nextQuery, nextStatus) => { void loadMeetings({ page: 0, query: nextQuery, status: nextStatus }) },
       onPage: next => { void loadMeetings({ page: Math.max(0, Math.min(meetingPages - 1, next)) }) },
       onOpen: id => { void openMeetingDetail(id) },
     }),
