@@ -1,6 +1,6 @@
 // DSH Agent Apartment host plugin: centralized agent homes, leases, teams,
 // task-role bindings, experience and root backup/migration.
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApartment, getActiveRoot, setActiveRoot } from './src/store.js'
@@ -181,7 +181,16 @@ export function apply(ctx, config) {
       const offset = Number.isFinite(Number(query?.offset)) ? Math.max(0, Math.trunc(Number(query.offset))) : 0
       const match = value => q === '' || String(value ?? '').toLowerCase().includes(q)
       let rows
-      if (section === 'agents') rows = apartment.listAgents().filter(row => match(row.id) || match(row.name) || match(row.home) || match(row.status))
+      const agentDetail = row => {
+        const home = join(apartment.root, 'agents', row.id)
+        const readList = dir => {
+          try { return readdirSync(join(home, dir)).slice(0, 100) } catch { return [] }
+        }
+        let agentsMd = null
+        try { agentsMd = readFileSync(join(home, 'AGENTS.md'), 'utf8').slice(0, 4000) } catch { /* optional */ }
+        return { ...row, resolvedHome: home, agentsMd, skills: readList('skills'), tools: readList('tools') }
+      }
+      if (section === 'agents') rows = apartment.listAgents().filter(row => match(row.id) || match(row.name) || match(row.home) || match(row.status)).map(agentDetail)
       else if (section === 'teams') rows = apartment.listTeams().filter(row => match(row.id) || match(row.name) || match(row.purpose))
       else if (section === 'leases') rows = apartment.listLeases().filter(row => match(row.agent_id) || match(row.workspace) || match(row.state))
       else if (section === 'roles') rows = apartment.listTaskRoles().filter(row => match(row.task_id) || match(row.agent_id) || match(row.role))
