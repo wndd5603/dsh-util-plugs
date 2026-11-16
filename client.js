@@ -232,9 +232,9 @@ function canDelete(typed) {
  */
 
 const zh = {
-  panel: '智能体网络',
-  title: '智能体网络',
-  subtitle: '公告栏/任务板与跨会话消息：查看任务状态、依赖和消息。',
+  panel: '协作网络',
+  title: '智能体协作网络',
+  subtitle: '公告栏/任务板、智能体公寓与跨会话消息统一入口。',
   networkTitle: '公告栏 / 任务板',
   networkSubtitle: '共享任务、依赖与状态；点击状态可快速定位当前工作。',
   networkLive: 'LIVE',
@@ -316,9 +316,9 @@ const zh = {
 }
 
 const en = {
-  panel: 'Agent Network',
-  title: 'Agent Network',
-  subtitle: 'Bulletin board/task board and cross-session messages: task status, dependencies, and messages.',
+  panel: 'Agent Hub',
+  title: 'Agent Collaboration Network',
+  subtitle: 'One surface for boards/tasks, apartment storage and cross-session messages.',
   networkTitle: 'Bulletin board / task board',
   networkSubtitle: 'Shared tasks, dependencies and state; status pills show where work stands.',
   networkLive: 'LIVE',
