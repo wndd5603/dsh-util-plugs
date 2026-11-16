@@ -47,6 +47,8 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingDetail', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'networkPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'messageAudit', invocation: Object.freeze({ kind: 'direct' }) }),
 ])
 
 /**
@@ -416,29 +418,43 @@ function forgetMemory(rawArgs) {
   }
 }
 
+/**
+ * Resolve the session-network registry for the current profile: explicit env
+ * overrides first, then the active profile's data dir, then the most recently
+ * updated profile database (zero-config discovery).
+ */
+function networkDbPath() {
+  const explicit = process.env.DSH_TEAM_NETWORK_DB
+  if (typeof explicit === 'string' && explicit.trim() !== '') return resolve(explicit.trim())
+  const dataDir = process.env.DSH_TEAM_DATA_DIR
+  if (typeof dataDir === 'string' && dataDir.trim() !== '') return join(resolve(dataDir.trim()), 'network.db')
+  const profilesDir = join(dshHomeDir(), 'profiles')
+  const profile = process.env.DSH_PROFILE
+  if (typeof profile === 'string' && profile.trim() !== '') {
+    const active = join(profilesDir, profile.trim(), 'data', 'session-network', 'network.db')
+    if (existsSync(active)) return active
+  }
+  let names = []
+  try { names = readdirSync(profilesDir) } catch { return undefined }
+  let latest = -1
+  let dbPath
+  for (const name of names) {
+    const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
+    if (!existsSync(candidate)) continue
+    let mtime
+    try { mtime = statSync(candidate).mtimeMs } catch { continue }
+    if (mtime > latest) { latest = mtime; dbPath = candidate }
+  }
+  return dbPath
+}
+
 function readMeetingsPage(rawQuery) {
   const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
   const limit = Number.isFinite(Number(query.limit)) ? Math.min(100, Math.max(1, Math.trunc(Number(query.limit)))) : 20
   const offset = Number.isFinite(Number(query.offset)) ? Math.max(0, Math.trunc(Number(query.offset))) : 0
   const keyword = typeof query.query === 'string' ? query.query.trim() : ''
   const status = typeof query.status === 'string' && query.status !== '' ? query.status : null
-  let dbPath = process.env.DSH_TEAM_NETWORK_DB && process.env.DSH_TEAM_NETWORK_DB.trim() !== ''
-    ? resolve(process.env.DSH_TEAM_NETWORK_DB.trim())
-    : (process.env.DSH_TEAM_DATA_DIR && process.env.DSH_TEAM_DATA_DIR.trim() !== ''
-      ? join(resolve(process.env.DSH_TEAM_DATA_DIR.trim()), 'network.db')
-      : undefined)
-  if (dbPath === undefined) {
-    const profilesDir = join(dshHomeDir(), 'profiles')
-    let names = []
-    try { names = readdirSync(profilesDir) } catch { return { meetings: [], total: 0, counts: {}, offset, limit } }
-    let latest = -1
-    for (const name of names) {
-      const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
-      if (!existsSync(candidate)) continue
-      const mtime = statSync(candidate).mtimeMs
-      if (mtime > latest) { latest = mtime; dbPath = candidate }
-    }
-  }
+  const dbPath = networkDbPath()
   if (dbPath === undefined || !existsSync(dbPath)) return { meetings: [], total: 0, counts: {}, offset, limit }
   let db
   try {
@@ -483,23 +499,7 @@ function readMeetingDetail(rawQuery) {
   const query = rawQuery !== null && typeof rawQuery === 'object' ? rawQuery : {}
   const meetingId = typeof query.meetingId === 'string' ? query.meetingId.trim() : ''
   if (meetingId === '') return { ok: false, error: 'meetingId is required' }
-  let dbPath = process.env.DSH_TEAM_NETWORK_DB && process.env.DSH_TEAM_NETWORK_DB.trim() !== ''
-    ? resolve(process.env.DSH_TEAM_NETWORK_DB.trim())
-    : (process.env.DSH_TEAM_DATA_DIR && process.env.DSH_TEAM_DATA_DIR.trim() !== ''
-      ? join(resolve(process.env.DSH_TEAM_DATA_DIR.trim()), 'network.db')
-      : undefined)
-  if (dbPath === undefined) {
-    const profilesDir = join(dshHomeDir(), 'profiles')
-    let names = []
-    try { names = readdirSync(profilesDir) } catch { names = [] }
-    let latest = -1
-    for (const name of names) {
-      const candidate = join(profilesDir, name, 'data', 'session-network', 'network.db')
-      if (!existsSync(candidate)) continue
-      const mtime = statSync(candidate).mtimeMs
-      if (mtime > latest) { latest = mtime; dbPath = candidate }
-    }
-  }
+  const dbPath = networkDbPath()
   if (dbPath === undefined || !existsSync(dbPath)) return { ok: false, error: 'meeting database not found' }
   let db
   try {
@@ -554,6 +554,121 @@ function readMeetingDetail(rawQuery) {
     return { ok: false, error: String(error?.message ?? error) }
   } finally {
     try { db?.close() } catch { /* ignore */ }
+  }
+}
+
+function emptyNetworkPage(offset, limit) {
+  return { sessions: [], aliases: [], total: 0, counts: { sessions: 0, aliases: 0 }, offset, limit }
+}
+
+/**
+ * Read-only session-network registry page for the Web console (sessions plus
+ * aliases). The workspace path hash is never selected, and no row is written.
+ */
+function readNetworkPage(rawArgs) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : {}
+  const { limit, offset } = pageBoundsOf(args)
+  const query = typeof args.query === 'string' ? args.query.trim().slice(0, 200) : ''
+  const status = textFilterOf(args.status)
+  const dbPath = networkDbPath()
+  if (dbPath === undefined || !existsSync(dbPath)) return emptyNetworkPage(offset, limit)
+  const db = openSnapshotDb(dbPath)
+  if (db === null) return emptyNetworkPage(offset, limit)
+  try {
+    const where = []
+    const values = []
+    if (status !== null) { where.push('s.status = ?'); values.push(status) }
+    if (query !== '') {
+      const like = likePattern(query)
+      where.push("(s.session_id LIKE ? ESCAPE '\\' OR s.short_id LIKE ? ESCAPE '\\'"
+        + " OR s.display_name LIKE ? ESCAPE '\\' OR s.role_name LIKE ? ESCAPE '\\'"
+        + " OR s.agent_preset LIKE ? ESCAPE '\\'"
+        + " OR EXISTS (SELECT 1 FROM aliases a WHERE a.session_id = s.session_id AND a.alias LIKE ? ESCAPE '\\'))")
+      values.push(like, like, like, like, like, like)
+    }
+    const whereSql = where.length === 0 ? '' : ' WHERE ' + where.join(' AND ')
+    const total = Number(db.prepare('SELECT COUNT(*) AS n FROM sessions s' + whereSql).get(...values)?.n ?? 0)
+    const rows = db.prepare('SELECT s.session_id, s.short_id, s.display_name, s.role_name, s.agent_preset,'
+      + ' s.status, s.kind, s.last_seen FROM sessions s' + whereSql
+      + ' ORDER BY s.last_seen DESC, s.session_id ASC LIMIT ? OFFSET ?').all(...values, limit, offset)
+    const aliases = db.prepare('SELECT alias, session_id, root_name, role_name, status FROM aliases'
+      + ' ORDER BY created_at DESC, alias ASC').all().map(row => ({
+      alias: row.alias, sessionId: row.session_id, rootName: row.root_name,
+      roleName: row.role_name, status: row.status,
+    }))
+    const aliasesBySession = new Map()
+    for (const alias of aliases) {
+      if (typeof alias.sessionId !== 'string') continue
+      const list = aliasesBySession.get(alias.sessionId) ?? []
+      list.push(alias.alias)
+      aliasesBySession.set(alias.sessionId, list)
+    }
+    const iso = value => {
+      if (value === null || value === undefined) return null
+      const date = new Date(value)
+      return Number.isFinite(date.getTime()) ? date.toISOString() : null
+    }
+    const sessions = rows.map(row => ({
+      sessionId: row.session_id, shortId: row.short_id, displayName: row.display_name,
+      roleName: row.role_name, agentPreset: row.agent_preset, status: row.status,
+      kind: row.kind, lastSeen: iso(row.last_seen),
+      aliases: (aliasesBySession.get(row.session_id) ?? []).sort(),
+    }))
+    return {
+      sessions, aliases, total, offset, limit,
+      counts: {
+        sessions: Number(db.prepare('SELECT COUNT(*) AS n FROM sessions').get()?.n ?? 0),
+        aliases: aliases.length,
+      },
+    }
+  } catch {
+    return emptyNetworkPage(offset, limit)
+  } finally {
+    closeSnapshotDb(db)
+  }
+}
+
+/**
+ * Read-only delivery/read audit for one bus message (metadata only; the body is
+ * never selected, so the Web detail view cannot exfiltrate message text).
+ */
+function readMessageAudit(store, rawArgs) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : {}
+  const messageId = typeof args.messageId === 'string' ? args.messageId.trim() : ''
+  if (messageId === '') return { ok: false, error: 'messageId is required' }
+  const { limit, offset } = pageBoundsOf(args)
+  try {
+    const db = store.db
+    const row = db.prepare('SELECT id, at, from_session, to_session, subject, bytes, sha256 FROM messages WHERE id = ?').get(messageId)
+    if (row === undefined || row === null) return { ok: false, gone: true, id: messageId }
+    const total = Number(db.prepare('SELECT COUNT(*) AS n FROM deliveries WHERE message_id = ?').get(messageId)?.n ?? 0)
+    const deliveries = db.prepare('SELECT id, at, to_session, duplicate, suppressed, delivered, coalesced, resumed, error'
+      + ' FROM deliveries WHERE message_id = ? ORDER BY id ASC LIMIT ? OFFSET ?').all(messageId, limit, offset)
+    const readState = db.prepare('SELECT session_id, read_at FROM read_state WHERE message_id = ? ORDER BY read_at DESC').all(messageId)
+    const envelopes = db.prepare('SELECT to_session, delivered_at, consumed_at FROM envelope_state WHERE message_id = ?'
+      + ' ORDER BY delivered_at ASC').all(messageId)
+    const routes = db.prepare('SELECT alias, session_id, display_name FROM routes ORDER BY alias ASC LIMIT 200').all()
+    return {
+      ok: true,
+      message: {
+        id: row.id, toSession: row.to_session, subject: row.subject, at: row.at,
+        bytes: row.bytes, sha256: row.sha256, readAt: readState[0]?.read_at ?? null,
+      },
+      deliveries: deliveries.map(delivery => ({
+        id: String(delivery.id), at: delivery.at, toSession: delivery.to_session,
+        duplicate: delivery.duplicate === 1, suppressed: delivery.suppressed === 1,
+        delivered: delivery.delivered === 1, coalesced: delivery.coalesced === 1,
+        resumed: delivery.resumed === 1, error: delivery.error ?? null,
+      })),
+      readState: readState.map(entry => ({ sessionId: entry.session_id, readAt: entry.read_at })),
+      envelopes: envelopes.map(envelope => ({
+        toSession: envelope.to_session, deliveredAt: envelope.delivered_at, consumedAt: envelope.consumed_at,
+      })),
+      routes: routes.map(route => ({ alias: route.alias, sessionId: route.session_id, displayName: route.display_name })),
+      total, limit, offset,
+    }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) }
   }
 }
 
@@ -1653,6 +1768,8 @@ export function apply(ctx, config) {
       memoryForget(query) { return forgetMemory(query) }
       meetingsPage(query) { return readMeetingsPage(query) }
       meetingDetail(query) { return readMeetingDetail(query) }
+      networkPage(query) { return readNetworkPage(query) }
+      messageAudit(query) { return readMessageAudit(store, query) }
     }
     Object.defineProperty(MessageBusWebRemote.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
       configurable: true,

@@ -175,7 +175,7 @@ export async function apply(ctx, config = {}) {
   const dataDir = rowDataDir ?? resolveDataDir(profileDir, cfg)
 
   let auditDb = null
-  const AUDIT_META_KEYS = ['source', 'reason', 'idempotency', 'briefStore', 'injectionReason', 'markFailed', 'markerHeal', 'healCount', 'section', 'count', 'alias', 'code', 'resultKeys', 'pointerLines', 'pointerChars', 'templateVersion', 'sessionKind', 'turn', 'step']
+  const AUDIT_META_KEYS = ['source', 'reason', 'idempotency', 'briefStore', 'injectionReason', 'markFailed', 'markerHeal', 'healCount', 'section', 'count', 'alias', 'code', 'resultKeys', 'pointerLines', 'pointerChars', 'templateVersion', 'sessionKind', 'turn', 'step', 'meetingId']
   const pickAuditMeta = record => {
     const meta = { source: 'session-network' }
     if (record === null || typeof record !== 'object') return meta
@@ -198,7 +198,9 @@ export async function apply(ctx, config = {}) {
           at: new Date().toISOString(),
           actor: record?.caller ?? { sessionId: record?.sessionId ?? null, displayName: record?.displayName ?? null, roleName: record?.roleName ?? null },
           action: typeof record?.action === 'string' ? record.action : 'event',
-          target: typeof record?.target === 'string' ? record.target : null,
+          target: typeof record?.target === 'string' && record.target !== ''
+            ? record.target
+            : (typeof record?.meetingId === 'string' && record.meetingId !== '' ? 'meeting:' + record.meetingId : null),
           result: typeof record?.result === 'string' ? record.result : 'ok',
           meta: pickAuditMeta(record),
         })

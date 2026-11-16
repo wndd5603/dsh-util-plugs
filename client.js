@@ -138,6 +138,26 @@ function createRemoteContribution() {
         parameters: [jsonParameter('query')],
         result: identityCodec('dsh-message-bus#messageBus/meetingDetail:result'),
       },
+      {
+        id: 'dsh-message-bus/messageBus/networkPage',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'networkPage',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/networkPage:result'),
+        description: 'Paginated read-only sessions/aliases directory from the session network.',
+      },
+      {
+        id: 'dsh-message-bus/messageBus/messageAudit',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'messageAudit',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/messageAudit:result'),
+        description: 'Read-only delivery/read-receipt/envelope/routing audit for one message; never returns the body.',
+      },
     ],
   }
 }
@@ -310,6 +330,16 @@ const zh = {
   prevPage: '上一页',
   nextPage: '下一页',
   networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建。',
+  directoryTitle: '成员 / 别名',
+  directorySubtitle: '只读浏览会话与别名；支持搜索、分页和长名称折叠。',
+  sessionsLabel: '会话',
+  aliasesLabel: '别名',
+  sessionsSearch: '搜索会话 / 别名（名称 / shortId / 角色 / 别名）',
+  sessionsEmpty: '暂无会话。',
+  aliasesEmpty: '暂无别名。',
+  lastSeen: '最近活动',
+  roleLabel: '角色',
+  rootLabel: '根',
   apartmentTitle: '智能体公寓 / 存储',
   apartmentSubtitle: '集中管理 Agent 主目录、租约、备份与根目录迁移。',
   apartmentStats: 'STORAGE',
@@ -353,6 +383,18 @@ const zh = {
   allMessages: '全部消息',
   readAt: '已读：{time}',
   unread: '未读',
+  auditTitle: '投递 / 回执 / 审计',
+  auditReadOnly: '只读',
+  auditDeliveries: '投递',
+  auditReadState: '回执',
+  auditEnvelopes: '信封',
+  auditRoutes: '路由',
+  auditEmpty: '暂无审计记录。',
+  auditNone: '暂无记录',
+  auditGone: '消息已不存在，无法读取审计。',
+  auditFailed: '审计加载失败：{error}',
+  deliveredAt: '投递于',
+  consumedAt: '消费于',
   detailTitle: '消息详情',
   close: '关闭',
   from: '发送者',
@@ -419,6 +461,16 @@ const en = {
   prevPage: 'Previous',
   nextPage: 'Next',
   networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
+  directoryTitle: 'Sessions / aliases',
+  directorySubtitle: 'Read-only session and alias directory with search, paging and long-name folding.',
+  sessionsLabel: 'Sessions',
+  aliasesLabel: 'Aliases',
+  sessionsSearch: 'Search sessions / aliases (name / shortId / role / alias)',
+  sessionsEmpty: 'No sessions yet.',
+  aliasesEmpty: 'No aliases yet.',
+  lastSeen: 'Last seen',
+  roleLabel: 'Role',
+  rootLabel: 'Root',
   apartmentTitle: 'Agent Apartment / storage',
   apartmentSubtitle: 'Central agent homes, leases, backups and root migration.',
   apartmentStats: 'STORAGE',
@@ -462,6 +514,18 @@ const en = {
   allMessages: 'All messages',
   readAt: 'Read at {time}',
   unread: 'Unread',
+  auditTitle: 'Delivery / read receipts / audit',
+  auditReadOnly: 'read-only',
+  auditDeliveries: 'Deliveries',
+  auditReadState: 'Read receipts',
+  auditEnvelopes: 'Envelopes',
+  auditRoutes: 'Routes',
+  auditEmpty: 'No audit records yet.',
+  auditNone: 'No records',
+  auditGone: 'The message no longer exists; audit unavailable.',
+  auditFailed: 'Audit load failed: {error}',
+  deliveredAt: 'Delivered',
+  consumedAt: 'Consumed',
   detailTitle: 'Message detail',
   close: 'Close',
   from: 'From',
@@ -576,6 +640,15 @@ body[data-ds-dark-theme="false"] .mb-dialog { background: rgb(250,250,250); }
 .mb-feedback[data-tone="ok"] { border: 1px solid rgba(63,185,80,0.40); background: rgba(63,185,80,0.08); }
 .mb-inlineInput { flex: 1 1 260px; min-width: 0; padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(127,127,127,0.3); background: rgba(127,127,127,0.08); color: inherit; }
 .mb-busy { opacity: .65; }
+.mb-subsection { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(127,127,127,0.18); }
+.mb-subsection summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.mb-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-nameFold { min-width: 0; }
+.mb-nameFold > summary { cursor: pointer; }
+.mb-auditFlags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.mb-flag { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.25); font-size: 11px; white-space: nowrap; opacity: .5; }
+.mb-flag[data-on="true"] { opacity: 1; color: rgb(120,170,255); border-color: rgba(79,140,255,0.45); }
+.mb-subhead { margin: 12px 0 4px; font-size: 12.5px; font-weight: 600; }
 `
 
 const style = {
@@ -629,6 +702,71 @@ function messageText(item) {
 
 function detailRow(label, value) {
   return panel('div', { style: style.metaRow }, panel('span', { style: { opacity: 0.65 } }, label), panel('span', { className: 'mb-mono' }, value))
+}
+
+/** First non-empty field, accepting both camelCase (plan) and snake_case (DB rows). */
+function fieldOf(row, camel, snake) {
+  if (row === null || typeof row !== 'object') return undefined
+  if (row[camel] !== undefined && row[camel] !== null) return row[camel]
+  return snake === undefined ? undefined : (row[snake] ?? undefined)
+}
+
+function aliasNamesOf(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(entry => typeof entry === 'string' ? entry : entry?.alias)
+    .filter(name => typeof name === 'string' && name !== '')
+}
+
+/** Short label that folds long display names into a native <details> disclosure. */
+function LongName(props) {
+  const raw = props.value
+  const value = typeof raw === 'string' && raw !== '' ? raw : '—'
+  const limit = typeof props.limit === 'number' && props.limit > 8 ? props.limit : 40
+  if (value.length <= limit) return panel('span', { className: 'mb-ellipsis', title: value }, value)
+  return panel('details', { className: 'mb-nameFold', 'data-long-name': '' },
+    panel('summary', { className: 'mb-ellipsis', title: value }, value.slice(0, limit) + '…'),
+    panel('div', { className: 'mb-mono', style: { whiteSpace: 'normal', overflowWrap: 'anywhere', marginTop: 4 } }, value))
+}
+
+function SessionRow(props) {
+  const { t, session } = props
+  const sessionId = fieldOf(session, 'sessionId', 'session_id')
+  const shortId = fieldOf(session, 'shortId', 'short_id')
+  const displayName = fieldOf(session, 'displayName', 'display_name')
+  const roleName = fieldOf(session, 'roleName', 'role_name')
+  const lastSeen = fieldOf(session, 'lastSeen', 'last_seen')
+  const status = fieldOf(session, 'status')
+  const aliases = aliasNamesOf(fieldOf(session, 'aliases'))
+  return panel('article', {
+    className: 'mb-task',
+    'data-network-session': typeof sessionId === 'string' ? sessionId : (typeof shortId === 'string' ? shortId : ''),
+  },
+  panel('div', { className: 'mb-taskTitle' },
+    panel(LongName, { value: displayName || shortId || sessionId || '—' }),
+    panel('span', { className: 'mb-pill', 'data-status': typeof status === 'string' ? status : '' }, typeof status === 'string' && status !== '' ? status : '—')),
+  panel('div', { className: 'mb-taskMeta' },
+    typeof shortId === 'string' && shortId !== '' ? panel('span', { className: 'mb-mono', title: shortId }, shortId) : null,
+    typeof roleName === 'string' && roleName !== '' ? panel('span', null, `${t('roleLabel')}: ${roleName}`) : null,
+    aliases.length > 0 ? panel('span', { className: 'mb-ellipsis', style: { maxWidth: '100%' }, title: aliases.join(', ') }, `${t('aliasesLabel')}: ${aliases.join(', ')}`) : null,
+    typeof lastSeen === 'string' && lastSeen !== '' ? panel('span', null, `${t('lastSeen')}: ${formatTime(lastSeen)}`) : null))
+}
+
+function AliasRow(props) {
+  const { t, alias } = props
+  const aliasName = typeof alias?.alias === 'string' && alias.alias !== '' ? alias.alias : '—'
+  const sessionId = fieldOf(alias, 'sessionId', 'session_id')
+  const rootName = fieldOf(alias, 'rootName', 'root_name')
+  const roleName = fieldOf(alias, 'roleName', 'role_name')
+  const status = fieldOf(alias, 'status')
+  return panel('article', { className: 'mb-task', 'data-network-alias': aliasName },
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', { className: 'mb-mono mb-ellipsis', title: aliasName }, aliasName),
+      panel('span', { className: 'mb-pill', 'data-status': typeof status === 'string' ? status : '' }, typeof status === 'string' && status !== '' ? status : '—')),
+    panel('div', { className: 'mb-taskMeta' },
+      typeof sessionId === 'string' && sessionId !== '' ? panel('span', { className: 'mb-mono', title: sessionId }, sessionId) : null,
+      typeof rootName === 'string' && rootName !== '' ? panel('span', null, `${t('rootLabel')}: ${rootName}`) : null,
+      typeof roleName === 'string' && roleName !== '' ? panel('span', null, `${t('roleLabel')}: ${roleName}`) : null))
 }
 
 function Toast(props) {
@@ -693,8 +831,108 @@ function SendDialog(props) {
         }, sending ? t('sending') : t('sendSubmit')))))
 }
 
+function AuditList(props) {
+  const { label, rows, empty, render } = props
+  return panel('div', { style: { marginTop: 10 } },
+    panel('h4', { className: 'mb-subhead' }, `${label} (${rows.length})`),
+    rows.length === 0
+      ? panel('p', { className: 'mb-muted', style: { margin: '4px 0' } }, empty)
+      : panel('div', { className: 'mb-taskList', style: { maxHeight: '28vh', overflow: 'auto' } }, rows.map((row, index) => panel('article', {
+        key: row?.id ?? row?.sessionId ?? row?.session_id ?? row?.alias ?? index,
+        className: 'mb-task',
+      }, render(row, index)))))
+}
+
 function MessageDetail(props) {
-  const { t, item, readBy, onClose, onDelete, onCopyBody, onCopyQuote } = props
+  const { t, api, item, readBy, onClose, onDelete, onCopyBody, onCopyQuote } = props
+  const auditPageSize = 20
+  const [auditOpen, setAuditOpen] = React.useState(false)
+  const [auditPage, setAuditPage] = React.useState(0)
+  const [audit, setAudit] = React.useState(undefined)
+  const [auditBusy, setAuditBusy] = React.useState(false)
+  const [auditError, setAuditError] = React.useState(undefined)
+
+  React.useEffect(() => {
+    setAudit(undefined)
+    setAuditPage(0)
+    setAuditError(undefined)
+  }, [item.id])
+
+  React.useEffect(() => {
+    if (!auditOpen || typeof api?.messageAudit !== 'function') return undefined
+    let cancelled = false
+    setAuditBusy(true)
+    setAuditError(undefined)
+    Promise.resolve().then(() => api.messageAudit({ messageId: item.id, limit: auditPageSize, offset: auditPage * auditPageSize }))
+      .then(result => {
+        if (cancelled) return
+        if (result !== null && typeof result === 'object' && result.ok === false) {
+          setAuditError(result.gone === true
+            ? t('auditGone')
+            : (typeof result.error === 'string' ? result.error : remoteErrorText(result)))
+          return
+        }
+        const value = unwrapRemote(result)
+        if (value !== null && typeof value === 'object' && value.ok === false) {
+          setAuditError(value.gone === true
+            ? t('auditGone')
+            : (typeof value.error === 'string' ? value.error : 'message audit unavailable'))
+          return
+        }
+        if (value !== null && typeof value === 'object') setAudit(value)
+      })
+      .catch(caught => { if (!cancelled) setAuditError(errorTextOf(caught)) })
+      .finally(() => { if (!cancelled) setAuditBusy(false) })
+    return () => { cancelled = true }
+  }, [api, item.id, auditOpen, auditPage])
+
+  const deliveries = Array.isArray(audit?.deliveries) ? audit.deliveries : []
+  const readState = Array.isArray(audit?.readState) ? audit.readState : (Array.isArray(audit?.read_state) ? audit.read_state : [])
+  const envelopes = Array.isArray(audit?.envelopes) ? audit.envelopes : []
+  const routes = Array.isArray(audit?.routes) ? audit.routes : []
+  const auditLimit = typeof audit?.limit === 'number' && audit.limit > 0 ? audit.limit : auditPageSize
+  const auditTotal = typeof audit?.total === 'number' ? audit.total : deliveries.length
+  const auditPages = pageCount(auditTotal, auditLimit)
+  const auditOffset = typeof audit?.offset === 'number' ? audit.offset : auditPage * auditLimit
+  const auditPageNumber = Math.floor(Math.max(0, auditOffset) / auditLimit) + 1
+  const auditEmpty = !auditBusy && audit !== undefined && deliveries.length === 0 && readState.length === 0 && envelopes.length === 0 && routes.length === 0
+
+  const sessionIdOf = row => {
+    const value = fieldOf(row, 'sessionId', 'session_id')
+    return typeof value === 'string' && value !== '' ? value : '—'
+  }
+  const renderDelivery = delivery => panel('div', null,
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', { className: 'mb-mono mb-ellipsis', title: sessionIdOf(delivery) }, sessionIdOf(delivery)),
+      panel('span', { className: 'mb-muted' }, formatTime(delivery?.at))),
+    panel('div', { className: 'mb-taskMeta' },
+      typeof delivery?.id === 'string' && delivery.id !== '' ? panel('span', { className: 'mb-mono', title: delivery.id }, delivery.id) : null,
+      panel('span', { className: 'mb-auditFlags' }, ['duplicate', 'suppressed', 'delivered', 'coalesced', 'resumed'].map(flag => panel('span', {
+        key: flag,
+        className: 'mb-flag',
+        'data-on': delivery?.[flag] === true ? 'true' : 'false',
+      }, flag))),
+      typeof delivery?.error === 'string' && delivery.error !== '' ? panel('span', { style: { color: 'rgb(235,145,120)' }, title: delivery.error }, 'error: ' + delivery.error) : null))
+
+  const renderReadState = entry => panel('div', null,
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', { className: 'mb-mono mb-ellipsis', title: sessionIdOf(entry) }, sessionIdOf(entry)),
+      panel('span', { className: 'mb-muted' }, formatTime(fieldOf(entry, 'readAt', 'read_at')))))
+
+  const renderEnvelope = entry => panel('div', null,
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', { className: 'mb-mono mb-ellipsis', title: sessionIdOf(entry) }, sessionIdOf(entry)),
+      panel('span', { className: 'mb-muted' }, `${t('deliveredAt')}: ${formatTime(fieldOf(entry, 'deliveredAt', 'delivered_at'))}`)),
+    panel('div', { className: 'mb-taskMeta' },
+      panel('span', null, `${t('consumedAt')}: ${formatTime(fieldOf(entry, 'consumedAt', 'consumed_at'))}`)))
+
+  const renderRoute = entry => panel('div', null,
+    panel('div', { className: 'mb-taskTitle' },
+      panel('span', { className: 'mb-mono mb-ellipsis', title: String(entry?.alias ?? '') }, String(entry?.alias ?? '—')),
+      panel('span', { className: 'mb-muted mb-ellipsis', title: String(entry?.displayName ?? '') }, String(entry?.displayName ?? ''))),
+    panel('div', { className: 'mb-taskMeta' },
+      panel('span', { className: 'mb-mono', title: sessionIdOf(entry) }, sessionIdOf(entry))))
+
   return panel('div', null,
     panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' } },
       panel('h2', { style: { margin: 0, fontSize: '16px' } }, t('detailTitle')),
@@ -707,7 +945,39 @@ function MessageDetail(props) {
     panel('div', { className: 'mb-actions', style: { justifyContent: 'flex-start' } },
       panel('button', { type: 'button', className: 'mb-button', onClick: onCopyBody, 'data-message-copy': '' }, t('copyBody')),
       panel('button', { type: 'button', className: 'mb-button', onClick: onCopyQuote, 'data-message-quote': '' }, t('copyQuote')),
-      panel('button', { type: 'button', className: 'mb-button mb-danger', onClick: onDelete, 'data-message-delete': '' }, t('delete'))))
+      panel('button', { type: 'button', className: 'mb-button mb-danger', onClick: onDelete, 'data-message-delete': '' }, t('delete'))),
+    panel('details', {
+      className: 'mb-subsection',
+      'data-message-audit': '',
+      onToggle: event => setAuditOpen(event.currentTarget.open === true),
+    },
+    panel('summary', { 'data-message-audit-summary': '' }, t('auditTitle'), ' ', panel('span', { className: 'mb-muted' }, `(${t('auditReadOnly')})`)),
+    auditError === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': 'danger', role: 'status' }, t('auditFailed', { error: auditError })),
+    auditBusy && audit === undefined ? panel('p', { className: 'mb-muted' }, t('loading')) : null,
+    audit?.message ? panel('div', { className: 'mb-taskMeta', style: { marginTop: 8 } },
+      typeof audit.message.id === 'string' ? panel('span', { className: 'mb-mono' }, audit.message.id) : null,
+      typeof audit.message.bytes === 'number' ? panel('span', null, formatBytes(audit.message.bytes)) : null,
+      typeof audit.message.sha256 === 'string' && audit.message.sha256 !== '' ? panel('span', { className: 'mb-mono', title: audit.message.sha256 }, audit.message.sha256.slice(0, 12) + '…') : null,
+      typeof audit.message.readAt === 'string' && audit.message.readAt !== '' ? panel('span', null, t('readAt', { time: formatTime(audit.message.readAt) })) : null) : null,
+    audit === undefined ? null : (auditEmpty
+      ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('auditEmpty'))
+      : panel('div', null,
+        panel(AuditList, { label: t('auditDeliveries'), rows: deliveries, empty: t('auditNone'), render: renderDelivery }),
+        panel(AuditList, { label: t('auditReadState'), rows: readState, empty: t('auditNone'), render: renderReadState }),
+        panel(AuditList, { label: t('auditEnvelopes'), rows: envelopes, empty: t('auditNone'), render: renderEnvelope }),
+        panel(AuditList, { label: t('auditRoutes'), rows: routes, empty: t('auditNone'), render: renderRoute }))),
+    audit === undefined ? null : panel('div', { className: 'mb-actionRow', style: { justifyContent: 'space-between', marginTop: 10 } },
+      panel('span', { className: 'mb-muted', 'data-message-audit-page': String(auditPageNumber) },
+        auditBusy ? t('working') : t('pageInfo', { page: auditPageNumber, pages: auditPages, total: auditTotal })),
+      panel('div', { style: { display: 'flex', gap: 6 } },
+        panel('button', {
+          type: 'button', className: 'mb-chipButton', disabled: auditBusy || auditPage <= 0,
+          onClick: () => setAuditPage(Math.max(0, auditPage - 1)),
+        }, t('prevPage')),
+        panel('button', {
+          type: 'button', className: 'mb-chipButton', disabled: auditBusy || auditPage >= auditPages - 1,
+          onClick: () => setAuditPage(auditPage + 1),
+        }, t('nextPage'))))))
 }
 
 function MessageRow(props) {
@@ -782,7 +1052,14 @@ function NetworkSection(props) {
   const [serverPage, setServerPage] = React.useState(undefined)
   const [taskLoading, setTaskLoading] = React.useState(false)
   const [taskDetailData, setTaskDetailData] = React.useState(undefined)
+  const [directoryQueryInput, setDirectoryQueryInput] = React.useState('')
+  const [directoryQuery, setDirectoryQuery] = React.useState('')
+  const [directoryPage, setDirectoryPage] = React.useState(0)
+  const [directoryData, setDirectoryData] = React.useState(undefined)
+  const [directoryBusy, setDirectoryBusy] = React.useState(false)
+  const [directoryError, setDirectoryError] = React.useState(undefined)
   const taskPageSize = 20
+  const directoryPageSize = 10
   const activeBoard = boards.find(board => board.id === selectedBoardId) ?? boards[0]
   const boardTasks = activeBoard === undefined ? [] : tasks.filter(task => (task.boardId ?? task.board_id) === activeBoard.id)
   const normalizedQuery = taskQuery.trim().toLowerCase()
@@ -801,6 +1078,12 @@ function NetworkSection(props) {
   const taskPageCount = Math.max(1, Math.ceil(totalTasks / taskPageSize))
   const pageTasks = Array.isArray(pageData?.tasks) ? pageData.tasks : localPageTasks
   const selectedTask = pageTasks.find(task => task.id === selectedTaskId) ?? tasks.find(task => task.id === selectedTaskId)
+  const directorySessions = Array.isArray(directoryData?.sessions) ? directoryData.sessions : []
+  const directoryAliases = Array.isArray(directoryData?.aliases) ? directoryData.aliases : []
+  const directoryCounts = directoryData?.counts !== null && directoryData?.counts !== undefined && typeof directoryData.counts === 'object' ? directoryData.counts : {}
+  const directoryTotal = typeof directoryData?.total === 'number' ? directoryData.total : (typeof directoryCounts.sessions === 'number' ? directoryCounts.sessions : directorySessions.length)
+  const directoryPages = pageCount(directoryTotal, directoryPageSize)
+  const directoryAliasTotal = typeof directoryCounts.aliases === 'number' ? directoryCounts.aliases : directoryAliases.length
   const selectBoard = boardId => { setSelectedBoardId(boardId); setSelectedTaskId(undefined); setTaskPage(0); setServerPage(undefined) }
   const openTaskDetail = async id => {
     if (typeof api?.taskDetail !== 'function') return
@@ -825,6 +1108,34 @@ function NetworkSection(props) {
     }).catch(() => { if (!cancelled) setServerPage(undefined) }).finally(() => { if (!cancelled) setTaskLoading(false) })
     return () => { cancelled = true }
   }, [api, activeBoard?.id, statusFilter, taskQuery, taskPage])
+
+  React.useEffect(() => {
+    if (typeof api?.networkPage !== 'function') return undefined
+    let cancelled = false
+    setDirectoryBusy(true)
+    setDirectoryError(undefined)
+    Promise.resolve().then(() => api.networkPage({
+      query: directoryQuery,
+      limit: directoryPageSize,
+      offset: directoryPage * directoryPageSize,
+    })).then(result => {
+      if (cancelled) return
+      if (result !== null && typeof result === 'object' && result.ok === false) {
+        setDirectoryError(typeof result.error === 'string' ? result.error : remoteErrorText(result))
+        setDirectoryData({ sessions: [], aliases: [], total: 0 })
+        return
+      }
+      const value = unwrapRemote(result)
+      if (value !== null && typeof value === 'object' && value.ok === false) {
+        setDirectoryError(typeof value.error === 'string' ? value.error : 'network page unavailable')
+        setDirectoryData({ sessions: [], aliases: [], total: 0 })
+        return
+      }
+      setDirectoryData(value !== null && typeof value === 'object' ? value : { sessions: [], aliases: [], total: 0 })
+    }).catch(caught => { if (!cancelled) setDirectoryError(errorTextOf(caught)) })
+      .finally(() => { if (!cancelled) setDirectoryBusy(false) })
+    return () => { cancelled = true }
+  }, [api, directoryQuery, directoryPage])
 
   const boardGrid = panel('div', { className: 'mb-boardGrid' }, boards.slice(0, 8).map(board => {
     const active = activeBoard?.id === board.id
@@ -907,6 +1218,64 @@ function NetworkSection(props) {
         panel('button', { type: 'button', className: 'mb-chipButton', disabled: safeTaskPage >= taskPageCount - 1, onClick: () => setTaskPage(Math.min(taskPageCount - 1, safeTaskPage + 1)) }, t('nextPage')))),
     taskDetail)
 
+  const submitDirectorySearch = event => {
+    if (event !== undefined) event.preventDefault()
+    setDirectoryQuery(directoryQueryInput.trim())
+    setDirectoryPage(0)
+  }
+
+  const directoryPanel = panel('div', { className: 'mb-subsection', 'data-network-directory': '' },
+    panel('div', { className: 'mb-cardHead' },
+      panel('div', null,
+        panel('h3', { className: 'mb-cardTitle', style: { fontSize: '13.5px' } }, t('directoryTitle')),
+        panel('p', { className: 'mb-cardSub' }, t('directorySubtitle'))),
+      panel('span', { className: 'mb-kicker' }, t('pageInfo', { page: directoryPage + 1, pages: directoryPages, total: directoryTotal }))),
+    panel('form', { className: 'mb-actionRow', onSubmit: submitDirectorySearch },
+      panel('input', {
+        type: 'search',
+        value: directoryQueryInput,
+        placeholder: t('sessionsSearch'),
+        className: 'mb-inlineInput',
+        'aria-label': t('sessionsSearch'),
+        'data-network-search': '',
+        onChange: event => setDirectoryQueryInput(event.target.value),
+      }),
+      panel('button', { type: 'submit', className: 'mb-chipButton', 'data-network-search-submit': '' }, t('search')),
+      panel('button', {
+        type: 'button',
+        className: 'mb-chipButton',
+        onClick: () => { setDirectoryQueryInput(''); setDirectoryQuery(''); setDirectoryPage(0) },
+      }, t('clear'))),
+    directoryError === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': 'danger', role: 'status' }, t('loadFailed', { error: directoryError })),
+    panel('h4', { className: 'mb-subhead' }, `${t('sessionsLabel')} (${directorySessions.length}/${directoryTotal})`),
+    directorySessions.length === 0
+      ? panel('p', { className: 'mb-muted', style: { margin: '4px 0' } }, directoryBusy ? t('working') : t('sessionsEmpty'))
+      : panel('div', { className: 'mb-taskList', style: { maxHeight: '32vh', overflow: 'auto' } }, directorySessions.map((session, index) => panel(SessionRow, {
+        key: session.sessionId ?? session.shortId ?? session.short_id ?? index,
+        t,
+        session,
+      }))),
+    panel('h4', { className: 'mb-subhead' }, `${t('aliasesLabel')} (${directoryAliasTotal})`),
+    directoryAliases.length === 0
+      ? panel('p', { className: 'mb-muted', style: { margin: '4px 0' } }, directoryBusy ? t('working') : t('aliasesEmpty'))
+      : panel('div', { className: 'mb-taskList', style: { maxHeight: '32vh', overflow: 'auto' } }, directoryAliases.map((alias, index) => panel(AliasRow, {
+        key: alias.alias ?? index,
+        t,
+        alias,
+      }))),
+    panel('div', { className: 'mb-actionRow', style: { justifyContent: 'space-between' } },
+      panel('span', { className: 'mb-muted', 'data-network-page': String(directoryPage + 1) },
+        directoryBusy ? t('working') : t('pageInfo', { page: directoryPage + 1, pages: directoryPages, total: directoryTotal })),
+      panel('div', { style: { display: 'flex', gap: 6 } },
+        panel('button', {
+          type: 'button', className: 'mb-chipButton', disabled: directoryBusy || directoryPage <= 0,
+          onClick: () => setDirectoryPage(Math.max(0, directoryPage - 1)),
+        }, t('prevPage')),
+        panel('button', {
+          type: 'button', className: 'mb-chipButton', disabled: directoryBusy || directoryPage >= directoryPages - 1,
+          onClick: () => setDirectoryPage(directoryPage + 1),
+        }, t('nextPage')))))
+
   const content = boards.length === 0
     ? panel('p', { className: 'mb-muted' }, t('networkEmpty'))
     : panel('div', null, boardGrid, taskPanel)
@@ -929,7 +1298,8 @@ function NetworkSection(props) {
       panel('span', { className: 'mb-stat' }, t('boardsLabel'), ' ', panel('strong', null, boards.length)),
       panel('span', { className: 'mb-stat' }, t('tasksLabel'), ' ', panel('strong', null, tasks.length))),
     content,
-    countsRow)
+    countsRow,
+    directoryPanel)
 }
 
 function ApartmentSection(props) {
@@ -1597,7 +1967,9 @@ function MessageCenterPage(props) {
     }),
     detail === undefined ? null : panel('div', { className: 'mb-overlay', onMouseDown: event => { if (event.target === event.currentTarget) { setSelected(undefined); setDetail(undefined) } } },      panel('div', { className: 'mb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('detailTitle'), 'data-message-detail': '' },
         panel(MessageDetail, {
+          key: detail.id,
           t,
+          api,
           item: detail,
           readBy,
           onClose: () => { setSelected(undefined); setDetail(undefined) },
@@ -1666,6 +2038,8 @@ function apply(ctx) {
         memoryForget: query => scope.remote.messageBus.memoryForget(query),
         meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
         meetingDetail: query => scope.remote.messageBus.meetingDetail(query),
+        networkPage: query => scope.remote.messageBus.networkPage(query),
+        messageAudit: query => scope.remote.messageBus.messageAudit(query),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',
