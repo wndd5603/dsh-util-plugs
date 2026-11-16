@@ -996,6 +996,12 @@ function ApartmentSection(props) {
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onBackup }, t('apartmentBackup')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: () => openDialog('restore') }, t('apartmentRestore')),
       panel('button', { type: 'button', style: buttonStyle('default', busy), disabled: busy, onClick: onVerify }, t('apartmentVerify'))),
+    feedback === undefined ? null : panel('p', {
+      className: 'mb-feedback',
+      'data-tone': feedback.tone === 'danger' ? 'danger' : 'ok',
+      role: 'status',
+      'aria-live': 'polite',
+    }, feedback.text),
     panel('div', { className: 'mb-actionRow', 'data-apartment-sections': '' },
       sections.map(([id, label]) => panel('button', {
         key: id, type: 'button', className: 'mb-chipButton', 'data-active': section === id ? 'true' : 'false',
@@ -1026,12 +1032,7 @@ function ApartmentSection(props) {
         panel('div', { className: 'mb-actionRow', style: { justifyContent: 'flex-end' } },
           panel('button', { type: 'button', className: 'mb-chipButton', onClick: () => setDialog(undefined) }, '取消'),
           panel('button', { type: 'button', style: buttonStyle('primary', busy || pathInput.trim() === ''), disabled: busy || pathInput.trim() === '', onClick: confirmDialog }, dialog === 'restore' ? '恢复' : dialog === 'migrate' ? '迁移' : '切换')))),
-    feedback === undefined ? null : panel('p', {
-      className: 'mb-feedback',
-      'data-tone': feedback.tone === 'danger' ? 'danger' : 'ok',
-      role: 'status',
-      'aria-live': 'polite',
-    }, feedback.text))
+    )
 }
 
 function MemoryRow(props) {
@@ -1159,7 +1160,7 @@ function MeetingsSection(props) {
         'aria-label': t('meetingStatus'), onChange: event => setStatus(event.target.value),
       },
       panel('option', { value: '' }, t('allTasks')),
-      ['open', 'r1', 'r2', 'final', 'cancelled'].map(state => panel('option', { key: state, value: state }, state)),
+      ['open', 'r1', 'r2', 'final', 'cancelled'].map(state => panel('option', { key: state, value: state }, state))),
       panel('button', { type: 'button', style: buttonStyle('primary', busy), disabled: busy, onClick: () => onSearch(query, status) }, t('search'))),
     items.length === 0
       ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('meetingsEmpty'))
@@ -1177,7 +1178,7 @@ function MeetingsSection(props) {
       panel('span', { className: 'mb-muted' }, t('pageInfo', { page: page + 1, pages: pageCount, total: meetings.total ?? items.length })),
       panel('button', { type: 'button', className: 'mb-chipButton', disabled: page <= 0, onClick: () => onPage(page - 1) }, t('prevPage')),
       panel('button', { type: 'button', className: 'mb-chipButton', disabled: page >= pageCount - 1, onClick: () => onPage(page + 1) }, t('nextPage'))),
-    message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text)))
+    message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text))
 }
 
 function MessageCenterPage(props) {
