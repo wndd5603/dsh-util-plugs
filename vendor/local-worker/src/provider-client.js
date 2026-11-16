@@ -35,6 +35,7 @@ export function createDshProviderClient({ llm, agentDefaultModel, rawConfig = {}
     let text = ''
     let usage = null
     let finishReason = null
+    const observed = []
     try {
       const prepared = await llm.prepareCall({
         provider: selected.provider,
@@ -50,7 +51,9 @@ export function createDshProviderClient({ llm, agentDefaultModel, rawConfig = {}
         signal: options.signal,
       }
       for await (const chunk of prepared.stream(streamOptions)) {
+        if (chunk?.type !== undefined) observed.push(String(chunk.type))
         if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
+        else if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && typeof chunk.block.text === 'string') text += chunk.block.text
         else if (chunk?.type === 'usage' && chunk.usage !== null && typeof chunk.usage === 'object') usage = chunk.usage
         else if (chunk?.type === 'finish' && typeof chunk.reason === 'string') finishReason = chunk.reason
       }
@@ -59,7 +62,10 @@ export function createDshProviderClient({ llm, agentDefaultModel, rawConfig = {}
       throw new LocalLlmError('PROVIDER_CALL_FAILED', String(error?.message ?? error), { code: error?.code ?? null })
     }
     if (text.trim() === '') {
-      throw new LocalLlmError('INVALID_MODEL_OUTPUT', 'provider returned no assistant content', { finishReason })
+      throw new LocalLlmError('INVALID_MODEL_OUTPUT', 'provider returned no assistant content', {
+        finishReason,
+        excerpt: observed.join(',') || 'no chunks',
+      })
     }
     return {
       text: text.trim(),
