@@ -1,6 +1,6 @@
-# dsh-util-plugs — one bundle, ten switchable rows
+# dsh-util-plugs — one bundle, eleven switchable rows
 #
-# Self-contained: all ten runtime modules live inside this package under
+# Self-contained: all eleven runtime modules live inside this package under
 # plugins/ and vendor/. No unpublished npm package, workspace resolution or
 # network registry is required at install time.
 - insert:
@@ -18,6 +18,8 @@
         strictMode: true
     - id: bulletin-board
       name: dsh-util-plugs/plugins/bulletin-board
+    - id: agent-apartment
+      name: dsh-util-plugs/plugins/agent-apartment
     - id: local-worker
       name: dsh-util-plugs/plugins/local-worker
       config:

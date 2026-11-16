@@ -235,6 +235,13 @@ const zh = {
   subtitle: '公告栏/任务板与跨会话消息：查看任务状态、依赖和消息。',
   networkTitle: '公告栏 / 任务板',
   networkEmpty: '暂无公告栏。让 Agent 调用 bulletin_board_create 创建。',
+  apartmentTitle: '智能体公寓 / 存储',
+  apartmentRootPlaceholder: '/path/to/apartment（当前根目录）',
+  apartmentSaveRoot: '保存目录',
+  apartmentMigrate: '迁移到此目录',
+  apartmentBackup: '立即备份',
+  apartmentRestore: '从目录恢复',
+  apartmentVerify: '验证',
   stats: '共 {total} 条消息 · 已加载 {shown} 条',
   refresh: '刷新',
   loading: '正在加载消息…',
@@ -295,6 +302,13 @@ const en = {
   subtitle: 'Bulletin board/task board and cross-session messages: task status, dependencies, and messages.',
   networkTitle: 'Bulletin board / task board',
   networkEmpty: 'No boards yet. Ask an Agent to call bulletin_board_create.',
+  apartmentTitle: 'Agent Apartment / storage',
+  apartmentRootPlaceholder: '/path/to/apartment (current root)',
+  apartmentSaveRoot: 'Save root',
+  apartmentMigrate: 'Migrate here',
+  apartmentBackup: 'Backup now',
+  apartmentRestore: 'Restore from dir',
+  apartmentVerify: 'Verify',
   stats: '{total} messages · {shown} shown',
   refresh: 'Refresh',
   loading: 'Loading messages…',
@@ -526,20 +540,35 @@ const BOARD_REMOTE_METHODS = [
   { method: 'boards', invocation: { kind: 'direct' } },
   { method: 'tasks', invocation: { kind: 'direct' } },
 ]
+const APARTMENT_REMOTE_METHODS = [
+  { method: 'status', invocation: { kind: 'direct' } },
+  { method: 'setRoot', invocation: { kind: 'direct' } },
+  { method: 'migrate', invocation: { kind: 'direct' } },
+  { method: 'backup', invocation: { kind: 'direct' } },
+  { method: 'restore', invocation: { kind: 'direct' } },
+  { method: 'verify', invocation: { kind: 'direct' } },
+]
 const boardResultCodec = name => ({ mode: 'strict', typeSymbol: `dsh-bulletin-board#${name}:result`, create: () => ({ parse: value => value }) })
-function createBoardRemoteContribution() {
+const apartmentResultCodec = name => ({ mode: 'strict', typeSymbol: `dsh-agent-apartment#${name}:result`, create: () => ({ parse: value => value }) })
+function remoteContribution(pkg, namespace, service, methods, codec) {
   return {
-    package: 'dsh-bulletin-board',
-    descriptors: BOARD_REMOTE_METHODS.map(entry => ({
-      id: `dsh-bulletin-board/bulletinBoard/${entry.method}`,
-      service: 'bulletinBoardRemote',
-      namespace: 'bulletinBoard',
+    package: pkg,
+    descriptors: methods.map(entry => ({
+      id: `${pkg}/${namespace}/${entry.method}`,
+      service,
+      namespace,
       method: entry.method,
       invocation: { kind: 'direct' },
       parameters: [],
-      result: boardResultCodec(entry.method),
+      result: codec(entry.method),
     })),
   }
+}
+function createBoardRemoteContribution() {
+  return remoteContribution('dsh-bulletin-board', 'bulletinBoard', 'bulletinBoardRemote', BOARD_REMOTE_METHODS, boardResultCodec)
+}
+function createApartmentRemoteContribution() {
+  return remoteContribution('dsh-agent-apartment', 'agentApartment', 'agentApartmentRemote', APARTMENT_REMOTE_METHODS, apartmentResultCodec)
 }
 
 function NetworkSection(props) {
@@ -562,6 +591,25 @@ function NetworkSection(props) {
         ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated'].map(status => panel('span', { key: status }, `${status}: ${String(counts[status] ?? 0)}`)))))
 }
 
+function ApartmentSection(props) {
+  const { t, apartment, rootInput, setRootInput, busy, message, onSetRoot, onMigrate, onBackup, onRestore, onVerify } = props
+  if (apartment === undefined || apartment === null) return null
+  const counts = apartment
+  return panel('section', { 'data-apartment': '', style: { marginBottom: '14px', padding: '10px 12px', border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px' } },
+    panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
+      panel('h2', { style: { margin: 0, fontSize: '15px' } }, t('apartmentTitle')),
+      panel('span', { style: { opacity: 0.7, fontSize: '12px' } }, `agents ${counts.agents ?? 0} · teams ${counts.teams ?? 0} · leases ${counts.leases ?? 0}`)),
+    panel('p', { style: { fontSize: '12.5px', opacity: 0.8, wordBreak: 'break-all' } }, counts.root ?? ''),
+    panel('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' } },
+      panel('input', { type: 'text', value: rootInput, placeholder: t('apartmentRootPlaceholder'), style: { flex: '1 1 260px', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(127,127,127,0.3)', background: 'transparent', color: 'inherit' }, onChange: event => setRootInput(event.target.value) }),
+      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onSetRoot }, t('apartmentSaveRoot')),
+      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onMigrate }, t('apartmentMigrate')),
+      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onBackup }, t('apartmentBackup')),
+      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onRestore }, t('apartmentRestore')),
+      panel('button', { type: 'button', style: style.button, disabled: busy, onClick: onVerify }, t('apartmentVerify'))),
+    message === undefined ? null : panel('p', { style: { fontSize: '12.5px' } }, message))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -578,6 +626,10 @@ function MessageCenterPage(props) {
   const [strictMode, setStrictMode] = React.useState(true)
   const [counts, setCounts] = React.useState({})
   const [network, setNetwork] = React.useState(undefined)
+  const [apartment, setApartment] = React.useState(undefined)
+  const [rootInput, setRootInput] = React.useState('')
+  const [apartmentBusy, setApartmentBusy] = React.useState(false)
+  const [apartmentMessage, setApartmentMessage] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
   const [detail, setDetail] = React.useState(undefined)
   const [deleteOpen, setDeleteOpen] = React.useState(false)
@@ -620,6 +672,13 @@ function MessageCenterPage(props) {
           const overview = await api.overview?.()
           if (overview !== undefined && overview !== null) setNetwork(overview)
         } catch { /* bulletin board row may be absent */ }
+        try {
+          const status = await api.apartmentStatus?.()
+          if (status !== undefined && status !== null) {
+            setApartment(status)
+            setRootInput(current => current === '' ? (status.root ?? '') : current)
+          }
+        } catch { /* apartment row may be absent */ }
       }
     } catch (caught) {
       setError(errorTextOf(caught))
@@ -629,6 +688,29 @@ function MessageCenterPage(props) {
   }, [api, keyword, limit, offset, readBy])
 
   React.useEffect(() => { void load({ offset: 0 }) }, []) // initial load
+
+  const apartmentAction = async (kind) => {
+    if (apartmentBusy) return
+    setApartmentBusy(true)
+    setApartmentMessage(undefined)
+    try {
+      const root = rootInput.trim()
+      if ((kind === 'setRoot' || kind === 'migrate') && root === '') throw new Error('root path is required')
+      let result
+      if (kind === 'setRoot') result = await api.apartmentSetRoot?.(root)
+      else if (kind === 'migrate') result = await api.apartmentMigrate?.(root)
+      else if (kind === 'backup') result = await api.apartmentBackup?.('manual-ui')
+      else if (kind === 'restore') result = await api.apartmentRestore?.(root)
+      else result = await api.apartmentVerify?.()
+      setApartmentMessage(JSON.stringify(result ?? { ok: true }))
+      const status = await api.apartmentStatus?.()
+      if (status !== undefined && status !== null) { setApartment(status); setRootInput(status.root ?? root) }
+    } catch (caught) {
+      setApartmentMessage(errorTextOf(caught))
+    } finally {
+      setApartmentBusy(false)
+    }
+  }
 
   const search = event => {
     if (event !== undefined) event.preventDefault()
@@ -739,6 +821,14 @@ function MessageCenterPage(props) {
         allowSend ? panel('button', { type: 'button', style: buttonStyle('primary', false), onClick: () => { setSendOpen(true); setSendError(undefined) }, 'data-message-send-open': '' }, t('send')) : null,
         panel('button', { type: 'button', style: style.button, onClick: () => { void load({ offset }) } }, t('refresh')))),
     panel(NetworkSection, { t, network }),
+    panel(ApartmentSection, {
+      t, apartment, rootInput, setRootInput, busy: apartmentBusy, message: apartmentMessage,
+      onSetRoot: () => { void apartmentAction('setRoot') },
+      onMigrate: () => { void apartmentAction('migrate') },
+      onBackup: () => { void apartmentAction('backup') },
+      onRestore: () => { void apartmentAction('restore') },
+      onVerify: () => { void apartmentAction('verify') },
+    }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
         type: 'search',
@@ -838,6 +928,7 @@ function apply(ctx) {
   ctx.plugin(async function mountMessageBusRemote(owner) {
     await owner.remote.$mount(createRemoteContribution())
     try { await owner.remote.$mount(createBoardRemoteContribution()) } catch { /* bulletin-board row may be absent */ }
+    try { await owner.remote.$mount(createApartmentRemoteContribution()) } catch { /* apartment row may be absent */ }
   })
   ctx.inject(['remote.messageBus'], scope => {
     scope.remoteAccess.whenAccess('messageBus/list', function* () {
@@ -849,6 +940,12 @@ function apply(ctx) {
         delete: (messageId, confirm) => scope.remote.messageBus.delete(messageId, confirm),
         send: (to, subject, body, from) => scope.remote.messageBus.send(to, subject, body, from),
         overview: () => scope.remote.bulletinBoard?.overview?.(),
+        apartmentStatus: () => scope.remote.agentApartment?.status?.(),
+        apartmentSetRoot: root => scope.remote.agentApartment?.setRoot?.(root),
+        apartmentMigrate: to => scope.remote.agentApartment?.migrate?.(to),
+        apartmentBackup: label => scope.remote.agentApartment?.backup?.(label),
+        apartmentRestore: from => scope.remote.agentApartment?.restore?.(from),
+        apartmentVerify: () => scope.remote.agentApartment?.verify?.(),
       }
       yield scope.slots.inject('sidebar.panellist', () => scope.slots.register({
         name: 'sidebar.panellist',

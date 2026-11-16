@@ -1,12 +1,13 @@
-## 2026.11.16-1 (dev)
+## 2026.11.16-2 (dev)
 
+- **Agent Apartment (new row `agent-apartment`)**: centralized agent homes/AGENTS.md/skills/tools, workspace leases, many-to-many teams/memberships, task-role bindings, experience records, legacy `team/members` import, root pointer + backup/migration tools (`apartment_set_root`, `apartment_migrate`, `apartment_backup`, `apartment_verify`); Agent Network panel has storage/migrate/backup/verify buttons.
 - **Bulletin board / task board (new row `bulletin-board`)**: shared SQLite boards and tasks with statuses, workspace/assignee association, dependencies, atomic claim and digest queries.
 - **Local LLM worker (new row `local-worker`)**: bounded `local_llm_health` / `local_task_plan` / `local_task_transform` / `local_task_validate` tools backed by an OpenAI-compatible local model; proposals only, strict JSON, timeout/token limits.
 - **Cross-permission guard**: `crossPermissionGuard` (default true) blocks confined senders from messaging danger-full-access targets via direct id, alias, header or autoResume.
 - **Agent Network panel**: the former “跨会话消息 / Cross-session messages” panel is now “智能体网络 / Agent Network”; it adds a live bulletin-board/task section (boards, task counts by status) above the existing message-center tools. **The plugin console remains a separate panel** with its original cards/configuration/status/extensions. The bulletin-board host exposes a read-only `bulletinBoard` Remote.
 - **Subagent progress**: `agent_progress` reads `team/progress/<sessionId>.json` heartbeats plus the live agent roster and classifies starting/running/stalled/inactive/failed; documented in the `subagent-progress` skill.
 - **Context guard self-heal**: context-meter and team-hooks2 re-scan `agents.list()` every 5s (idempotent), so turn-stopping listeners and archive reminders attach even when the first agents exist before plugin mount/restart.
-- Bundle is now 10 rows; existing rows remain switchable and zero npm dependencies.
+- Bundle is now 11 rows; existing rows remain switchable and zero npm dependencies.
 
 ## 2026.11.5-9
 

@@ -1,10 +1,10 @@
 # dsh-util-plugs — DSH 工具箱插件集
 
-A single install that adds ten independently switchable plugins to DeepSeek Harness.
+A single install that adds eleven independently switchable plugins to DeepSeek Harness.
 
-一次安装，为 DeepSeek Harness 增加 10 个可独立启用的插件。
+一次安装，为 DeepSeek Harness 增加 11 个可独立启用的插件。
 
-> Version: 2026.11.16-1 (dev) · Not yet published on npm; install from GitHub.
+> Version: 2026.11.16-2 (dev) · Not yet published on npm; install from GitHub.
 
 ## English
 
@@ -37,15 +37,16 @@ The `dsh-util-plugs` package gives DeepSeek Harness context awareness, cross-ses
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#dev
 ```
 
-The package is self-contained: the ten runtime plugins live under `vendor/`, and an install works without publishing them to npm. No npm package is published yet.
+The package is self-contained: the eleven runtime plugins live under `vendor/`, and an install works without publishing them to npm. No npm package is published yet.
 
-### The ten plugins
+### The eleven plugins
 
 | Plugin | What it adds | Docs |
 |---|---|---|
 | `context-sentinel` | Context occupancy, a per-turn `[ctx]` signal, archive reminders and optional guard rails. | [`vendor/context-sentinel/README.md`](vendor/context-sentinel/README.md) |
 | `message-bus` | Local SQLite cross-session messaging, read receipts, priorities, inactive-session recovery (`autoResume`) and a Web message center. | [`vendor/message-bus/README.md`](vendor/message-bus/README.md) |
 | `bulletin-board` | Shared boards/tasks with statuses, workspace/assignee association, dependencies, atomic claim and digest. | [`vendor/bulletin-board/README.md`](vendor/bulletin-board/README.md) |
+| `agent-apartment` | Centralized agent homes, leases, teams/memberships, task roles, experience and root migration/backup. | [`vendor/agent-apartment/README.md`](vendor/agent-apartment/README.md) |
 | `local-worker` | Bounded local-LLM plan/transform/validate proposals with strict JSON and timeouts. | [`vendor/local-worker/README.md`](vendor/local-worker/README.md) |
 | `team-bus` | Session network, alias/meeting registry, shared pitfalls and five coordination skills. | [`vendor/team-bus/README.md`](vendor/team-bus/README.md) |
 | `agent-workflows` | Team Coordinator and Prompt Studio workflow tools. | [`vendor/agent-workflows/README.md`](vendor/agent-workflows/README.md) |

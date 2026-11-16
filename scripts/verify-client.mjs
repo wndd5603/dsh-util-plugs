@@ -99,6 +99,8 @@ check(seen.remotes.includes('dsh-message-bus'), 'message center must mount its m
 check(seen.remotes.includes('dsh-host-relaunch'), 'restart button must mount its relaunch Remote contribution')
 check(clientText.includes('dsh-bulletin-board'), 'Agent Network client must mount the bulletin-board Remote contribution')
 check(clientText.includes('data-agent-network'), 'Agent Network panel must render the board section')
+check(clientText.includes('dsh-agent-apartment'), 'Agent Network panel must mount the apartment Remote contribution')
+check(clientText.includes('data-apartment'), 'Agent Network panel must render the apartment settings/backup section')
 check(clientText.includes('智能体网络'), 'message center panel must be labeled 智能体网络')
 check(clientText.includes('插件控制台'), 'plugin console panel must remain separate and labeled 插件控制台')
 for (const service of ['slots', 'locale', 'remote', 'remoteAccess']) {
