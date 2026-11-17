@@ -50,25 +50,39 @@ const SKILLS_DIR = new URL('./skills/', import.meta.url)
  * `|` block styles; malformed frontmatter degrades to the directory name.
  */
 export function readSkillFrontmatter(text, fallbackName) {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
-  if (match === null) return { name: fallbackName, description: '' }
-  const lines = match[1].split(/\r?\n/)
+  // Parse linearly: frontmatter may come from an untrusted skill file, so no
+  // regex scans unbounded text (CodeQL js/polynomial-redos on the old
+  // /^name:\s*(.+)$/ and /^description:\s*(.*)$/ matchers).
+  const normalized = text.split('\r\n').join('\n')
+  if (!normalized.startsWith('---\n')) return { name: fallbackName, description: '' }
+  const end = normalized.indexOf('\n---', 4)
+  if (end === -1) return { name: fallbackName, description: '' }
+  const lines = normalized.slice(4, end).split('\n')
   let name = fallbackName
   const descriptionLines = []
   let capturing = false
   for (const line of lines) {
-    const nameMatch = /^name:\s*(.+)$/.exec(line)
-    if (nameMatch !== null) { name = nameMatch[1].trim(); capturing = false; continue }
-    const descriptionMatch = /^description:\s*(.*)$/.exec(line)
-    if (descriptionMatch !== null) {
-      const inline = descriptionMatch[1].trim()
+    if (line.startsWith('name:')) {
+      const value = line.slice('name:'.length)
+      // The previous /^name:\s*(.+)$/ required at least one character after ':'
+      // and trimmed both ends, so `name:` alone falls through unchanged.
+      if (value.length > 0) { name = value.trim(); capturing = false; continue }
+    }
+    if (line.startsWith('description:')) {
+      const inline = line.slice('description:'.length).trim()
       if (inline !== '' && inline !== '>-' && inline !== '|') descriptionLines.push(inline)
       capturing = true
       continue
     }
     if (capturing) {
-      if (/^\S/.test(line) && line.trim() !== '') capturing = false
-      else if (/^\s+\S/.test(line)) descriptionLines.push(line.trim())
+      const trimmedStart = line.trimStart()
+      if (trimmedStart.length === line.length) {
+        // A non-empty line starting at column 0 ends the block.
+        if (trimmedStart !== '') capturing = false
+      } else if (trimmedStart !== '') {
+        // Indented, non-blank continuation (folded `>-` / literal `|`).
+        descriptionLines.push(line.trim())
+      }
     }
   }
   return { name, description: descriptionLines.join(' ').trim() }

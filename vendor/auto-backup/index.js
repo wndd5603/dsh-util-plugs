@@ -77,8 +77,29 @@ const DEFAULT_EXCLUDE_DIRS = [
 
 const DEFAULT_TOOLS = ['write', 'edit']
 
-function normalize(value) {
-  return String(value).replace(/\\/g, '/').replace(/\/+$/, '')
+/**
+ * 路径归一化：`\` → `/`，并去掉全部尾随 `/`。
+ * 线性扫描（while/slice）实现，避免 `/\/+$/` 在超长输入上的多项式回溯
+ * （CodeQL js/polynomial-redos）。
+ */
+export function normalize(value) {
+  const slashed = String(value).replace(/\\/g, '/')
+  let end = slashed.length
+  while (end > 0 && slashed[end - 1] === '/') end -= 1
+  return slashed.slice(0, end)
+}
+
+/**
+ * 命令行 token 清理：去掉前导 `=`/`@` 和尾随 `,`/`:`。
+ * 与旧 `replace(/^[=@]+/).replace(/[,:]+$/)` 语义一致，但为线性扫描，
+ * 不做回溯（CodeQL js/polynomial-redos）。
+ */
+export function cleanToken(token) {
+  let start = 0
+  let end = token.length
+  while (start < end && (token[start] === '=' || token[start] === '@')) start += 1
+  while (end > start && (token[end - 1] === ',' || token[end - 1] === ':')) end -= 1
+  return token.slice(start, end)
 }
 
 /** glob → 正则：`*` 不跨 `/`，`**` 跨目录，`?` 单字符（用于 fileOverrides 的路径规则）。 */
@@ -381,7 +402,7 @@ export function createBackupManager(config) {
     const hits = []
     const seen = new Set()
     for (const token of tokens) {
-      const cleaned = token.replace(/^[=@]+/, '').replace(/[,:]+$/, '')
+      const cleaned = cleanToken(token)
       if (cleaned.length === 0) continue
       if (!/[\\/]/.test(cleaned) && !/\.(?:lua|md|js|mjs|json|ts|css|html)$/i.test(cleaned)) continue
       const decision = shouldBackup(cleaned)
@@ -481,7 +502,7 @@ export function apply(ctx, config, deps = {}) {
       + 'root was resolved (config / session workspace / unavailable), the backup directory and its totals, '
       + 'inactive reason when no root is available, and counters. Use it to verify the hook actually protects the '
       + 'current workspace before relying on file_backups. Capability index: skill("team-bootstrap") §2 / '
-      + 'CAPABILITY_AUDIT.md.',
+      + 'capability audit.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: {
       schema: { type: 'object', additionalProperties: true },

@@ -489,9 +489,36 @@ function clampText(value, maxLength, fallback) {
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) + '…' : trimmed
 }
 
-/** Quote one argv item for the diagnostic `hostCommand` line. */
-function quoteArg(value) {
-  return /[ \t"]/.test(value) ? '"' + value.replace(/"/g, '\\"') + '"' : value
+/**
+ * Quote one argv item for the diagnostic `hostCommand` line using the Windows
+ * CommandLineToArgvW rules, so the rendered command line parses back to the
+ * same argv. Items without spaces, tabs or quotes stay untouched; the empty
+ * item becomes `""` so it remains visible as an argument.
+ *
+ * A run of backslashes is literal unless it precedes a `"`: before a quote it
+ * is doubled, plus one extra backslash when the quote itself must stay
+ * literal; a trailing run is doubled before the closing quote.
+ */
+export function quoteArg(value) {
+  if (value === '') return '""'
+  if (!/[ \t"]/.test(value)) return value
+  let quoted = '"'
+  let backslashes = 0
+  for (const char of value) {
+    if (char === '\\') {
+      backslashes += 1
+      continue
+    }
+    if (char === '"') {
+      quoted += '\\'.repeat(backslashes * 2 + 1) + '"'
+      backslashes = 0
+      continue
+    }
+    quoted += '\\'.repeat(backslashes) + char
+    backslashes = 0
+  }
+  quoted += '\\'.repeat(backslashes * 2) + '"'
+  return quoted
 }
 
 /**
@@ -2174,7 +2201,7 @@ export function apply(ctx, config, deps) {
       'Read-only status of the two-step host restart plugin: version, enabled flag, the allowRealRestart safety lock, '
       + 'diagnostics mode, handoff/audit paths, pending token metadata (never the token itself), last boot replay, '
       + 'remote-endpoint registration state, and the effective config. It never restarts anything. Capability index: '
-      + 'skill("team-bootstrap") §2 / CAPABILITY_AUDIT.md.',
+      + 'skill("team-bootstrap") §2.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: {
       schema: { type: 'object', additionalProperties: true },
