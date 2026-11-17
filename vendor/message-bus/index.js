@@ -317,7 +317,7 @@ const safeJsonObject = value => {
 }
 
 /** Read-only Agent Network snapshots so the panel works even if auxiliary Remotes mount late. */
-function readAgentNetworkSnapshot() {
+function readAgentNetworkSnapshot(ctx) {
   const dbPath = join(dshHomeDir(), 'bulletin-board', 'board.sqlite')
   if (!existsSync(dbPath)) return undefined
   let db
@@ -325,6 +325,7 @@ function readAgentNetworkSnapshot() {
     db = new DatabaseSync(dbPath, { readOnly: true })
     const boards = db.prepare('SELECT * FROM boards ORDER BY updated_at DESC').all().map(row => ({
       id: row.id, title: row.title, description: row.description, workspace: row.workspace,
+      ownerSession: row.owner_session,
       status: row.status, priority: row.priority, labels: safeJsonArray(row.labels), updatedAt: row.updated_at,
     }))
     const tasks = db.prepare('SELECT * FROM tasks ORDER BY priority DESC, updated_at DESC').all().map(row => ({
@@ -335,7 +336,18 @@ function readAgentNetworkSnapshot() {
     }))
     const counts = {}
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1
-    return { boards, tasks, counts }
+    let sessionId = null
+    let workspace = null
+    try {
+      const agents = ctx?.get?.('agents')
+      const list = typeof agents?.list === 'function' ? agents.list() : []
+      const candidate = list.find(agent => agent?.session?.id === process.env.DSH_SESSION_ID)
+        ?? list.find(agent => agent?.status === 'running')
+        ?? list[0]
+      sessionId = candidate?.session?.id ?? null
+      workspace = candidate?.session?.header?.cwd ?? candidate?.workspace?.cwd ?? null
+    } catch { /* keep nulls */ }
+    return { boards, tasks, counts, sessionId, workspace }
   } catch {
     return undefined
   } finally {
@@ -2428,7 +2440,7 @@ export function apply(ctx, config) {
         offset,
         readBy,
         counts: store.counts(),
-        network: readAgentNetworkSnapshot(),
+        network: readAgentNetworkSnapshot(ctx),
         apartment: readApartmentSnapshot(),
         capabilities: { send: cfg.webUi.allowSend, audit: cfg.webUi.audit, strictMode: cfg.strictMode, autoResume: cfg.autoResume },
         remote: { service: WEB_REMOTE_SERVICE_KEY, namespace: WEB_REMOTE_NAMESPACE, actor: 'ui' },

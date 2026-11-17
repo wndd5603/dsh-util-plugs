@@ -1079,7 +1079,12 @@ function NetworkSection(props) {
   const tasks = Array.isArray(network.tasks) ? network.tasks : []
   const counts = network.counts !== null && typeof network.counts === 'object' ? network.counts : {}
   const statuses = ['pending', 'in_progress', 'blocked', 'suspended', 'completed', 'terminated']
-  const [selectedBoardId, setSelectedBoardId] = React.useState(boards[0]?.id)
+  const currentSessionId = typeof network.sessionId === 'string' ? network.sessionId : null
+  const currentWorkspace = typeof network.workspace === 'string' ? network.workspace : null
+  const preferredBoard = (currentWorkspace === null ? undefined : boards.find(board => board.workspace === currentWorkspace))
+    ?? (currentSessionId === null ? undefined : boards.find(board => board.ownerSession === currentSessionId))
+  const orderedBoards = preferredBoard === undefined ? boards : [preferredBoard, ...boards.filter(board => board.id !== preferredBoard.id)]
+  const [selectedBoardId, setSelectedBoardId] = React.useState(preferredBoard?.id ?? boards[0]?.id)
   const [statusFilter, setStatusFilter] = React.useState('all')
   const [selectedTaskId, setSelectedTaskId] = React.useState(undefined)
   const [taskQuery, setTaskQuery] = React.useState('')
@@ -1095,7 +1100,7 @@ function NetworkSection(props) {
   const [directoryError, setDirectoryError] = React.useState(undefined)
   const taskPageSize = 20
   const directoryPageSize = 10
-  const activeBoard = boards.find(board => board.id === selectedBoardId) ?? boards[0]
+  const activeBoard = orderedBoards.find(board => board.id === selectedBoardId) ?? orderedBoards[0]
   const boardTasks = activeBoard === undefined ? [] : tasks.filter(task => (task.boardId ?? task.board_id) === activeBoard.id)
   const normalizedQuery = taskQuery.trim().toLowerCase()
   const filteredTasks = boardTasks.filter(task => {
@@ -1172,7 +1177,7 @@ function NetworkSection(props) {
     return () => { cancelled = true }
   }, [api, directoryQuery, directoryPage])
 
-  const boardGrid = panel('div', { className: 'mb-boardGrid' }, boards.slice(0, 8).map(board => {
+  const boardGrid = panel('div', { className: 'mb-boardGrid' }, orderedBoards.slice(0, 8).map(board => {
     const active = activeBoard?.id === board.id
     return panel('article', {
       key: board.id,
@@ -1180,6 +1185,7 @@ function NetworkSection(props) {
       role: 'button',
       tabIndex: 0,
       'data-active': active ? 'true' : 'false',
+      'data-current': preferredBoard?.id === board.id ? 'true' : 'false',
       'aria-label': board.title,
       onClick: () => selectBoard(board.id),
       onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectBoard(board.id) } },
