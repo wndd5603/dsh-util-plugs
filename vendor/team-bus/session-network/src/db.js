@@ -537,10 +537,16 @@ export function getSessionBrief(sessionId) {
   return getSessionBriefInternal(openSharedRequired(), String(sessionId))
 }
 
+/**
+ * P1-3 state migration: mark one session stale without destroying the evidence
+ * that made it stale. The previous implementation also rewrote `last_seen` to
+ * the sweep time, which hid inactivity from later alias-retirement checks.
+ * `at` is retained in the signature for API compatibility.
+ */
 export function markSessionStale(sessionId, at) {
+  void at
   const db = openSharedRequired()
-  const now = toMs(at)
-  const result = run(db, "UPDATE sessions SET status = 'stale', last_seen = ? WHERE session_id = ?", [now, String(sessionId)])
+  const result = run(db, "UPDATE sessions SET status = 'stale' WHERE session_id = ? AND status NOT IN ('archived','stale')", [String(sessionId)])
   return result.changes > 0
 }
 
@@ -609,6 +615,52 @@ export function listAliases() {
 
 export function listAliasesForSession(sessionId) {
   return all(openSharedRequired(), 'SELECT * FROM aliases WHERE session_id = ? ORDER BY created_at ASC, alias ASC', [String(sessionId)])
+}
+
+export const ALIAS_RETIRE_AFTER_MS = 72 * 60 * 60_000
+
+/**
+ * P1-3: retire `legacy` aliases whose owning session has had no activity for
+ * `olderThanMs` (default 72h). Activity is the same source listStaleSessions
+ * uses: the latest heartbeat, else sessions.last_seen.
+ *
+ * Routing is deliberately preserved: only `status` changes to `retired`; the
+ * row, session_id and superseded_by stay intact, and resolveAlias keeps
+ * resolving retired aliases (current product behaviour, Q2 analysis §1.2).
+ * Sessions in `protectSessionIds` (live agents) are never touched.
+ *
+ * @returns {{count: number, retired: Array<{alias: string, sessionId: string, lastSeenAt: number}>, scanned: number, threshold: number}}
+ */
+export function retireStaleLegacyAliases({ now = Date.now(), olderThanMs = ALIAS_RETIRE_AFTER_MS, protectSessionIds = [] } = {}) {
+  const db = openSharedRequired()
+  const at = toMs(now)
+  const age = Math.max(0, Number(olderThanMs) || 0)
+  const threshold = at - age
+  const protectedIds = [...new Set(
+    (Array.isArray(protectSessionIds) ? protectSessionIds : [])
+      .filter(value => typeof value === 'string' && value !== ''),
+  )]
+  const protectClause = protectedIds.length === 0
+    ? ''
+    : ` AND a.session_id NOT IN (${protectedIds.map(() => '?').join(', ')})`
+  return tx(db, () => {
+    const rows = all(db, `SELECT a.alias, a.session_id,
+                                 COALESCE(h.at, s.last_seen) AS owner_last_seen
+                          FROM aliases a
+                          JOIN sessions s ON s.session_id = a.session_id
+                          LEFT JOIN heartbeats h ON h.session_id = a.session_id
+                          WHERE a.status = 'legacy'
+                            AND COALESCE(h.at, s.last_seen) < ?${protectClause}
+                          ORDER BY COALESCE(h.at, s.last_seen) ASC`, [threshold, ...protectedIds])
+    const retired = []
+    for (const row of rows) {
+      const result = run(db, "UPDATE aliases SET status = 'retired' WHERE alias = ? AND status = 'legacy'", [row.alias])
+      if (Number(result.changes ?? 0) > 0) {
+        retired.push({ alias: row.alias, sessionId: row.session_id, lastSeenAt: row.owner_last_seen })
+      }
+    }
+    return { count: retired.length, retired, scanned: rows.length, threshold }
+  })
 }
 
 /**
@@ -776,7 +828,11 @@ export function recordHeartbeat(sessionId, at) {
   return tx(db, () => {
     run(db, `INSERT INTO heartbeats (session_id, bucket, at) VALUES (?, ?, ?)
              ON CONFLICT(session_id) DO UPDATE SET bucket = excluded.bucket, at = excluded.at`, [String(sessionId), bucket, ts])
-    run(db, 'UPDATE sessions SET last_seen = ? WHERE session_id = ?', [ts, String(sessionId)])
+    // A fresh heartbeat is positive proof of life: revive a session the P1-3
+    // sweep previously marked stale, without touching archived/other states.
+    run(db, `UPDATE sessions SET last_seen = ?,
+               status = CASE WHEN status = 'stale' THEN 'active' ELSE status END
+             WHERE session_id = ?`, [ts, String(sessionId)])
     return { sessionId: String(sessionId), bucket, at: ts }
   })
 }
@@ -1035,6 +1091,39 @@ export function getSetting(key) {
   const row = get(openSharedRequired(), 'SELECT * FROM settings WHERE key = ?', [String(key)])
   if (row === undefined) return undefined
   return { ...row, value: safeJsonParse(row.value_json) }
+}
+
+export const STALE_SWEEP_SETTING_KEY = 'stale_sweep_at'
+
+/**
+ * P1-3: atomically claim the next stale-sweep slot. The timestamp lives in the
+ * `settings` table so every session/plugin instance sharing this dataDir honours
+ * one 10-minute throttle (and it survives host restarts). BEGIN IMMEDIATE makes
+ * the read+write one critical section, so concurrent pre-steps cannot both win.
+ *
+ * @returns {{claimed: boolean, at?: number, lastSweepAt: number|null, nextAt?: number}}
+ */
+export function claimStaleSweep({ now = Date.now(), intervalMs = 10 * 60_000, key = STALE_SWEEP_SETTING_KEY } = {}) {
+  const db = openSharedRequired()
+  const at = toMs(now)
+  const gap = Math.max(0, Number(intervalMs) || 0)
+  return tx(db, () => {
+    const row = get(db, 'SELECT value_json FROM settings WHERE key = ?', [String(key)])
+    let last = NaN
+    if (row !== undefined) {
+      const parsed = safeJsonParse(row.value_json)
+      last = typeof parsed === 'number'
+        ? parsed
+        : (parsed !== null && typeof parsed === 'object' ? Number(parsed.at) : NaN)
+    }
+    if (Number.isFinite(last) && at - last < gap) {
+      return { claimed: false, lastSweepAt: last, nextAt: last + gap }
+    }
+    run(db, `INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+    [String(key), JSON.stringify({ at }), at])
+    return { claimed: true, at, lastSweepAt: Number.isFinite(last) ? last : null }
+  })
 }
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,23 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope, updated_at);
 `
 const now = () => new Date().toISOString()
+const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const tagsOf = value => Array.isArray(value) ? value.filter(tag => typeof tag === 'string') : []
+
+// Digest contract: counts only. Latest-key entries are capped to 3-5 so the
+// optional pre-step summary stays inside a two-line budget.
+const STALE_DAYS = 90
+const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000
+const DIGEST_MIN_KEYS = 3
+const DIGEST_MAX_KEYS = 5
+const DIGEST_SOURCE_KIND = 'agent-memory-digest'
+const DIGEST_SOURCE_VERSION = 1
+const digestKeyLimit = value => {
+  const number = Number(value)
+  return Number.isFinite(number)
+    ? Math.max(DIGEST_MIN_KEYS, Math.min(DIGEST_MAX_KEYS, Math.trunc(number)))
+    : DIGEST_MAX_KEYS
+}
 const output = {
   schema: { type: 'object', additionalProperties: true },
   render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
@@ -134,7 +150,149 @@ export function validateMemory({ scope = 'project', key, content, tags } = {}) {
   }
 }
 
-export function apply(ctx) {
+/**
+ * Read-only digest over the memories table.
+ *
+ * Returns counts only: total, per-scope counts, the latest 3-5 non-empty keys
+ * (with updated_at), issue rows, warning-only rows and rows older than 90 days.
+ * `issueCount` and `warningCount` are disjoint row buckets and match
+ * memory_quality's `summary.errors` / `summary.warnings`. No row content is
+ * returned and no INSERT/UPDATE/DELETE is issued.
+ */
+export function buildMemoryDigest(db, { scope = null, limit = DIGEST_MAX_KEYS, nowMs = Date.now() } = {}) {
+  const scopeFilter = typeof scope === 'string' && scope.trim() !== '' ? scope.trim() : null
+  const keysLimit = digestKeyLimit(limit)
+  const clock = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now()
+  const rows = scopeFilter === null
+    ? db.prepare('SELECT scope, key, content, tags, updated_at FROM memories ORDER BY updated_at DESC, rowid DESC').all()
+    : db.prepare('SELECT scope, key, content, tags, updated_at FROM memories WHERE scope=? ORDER BY updated_at DESC, rowid DESC').all(scopeFilter)
+  let issueCount = 0
+  let warningCount = 0
+  let staleCount = 0
+  for (const row of rows) {
+    const quality = validateMemory({ scope: row.scope, key: row.key, content: row.content, tags: safeTags(row.tags) })
+    if (quality.issues.length > 0) issueCount += 1
+    else if (quality.warnings.length > 0) warningCount += 1
+    const updatedAt = Date.parse(row.updated_at)
+    if (Number.isFinite(updatedAt) && clock - updatedAt > STALE_MS) staleCount += 1
+  }
+  const scopes = scopeFilter === null
+    ? db.prepare('SELECT scope, COUNT(*) AS count FROM memories GROUP BY scope ORDER BY count DESC, scope ASC').all()
+    : db.prepare('SELECT scope, COUNT(*) AS count FROM memories WHERE scope=? GROUP BY scope ORDER BY count DESC, scope ASC').all(scopeFilter)
+  const latestKeys = scopeFilter === null
+    ? db.prepare("SELECT key, updated_at FROM memories WHERE key IS NOT NULL AND key <> '' ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(keysLimit)
+    : db.prepare("SELECT key, updated_at FROM memories WHERE scope=? AND key IS NOT NULL AND key <> '' ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(scopeFilter, keysLimit)
+  return {
+    total: rows.length,
+    scopes: scopes.map(row => ({ scope: row.scope, count: Number(row.count) })),
+    latestKeys: latestKeys.map(row => ({ key: row.key, updated_at: row.updated_at })),
+    issueCount,
+    warningCount,
+    staleCount,
+  }
+}
+
+/** One sourced user message for the once-per-session digest. */
+function createDigestMessage(text) {
+  return Object.freeze({
+    id: randomUUID(),
+    role: 'user',
+    content: Object.freeze([{ type: 'text', text }]),
+    source: Object.freeze({ kind: DIGEST_SOURCE_KIND, version: DIGEST_SOURCE_VERSION }),
+  })
+}
+
+/**
+ * True when a message is this plugin's digest. The text-prefix fallback makes
+ * dedupe survive a host that strips `source` from committed messages.
+ */
+export function isMemoryDigestMessage(message) {
+  if (!isPlainObject(message)) return false
+  if (isPlainObject(message.source) && message.source.kind === DIGEST_SOURCE_KIND) return true
+  return Array.isArray(message.content) && message.content.some(part =>
+    isPlainObject(part) && part.type === 'text' && typeof part.text === 'string' && part.text.startsWith('[memory-digest]'))
+}
+
+/** Render at most two lines from a digest summary; never includes content. */
+export function formatMemoryDigest(summary) {
+  if (!isPlainObject(summary) || !(Number(summary.total) > 0)) return ''
+  const scopes = Array.isArray(summary.scopes) ? summary.scopes : []
+  const shownScopes = scopes.slice(0, 4).map(item => `${item.scope} ${Number(item.count)}`).join(', ')
+  const extraScopes = scopes.length > 4 ? ` +${scopes.length - 4} more` : ''
+  const keys = (Array.isArray(summary.latestKeys) ? summary.latestKeys : [])
+    .slice(0, 3)
+    .map(item => String(item.key ?? '').slice(0, 40))
+    .filter(Boolean)
+    .join(', ')
+  const line1 = `[memory-digest] ${Number(summary.total)} memories`
+    + (shownScopes === '' ? '' : ` (${shownScopes}${extraScopes})`)
+    + (keys === '' ? '' : `; latest keys: ${keys}`)
+    + '.'
+  const line2 = `[memory-digest] quality: ${Number(summary.issueCount) || 0} issue rows, `
+    + `${Number(summary.warningCount) || 0} warning-only rows; stale >${STALE_DAYS}d: ${Number(summary.staleCount) || 0}. `
+    + 'Read-only: memory_digest / memory_quality.'
+  return line1 + '\n' + line2
+}
+
+/**
+ * Build the optional `agent/pre-step` listener.
+ *
+ * Injects at most one two-line digest per session (process-local Set of
+ * session ids, plus a committed-message marker check). A new handler instance
+ * - host restart/resume - recomputes once. Delegates to `next()` first, skips
+ * reject decisions, and swallows all of its own failures (fail-open).
+ */
+export function createMemoryDigestPreStepHandler(options = {}) {
+  const getConfig = typeof options.getConfig === 'function' ? options.getConfig : () => ({})
+  const buildDigest = typeof options.buildDigest === 'function' ? options.buildDigest : () => null
+  const logger = options.logger
+  // Session ids (not object identities): one injection per session per process.
+  // A new handler instance after host restart/resume recomputes once.
+  let injectedSessionIds = new Set()
+
+  async function handler(first, next) {
+    // Downstream failures belong to downstream; never swallow them.
+    const decision = typeof next === 'function' ? await next() : first
+    try {
+      const config = getConfig() ?? {}
+      if (config.digestInjection === false) return decision
+      if (!isPlainObject(first) || !isPlainObject(first.agent) || !Array.isArray(first.messages)) return decision
+      if (isPlainObject(decision) && decision.kind === 'reject') return decision
+      if (first.step !== undefined && first.step !== 1) return decision
+      const session = isPlainObject(first.agent.session) ? first.agent.session : undefined
+      if (session === undefined || typeof session.id !== 'string' || session.id === '') return decision
+      const downstreamMessages = Array.isArray(decision?.messages) ? decision.messages : []
+      if (first.messages.some(isMemoryDigestMessage) || downstreamMessages.some(isMemoryDigestMessage)) {
+        injectedSessionIds.add(session.id)
+        return decision
+      }
+      if (injectedSessionIds.has(session.id)) return decision
+      const summary = buildDigest()
+      if (!isPlainObject(summary) || !(Number(summary.total) > 0)) return decision
+      const text = formatMemoryDigest(summary)
+      if (text === '') return decision
+      injectedSessionIds.add(session.id)
+      try {
+        logger?.info?.('[agent-memory] digest injected session=' + session.id + ' total=' + Number(summary.total))
+      } catch { /* logging is best-effort */ }
+      return {
+        ...(isPlainObject(decision) ? decision : {}),
+        messages: [...downstreamMessages, createDigestMessage(text)],
+      }
+    } catch (error) {
+      try { logger?.warn?.('[agent-memory] digest injection failed (fail-open): ' + String(error)) } catch { /* best effort */ }
+      return decision
+    }
+  }
+
+  return {
+    handler,
+    dispose() { injectedSessionIds = new Set() },
+  }
+}
+
+export function apply(ctx, config) {
+  const cfg = isPlainObject(config) ? config : {}
   const file = dbPath()
   mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(file)
@@ -213,6 +371,21 @@ export function apply(ctx) {
     return { ok: true, scope, checkedAt, summary, rows: audited.slice(0, limit) }
   })
 
+  register(desc('memory_digest', 'Read-only memory digest: total/scopes/latestKeys/issueCount(rows with issues)/'
+    + 'warningCount(warning-only rows)/staleCount(>90d). Returns counts and key/updated_at only, never memory '
+    + 'content; never writes to the DB and never fixes rows.', {
+    scope: str('Optional scope filter.'),
+    limit: num(`Number of latest keys to include, clamped to ${DIGEST_MIN_KEYS}-${DIGEST_MAX_KEYS} (default ${DIGEST_MAX_KEYS}).`),
+  }), async args => {
+    const scope = typeof args.scope === 'string' && args.scope !== '' ? args.scope : null
+    return {
+      ok: true,
+      scope,
+      checkedAt: now(),
+      summary: buildMemoryDigest(db, { scope, limit: args.limit }),
+    }
+  })
+
   register(desc('memory_forget', 'Delete one memory by id.', { id: str('Memory id.') }, ['id']), async args => {
     db.prepare('DELETE FROM memories WHERE id=?').run(args.id)
     return { ok: true, deleted: args.id }
@@ -222,7 +395,31 @@ export function apply(ctx) {
     ok: true, dbPath: file,
     count: db.prepare('SELECT COUNT(*) AS n FROM memories').get().n,
     scopes: db.prepare('SELECT scope, COUNT(*) AS n FROM memories GROUP BY scope').all(),
+    digest: {
+      injection: cfg.digestInjection !== false,
+      staleDays: STALE_DAYS,
+      latestKeys: DIGEST_MAX_KEYS,
+    },
   }))
+
+  // Optional first-step recall: distinct source marker/text prefix from the
+  // workbench brief, so the two never suppress each other; the workbench brief
+  // never carries memory counts.
+  if (cfg.digestInjection !== false && typeof ctx.on === 'function') {
+    const digestHandler = createMemoryDigestPreStepHandler({
+      getConfig: () => cfg,
+      buildDigest: () => buildMemoryDigest(db, { limit: DIGEST_MAX_KEYS }),
+      logger: ctx.logger,
+    })
+    try {
+      const disposeDigest = ctx.on('agent/pre-step', digestHandler.handler)
+      if (typeof disposeDigest === 'function' && typeof ctx.effect === 'function') ctx.effect(() => disposeDigest)
+      ctx.logger?.info?.('[agent-memory] digest injection enabled (once per session)')
+    } catch (error) {
+      digestHandler.dispose()
+      try { ctx.logger?.warn?.('[agent-memory] digest injection listener unavailable: ' + String(error)) } catch { /* best effort */ }
+    }
+  }
 }
 
 function safeTags(value) {

@@ -190,7 +190,7 @@ export async function apply(ctx, config = {}) {
   const dataDir = rowDataDir ?? resolveDataDir(profileDir, cfg)
 
   let auditDb = null
-  const AUDIT_META_KEYS = ['source', 'reason', 'idempotency', 'briefStore', 'injectionReason', 'markFailed', 'markerHeal', 'healCount', 'section', 'count', 'alias', 'code', 'resultKeys', 'pointerLines', 'pointerChars', 'templateVersion', 'sessionKind', 'turn', 'step', 'meetingId']
+  const AUDIT_META_KEYS = ['source', 'reason', 'idempotency', 'briefStore', 'injectionReason', 'markFailed', 'markerHeal', 'healCount', 'section', 'count', 'alias', 'code', 'resultKeys', 'pointerLines', 'pointerChars', 'templateVersion', 'sessionKind', 'turn', 'step', 'meetingId', 'staleCandidates', 'staleMarked', 'aliasesRetired', 'protectedSessions']
   const pickAuditMeta = record => {
     const meta = { source: 'session-network' }
     if (record === null || typeof record !== 'object') return meta
@@ -232,6 +232,7 @@ export async function apply(ctx, config = {}) {
     networkInfo: await loadOptional('./src/network-info.js'),
     pitfalls: await loadOptional('./src/pitfalls.js'),
     directory: await loadOptional('./src/session-directory.js'),
+    staleSweep: await loadOptional('./src/stale-sweep.js'),
   }
 
   // Initialize state.json so the documented default (autoInject enabled) is the effective value,
@@ -268,6 +269,29 @@ export async function apply(ctx, config = {}) {
   }
 
   registerTools(ctx, { config: cfg, profileDir, dataDir, source, modules, audit, logger: ctx.logger, directory })
+
+  // P1-3: soft stale/alias state migration on the existing pre-step hook. It
+  // excludes live agents and the session that triggered this pre-step, so
+  // listener/heartbeat ordering can never mislabel an active session. No timer
+  // is created; the DB claim enforces one pass per interval across sessions.
+  try {
+    if (typeof modules.staleSweep?.createStaleSweeper === 'function' && dataDir !== null) {
+      const sweeper = modules.staleSweep.createStaleSweeper({
+        db: modules.db,
+        dataDir,
+        getConfig: () => readConfig(profileDir).config,
+        getLiveSessionIds: () => modules.staleSweep.liveSessionIdsOf(readLiveAgents(ctx)),
+        now: () => new Date(),
+        audit,
+        logger: ctx.logger,
+      })
+      ctx.on?.('agent/pre-step', sweeper.handler)
+      try { ctx.on?.('dispose', () => sweeper.dispose()) } catch { /* dispose optional */ }
+      log(ctx, 'stale sweep registered')
+    }
+  } catch (errorSweep) {
+    log(ctx, 'stale sweep registration failed (fail-open):', String(errorSweep))
+  }
 
   // Injector is best-effort: absence of a module or a hook API must not break the host.
   try {

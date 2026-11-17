@@ -1,7 +1,7 @@
 // dsh-agent-apartment core: filesystem apartment + SQLite roster/teams/roles.
 // Zero npm dependencies.
 import { DatabaseSync } from 'node:sqlite'
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -61,6 +61,27 @@ CREATE TABLE IF NOT EXISTS experiences (
  * relative path), so a restore reproduces the backup exactly instead of merging
  * post-backup files into it. Returns the number of removed/replaced entries.
  */
+const DAY_MS = 24 * 60 * 60 * 1000
+const DEFAULT_BACKUP_KEEP = 5
+const MAX_BACKUP_KEEP = 100
+const DEFAULT_BACKUP_MAX_AGE_MS = 8 * DAY_MS
+const PRUNE_LOCK_NAME = '.prune.lock'
+// A prune pass normally takes well under a second; a lock older than this is
+// assumed to be abandoned by a crashed process and may be reclaimed once.
+const PRUNE_LOCK_STALE_MS = 60 * 60 * 1000
+const isPreRestoreBackup = (name, manifest) => /(^|-)pre-restore(?:-|$)/.test(name)
+  || manifest?.label === 'pre-restore' || manifest?.kind === 'pre-restore'
+// Directories only: a symlink or the prune lock file is never treated as a
+// backup, so retention can never follow a link out of the backups directory.
+const listBackupDirs = backupsDir => {
+  let entries
+  try { entries = readdirSync(backupsDir, { withFileTypes: true }) } catch { return [] }
+  return entries.filter(entry => entry.isDirectory()).map(entry => {
+    const path = join(backupsDir, entry.name)
+    const manifest = readJson(join(path, 'manifest.json'), null)
+    return { name: entry.name, path, manifest, preRestore: isPreRestoreBackup(entry.name, manifest) }
+  }).sort((a, b) => String(b.name).localeCompare(String(a.name)))
+}
 const removeExtraEntries = (sourceRoot, targetRoot) => {
   let removed = 0
   const walk = (source, target) => {
@@ -88,8 +109,16 @@ const removeExtraEntries = (sourceRoot, targetRoot) => {
   return removed
 }
 
-export function createApartment({ root, dbPath } = {}) {
+export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {}) {
   const resolvedRoot = ensureLayout(resolve(root || defaultRoot()))
+  const backupKeepLimit = (() => {
+    const value = Number(backupKeep)
+    return Number.isFinite(value) ? Math.max(1, Math.min(MAX_BACKUP_KEEP, Math.trunc(value))) : DEFAULT_BACKUP_KEEP
+  })()
+  const configuredBackupMaxAgeMs = (() => {
+    const value = Number(backupMaxAgeMs)
+    return Number.isFinite(value) && value >= 0 ? value : DEFAULT_BACKUP_MAX_AGE_MS
+  })()
   const dbFile = join(resolvedRoot, 'apartment.sqlite')
   const pendingDb = join(resolvedRoot, 'apartment.sqlite.restore-pending')
   let restoredPendingDb = false
@@ -125,6 +154,60 @@ export function createApartment({ root, dbPath } = {}) {
   const reapExpired = () => {
     const result = db.prepare("UPDATE leases SET state='expired' WHERE state='active' AND expires_at IS NOT NULL AND expires_at < ?").run(now())
     return { expired: result.changes }
+  }
+  // Retention is best effort: a failed prune must never fail the backup that
+  // just succeeded, and a concurrent prune (another apartment instance or
+  // process) must never race into deleting a different set of candidates. A
+  // short-lived lock file serializes prune passes; when it is held, this call
+  // skips pruning and leaves the bound to be restored by the next backup.
+  const pruneBackups = (keep, options = {}) => {
+    const backupsDir = join(resolvedRoot, 'backups')
+    const result = { pruned: [], kept: [], errors: [], skipped: null }
+    const protectedPaths = new Set()
+    for (const item of [options?.protect].flat()) {
+      if (typeof item === 'string' && item !== '') protectedPaths.add(resolve(item))
+    }
+    const lockPath = join(backupsDir, PRUNE_LOCK_NAME)
+    let lockHeld = false
+    try {
+      const acquireLock = () => {
+        const create = () => {
+          const fd = openSync(lockPath, 'wx')
+          try { writeFileSync(fd, `${process.pid} ${now()}`) } finally { closeSync(fd) }
+        }
+        try { create(); return true } catch (error) {
+          if (error?.code !== 'EEXIST') throw error
+          try {
+            if (Date.now() - statSync(lockPath).mtimeMs <= PRUNE_LOCK_STALE_MS) return false
+            unlinkSync(lockPath)
+            create()
+            return true
+          } catch { return false }
+        }
+      }
+      lockHeld = acquireLock()
+      if (!lockHeld) {
+        result.skipped = 'locked'
+        return result
+      }
+      const entries = listBackupDirs(backupsDir)
+      const normal = entries.filter(entry => !entry.preRestore)
+      for (const entry of normal.slice(0, keep)) result.kept.push(entry.name)
+      for (const entry of normal.slice(keep)) {
+        if (protectedPaths.has(resolve(entry.path))) { result.kept.push(entry.name); continue }
+        try {
+          rmSync(entry.path, { recursive: true, force: true })
+          result.pruned.push(entry.name)
+        } catch (error) {
+          result.errors.push({ name: entry.name, error: String(error?.message ?? error) })
+        }
+      }
+    } catch (error) {
+      result.errors.push({ name: null, error: String(error?.message ?? error) })
+    } finally {
+      if (lockHeld) { try { unlinkSync(lockPath) } catch { /* best effort */ } }
+    }
+    return result
   }
   const status = () => {
     reapExpired()
@@ -211,28 +294,62 @@ export function createApartment({ root, dbPath } = {}) {
       }
       return { imported }
     },
-    backup(label = 'manual') {
+    backup(label = 'manual', options = {}) {
       const stamp = now().replace(/[:.]/g, '-')
       const safeLabel = String(label).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[._-]+/, '').slice(0, 64) || 'manual'
-      const dir = join(resolvedRoot, 'backups', `${stamp}-${safeLabel}`)
-      mkdirSync(dir, { recursive: true })
-      cpSync(join(resolvedRoot, 'agents'), join(dir, 'agents'), { recursive: true })
-      cpSync(join(resolvedRoot, 'work'), join(dir, 'work'), { recursive: true })
-      this.checkpoint?.()
-      if (existsSync(join(resolvedRoot, 'apartment.sqlite'))) cpSync(join(resolvedRoot, 'apartment.sqlite'), join(dir, 'apartment.sqlite'))
-      const manifest = { id: stamp, at: now(), root: resolvedRoot, files: [] }
-      const walk = (base, prefix = '') => {
-        for (const entry of readdirSync(base)) {
-          const file = join(base, entry)
-          const rel = join(prefix, entry)
-          if (statSync(file).isDirectory()) { walk(file, rel); continue }
-          manifest.files.push({ path: rel, sha256: sha256(readFileSync(file)) })
+      const backupsDir = join(resolvedRoot, 'backups')
+      let dir = null
+      for (let attempt = 0; attempt < 5 && dir === null; attempt += 1) {
+        const suffix = attempt === 0 ? '' : '-' + randomUUID().slice(0, 8)
+        const candidate = join(backupsDir, `${stamp}-${safeLabel}${suffix}`)
+        try {
+          // Non-recursive mkdir is the atomic claim: two concurrent backups can
+          // never write into the same snapshot directory.
+          mkdirSync(candidate)
+          dir = candidate
+        } catch (error) {
+          if (error?.code !== 'EEXIST') throw error
         }
       }
-      walk(dir)
-      writeJson(join(dir, 'manifest.json'), manifest)
-      writeJson(join(resolvedRoot, 'manifests', `${stamp}.json`), manifest)
-      return { backup: dir, files: manifest.files.length }
+      if (dir === null) throw new Error('apartment: could not allocate a unique backup directory under ' + backupsDir)
+      try {
+        cpSync(join(resolvedRoot, 'agents'), join(dir, 'agents'), { recursive: true })
+        cpSync(join(resolvedRoot, 'work'), join(dir, 'work'), { recursive: true })
+        this.checkpoint?.()
+        if (existsSync(join(resolvedRoot, 'apartment.sqlite'))) cpSync(join(resolvedRoot, 'apartment.sqlite'), join(dir, 'apartment.sqlite'))
+        const manifest = {
+          id: stamp,
+          at: now(),
+          label: safeLabel,
+          kind: safeLabel === 'pre-restore' ? 'pre-restore' : 'snapshot',
+          root: resolvedRoot,
+          files: [],
+        }
+        const walk = (base, prefix = '') => {
+          for (const entry of readdirSync(base)) {
+            const file = join(base, entry)
+            const rel = join(prefix, entry)
+            if (statSync(file).isDirectory()) { walk(file, rel); continue }
+            manifest.files.push({ path: rel, sha256: sha256(readFileSync(file)) })
+          }
+        }
+        walk(dir)
+        writeJson(join(dir, 'manifest.json'), manifest)
+        writeJson(join(resolvedRoot, 'manifests', `${stamp}.json`), manifest)
+        const retention = pruneBackups(backupKeepLimit, { protect: [dir, options?.protect] })
+        return {
+          backup: dir,
+          files: manifest.files.length,
+          pruned: retention.pruned,
+          ...(retention.errors.length > 0 ? { pruneErrors: retention.errors } : {}),
+          ...(retention.skipped ? { pruneSkipped: retention.skipped } : {}),
+        }
+      } catch (error) {
+        // Never leave a half-written snapshot behind: it would consume a
+        // retention slot and could later look like a corrupt backup.
+        try { rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+        throw error
+      }
     },
     restoreFrom(source, options = {}) {
       const from = resolve(source)
@@ -262,7 +379,7 @@ export function createApartment({ root, dbPath } = {}) {
         if (file !== from && !file.startsWith(from + sep)) throw new Error('backup path escapes root: ' + entry.path)
         if (!existsSync(file) || sha256(readFileSync(file)) !== entry.sha256) throw new Error('backup hash mismatch: ' + entry.path)
       }
-      const safety = this.backup('pre-restore')
+      const safety = this.backup('pre-restore', { protect: from })
       let removedFiles = 0
       for (const dir of ['agents', 'work', 'manifests']) {
         const sourceDir = join(from, dir)
@@ -308,16 +425,105 @@ export function createApartment({ root, dbPath } = {}) {
       }
     },
     listBackups() {
-      const dir = join(resolvedRoot, 'backups')
-      if (!existsSync(dir)) return []
-      return readdirSync(dir).filter(name => {
-        try { return statSync(join(dir, name)).isDirectory() } catch { return false }
-      }).map(name => {
-        const path = join(dir, name)
-        let manifest = null
-        try { manifest = JSON.parse(readFileSync(join(path, 'manifest.json'), 'utf8')) } catch { /* ignore */ }
-        return { name, path, at: manifest?.at ?? null, files: Array.isArray(manifest?.files) ? manifest.files.length : 0 }
-      }).sort((a, b) => String(b.name).localeCompare(String(a.name)))
+      return listBackupDirs(join(resolvedRoot, 'backups')).map(entry => ({
+        name: entry.name,
+        path: entry.path,
+        at: entry.manifest?.at ?? null,
+        files: Array.isArray(entry.manifest?.files) ? entry.manifest.files.length : 0,
+        label: entry.manifest?.label ?? null,
+        preRestore: entry.preRestore,
+      }))
+    },
+    // Read-only backup audit: manifest shape, per-file sha256, path containment
+    // and the age of the newest normal snapshot. It never opens or writes the
+    // business DB, so it is safe to call while migration/restore is pending.
+    verifyBackups(options = {}) {
+      const requestedDays = Number(options?.maxAgeDays)
+      const requestedMs = Number(options?.maxAgeMs)
+      const maxAgeMs = Number.isFinite(requestedDays) && requestedDays >= 0
+        ? requestedDays * DAY_MS
+        : (Number.isFinite(requestedMs) && requestedMs >= 0 ? requestedMs : configuredBackupMaxAgeMs)
+      const issues = []
+      const entries = listBackupDirs(join(resolvedRoot, 'backups'))
+      let filesChecked = 0
+      for (const entry of entries) {
+        const base = resolve(entry.path)
+        const manifestPath = join(base, 'manifest.json')
+        if (!existsSync(manifestPath)) {
+          issues.push({ backup: entry.name, issue: 'missing-manifest' })
+          continue
+        }
+        let manifest
+        try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) } catch {
+          issues.push({ backup: entry.name, issue: 'invalid-manifest' })
+          continue
+        }
+        if (manifest === null || typeof manifest !== 'object' || !Array.isArray(manifest.files)) {
+          issues.push({ backup: entry.name, issue: 'invalid-manifest' })
+          continue
+        }
+        const listed = new Set()
+        for (const file of manifest.files) {
+          if (file === null || typeof file !== 'object' || typeof file.path !== 'string' || typeof file.sha256 !== 'string') {
+            issues.push({ backup: entry.name, issue: 'invalid-manifest-entry' })
+            continue
+          }
+          const target = resolve(base, file.path)
+          if (target !== base && !target.startsWith(base + sep)) {
+            issues.push({ backup: entry.name, issue: 'path-escape', path: file.path })
+            continue
+          }
+          listed.add(target)
+          let data
+          try { data = readFileSync(target) } catch {
+            issues.push({ backup: entry.name, issue: 'missing-file', path: file.path })
+            continue
+          }
+          filesChecked += 1
+          if (sha256(data) !== file.sha256) issues.push({ backup: entry.name, issue: 'hash-mismatch', path: file.path })
+        }
+        // Anything on disk that the manifest does not list is unexpected in an
+        // immutable snapshot (and catches a manifest entry silently removed).
+        const walk = (dir, prefix = '') => {
+          for (const dirent of readdirSync(dir, { withFileTypes: true })) {
+            if (prefix === '' && dirent.name === 'manifest.json') continue
+            const full = join(dir, dirent.name)
+            const rel = join(prefix, dirent.name)
+            if (dirent.isDirectory()) { walk(full, rel); continue }
+            if (!listed.has(resolve(full))) issues.push({ backup: entry.name, issue: 'unlisted-file', path: rel })
+          }
+        }
+        try { walk(base) } catch (error) {
+          issues.push({ backup: entry.name, issue: 'unreadable-directory', detail: String(error?.message ?? error) })
+        }
+      }
+      const normal = entries.filter(entry => !entry.preRestore)
+      let latestBackup = null
+      if (normal.length === 0) {
+        issues.push({ issue: 'no-backups' })
+      } else {
+        const latest = normal[0]
+        const at = latest.manifest?.at
+        const timestamp = typeof at === 'string' ? Date.parse(at) : NaN
+        if (!Number.isFinite(timestamp)) {
+          issues.push({ backup: latest.name, issue: 'invalid-backup-time' })
+        } else {
+          const ageMs = Math.max(0, Date.now() - timestamp)
+          latestBackup = { name: latest.name, at, ageMs }
+          if (ageMs > maxAgeMs) issues.push({ backup: latest.name, issue: 'latest-backup-stale', ageMs, maxAgeMs })
+        }
+      }
+      return {
+        ok: issues.length === 0,
+        root: resolvedRoot,
+        backups: entries.length,
+        normalBackups: normal.length,
+        filesChecked,
+        latestBackup,
+        maxAgeMs,
+        checkedAt: now(),
+        issues,
+      }
     },
     verify() {
       const issues = []

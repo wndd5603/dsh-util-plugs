@@ -14,6 +14,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   delegation: { shadow: true, minLines: 150, minBytes: 8192, minInputFiles: 3 },
   audit: { hotDays: 90, aggregateMonths: 12 },
   meeting: { defaultDeadlineHours: 24, digestInject: { enabled: true, intervalMinutes: 60 } },
+  // P1-3: state hygiene sweep on the existing agent/pre-step hook (no timer).
+  staleSweep: { enabled: true, intervalMinutes: 10, staleAfterMinutes: 60, aliasRetireAfterHours: 72 },
 })
 
 export function configDir(profileDir) {

@@ -162,11 +162,28 @@ export function apply(ctx) {
     + 'tasks, the creator) may complete it; danger-full-access operators may override.', { taskId: str('Task id.') }, ['taskId']),
   async (args, exec) => store.completeTask(args.taskId, exec, { operator: isOperator(exec) }))
 
-  register(describe('bulletin_digest', 'Tasks related to the caller: assignee, workspace, or explicit session/alias.', {
+  register(describe('bulletin_digest', 'Read-only recall digest of tasks related to the caller (assignee, workspace, '
+    + 'or explicit session/alias) that are blocked or stale. Stale is an SLA measured from updated_at; the board has '
+    + 'no dueAt and none is fabricated. completed/terminated tasks never match. Without an SLA only blocked tasks '
+    + 'match; with updatedBefore/staleAfterHours the result is blocked OR stale, and status narrows it. '
+    + 'New filters AND with the legacy session/alias/workspace OR scope.', {
     session: str('Optional session id; defaults to caller.'), alias: str('Optional alias.'), workspace: str('Optional workspace.'),
+    status: statusProp, boardId: str('Optional board id filter.'),
+    assignee: str('Optional assignee filter; matches assignee session or alias.'),
+    updatedBefore: str('Optional ISO timestamp: only tasks whose updated_at is strictly before it. Mutually exclusive with staleAfterHours.'),
+    staleAfterHours: num('Optional SLA in hours based on updated_at: tasks not updated for more than this many hours count as stale. Mutually exclusive with updatedBefore.'),
   }), async (args, exec) => {
     const a = actor(exec)
-    return { tasks: store.digest({ session: args.session ?? a.session, alias: args.alias ?? a.alias, workspace: args.workspace ?? a.cwd }) }
+    return { tasks: store.digest({
+      session: args.session ?? a.session,
+      alias: args.alias ?? a.alias,
+      workspace: args.workspace ?? a.cwd,
+      status: args.status,
+      boardId: args.boardId,
+      assignee: args.assignee,
+      updatedBefore: args.updatedBefore,
+      staleAfterHours: args.staleAfterHours,
+    }) }
   })
 
   // Heartbeat read model for Lead orchestration: subagents write

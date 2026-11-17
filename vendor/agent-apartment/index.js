@@ -28,6 +28,7 @@ export const Config = objectSchema({
     volatile: true,
   }),
   backupKeep: number(5, { description: 'Number of backup snapshots to retain.', int: true, min: 1, max: 100 }),
+  backupMaxAgeDays: number(8, { description: 'Maximum age in days of the latest normal backup before apartment_backup_verify reports it stale.', int: true, min: 1, max: 365 }),
 }, { description: 'Centralized Agent Apartment configuration.', schemaVersion: 1 })
 
 const output = {
@@ -48,7 +49,11 @@ export function apply(ctx, config) {
   const cfg = config ?? {}
   if (cfg.enabled === false) return
   const root = getActiveRoot(typeof cfg.root === 'string' && cfg.root !== '' ? cfg.root : undefined)
-  const apartment = createApartment({ root })
+  const apartment = createApartment({
+    root,
+    backupKeep: cfg.backupKeep,
+    backupMaxAgeMs: typeof cfg.backupMaxAgeDays === 'number' ? cfg.backupMaxAgeDays * 24 * 60 * 60 * 1000 : undefined,
+  })
   // A root pointer move is only fully effective after the Host restarts and
   // reopens the apartment at the new root. Until then every write is blocked so
   // no data can fork into the old root; reads stay available.
@@ -192,7 +197,10 @@ export function apply(ctx, config) {
     markMigrationPending(apartment.root)
     return { ...result, restartRequired: true, migrationPending: true, pendingRoot: apartment.root }
   })
-  register(desc('apartment_verify', 'Verify agent homes and AGENTS.md.'), async () => apartment.verify())
+  register(desc('apartment_verify', 'Verify agent homes and AGENTS.md (not backups; use apartment_backup_verify).'), async () => apartment.verify())
+  register(desc('apartment_backup_verify', 'Verify backup manifest/sha256 integrity and the age of the latest normal backup (read-only).', {
+    maxAgeDays: num('Optional maximum age in days for the latest normal backup; defaults to backupMaxAgeDays.'),
+  }), async args => apartment.verifyBackups({ maxAgeDays: args?.maxAgeDays }))
   register(desc('apartment_set_root', 'Switch apartment root pointer (empty/new root); migration should be used to copy data.', { root: str('New absolute root.') }, ['root']), async (args, exec) => {
     assertOperator(exec)
     assertWritable('apartment_set_root')

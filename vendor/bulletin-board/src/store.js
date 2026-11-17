@@ -137,6 +137,24 @@ export function createStore(dbPath, options = {}) {
   }
   const textOf = value => (typeof value === 'string' ? value.trim().slice(0, 200) : '')
   const likeOf = text => '%' + String(text).replace(/[\\%_]/g, character => '\\' + character) + '%'
+  // P1-4: digest SLA filters are measured from updated_at. The board schema has
+  // no due date, so none is invented here.
+  const instantOf = value => {
+    if (value === undefined || value === null || value === '') return null
+    const parsed = typeof value === 'number' ? value : Date.parse(String(value))
+    if (!Number.isFinite(parsed)) {
+      throw codedError('INVALID_ARGUMENT', 'updatedBefore must be a parseable ISO timestamp')
+    }
+    return new Date(parsed).toISOString()
+  }
+  const hoursOf = value => {
+    if (value === undefined || value === null || value === '') return null
+    const hours = Number(value)
+    if (!Number.isFinite(hours) || hours <= 0) {
+      throw codedError('INVALID_ARGUMENT', 'staleAfterHours must be a positive number of hours')
+    }
+    return hours
+  }
   const boardFilterOf = (query = {}) => {
     const where = []
     const values = []
@@ -167,6 +185,59 @@ export function createStore(dbPath, options = {}) {
       values.push(like, like, like, like, like, like, like, like, like, like, like)
     }
     return { clause: where.length === 0 ? '' : ' WHERE ' + where.join(' AND '), values }
+  }
+  // P1-4: blocked/stale recall digest. Read-only; the legacy
+  // session/alias/workspace scope stays OR (unchanged), while every new filter
+  // is an additional AND. `bulletin_task_list` keeps using taskFilterOf.
+  const digestFilterOf = (query = {}) => {
+    const status = typeof query.status === 'string' && query.status !== '' ? query.status : null
+    if (status !== null) assertStatus(status)
+    const before = instantOf(query.updatedBefore)
+    const staleHours = hoursOf(query.staleAfterHours)
+    if (before !== null && staleHours !== null) {
+      throw codedError('INVALID_ARGUMENT', 'updatedBefore and staleAfterHours are mutually exclusive')
+    }
+    const threshold = before !== null ? before
+      : staleHours !== null ? new Date(Date.now() - staleHours * 3600000).toISOString() : null
+    const scope = []
+    const values = []
+    if (query.session) { scope.push('assignee_session = ?'); values.push(query.session) }
+    if (query.alias) { scope.push('assignee_alias = ?'); values.push(query.alias) }
+    if (query.workspace) { scope.push('workspace = ?'); values.push(query.workspace) }
+    if (scope.length === 0) return null
+    // Terminal tasks are never recalled, even when old. `blocked` is
+    // non-terminal, so the blocked branch remains; the stale branch explicitly
+    // excludes both terminal states.
+    if (status === 'completed' || status === 'terminated') return null
+    const where = ['(' + scope.join(' OR ') + ')']
+    if (status === 'blocked') {
+      where.push('status = ?')
+      values.push('blocked')
+      if (threshold !== null) { where.push('updated_at < ?'); values.push(threshold) }
+    } else if (status !== null) {
+      // A non-blocked status is only interesting when it is stale; without an
+      // SLA there is no blocked-or-stale hit to return.
+      if (threshold === null) return null
+      where.push('status = ?')
+      values.push(status)
+      where.push('updated_at < ?')
+      values.push(threshold)
+    } else if (threshold === null) {
+      where.push("status = 'blocked'")
+    } else {
+      where.push("(status = 'blocked' OR (updated_at < ? AND status NOT IN ('completed','terminated')))")
+      values.push(threshold)
+    }
+    if (typeof query.boardId === 'string' && query.boardId !== '') {
+      where.push('board_id = ?')
+      values.push(query.boardId)
+    }
+    const assignee = typeof query.assignee === 'string' ? query.assignee.trim() : ''
+    if (assignee !== '') {
+      where.push('(assignee_session = ? OR assignee_alias = ?)')
+      values.push(assignee, assignee)
+    }
+    return { clause: where.join(' AND '), values }
   }
   const event = (actor, action, entity, entityId, detail) => db.prepare(
     'INSERT INTO events (at, actor, action, entity, entity_id, detail) VALUES (?,?,?,?,?,?)',
@@ -429,13 +500,10 @@ export function createStore(dbPath, options = {}) {
       return rowTask(db.prepare('SELECT * FROM tasks WHERE id=?').get(id))
     },
     digest(query = {}) {
-      const clauses = []
-      const values = []
-      if (query.session) { clauses.push('assignee_session = ?'); values.push(query.session) }
-      if (query.alias) { clauses.push('assignee_alias = ?'); values.push(query.alias) }
-      if (query.workspace) { clauses.push('workspace = ?'); values.push(query.workspace) }
-      if (clauses.length === 0) return []
-      const rows = db.prepare('SELECT * FROM tasks WHERE ' + clauses.join(' OR ') + ' ORDER BY priority DESC, updated_at DESC LIMIT 200').all(...values)
+      const filter = digestFilterOf(query)
+      if (filter === null) return []
+      const rows = db.prepare('SELECT * FROM tasks WHERE ' + filter.clause
+        + ' ORDER BY priority DESC, updated_at DESC, id ASC LIMIT 200').all(...filter.values)
       return rows.map(rowTask)
     },
   }
