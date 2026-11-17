@@ -2,9 +2,13 @@
 /**
  * Release workflow: dev -> master -> annotated tag -> GitHub Release + npm pack asset.
  *
+ * Policy: releases are opt-in. Nothing is tagged or released unless the caller
+ * passes --confirm-release; without it the script prints the plan and exits 2.
+ * Only pass --confirm-release when the user explicitly asked for this release.
+ *
  * Usage:
- *   node scripts/release.mjs --tag 0.0.2 --notes docs/releases/0.0.2.md --force
- *   node scripts/release.mjs --tag 0.0.3 --notes docs/releases/0.0.3.md
+ *   node scripts/release.mjs --confirm-release --tag 0.0.2 --notes docs/releases/0.0.2.md --force
+ *   node scripts/release.mjs --confirm-release --tag 0.0.3 --notes docs/releases/0.0.3.md
  *
  * The notes file is read as UTF-8 and sent as-is; no shell text is interpolated.
  * Auth: GITHUB_TOKEN, or the password from `git credential fill` for github.com.
@@ -26,12 +30,22 @@ const tag = opt('--tag')
 const notesPath = opt('--notes')
 const force = flag('--force')
 const skipGit = flag('--skip-git')
+const confirmRelease = flag('--confirm-release')
 if (!tag || !notesPath) {
-  console.error('usage: node scripts/release.mjs --tag <tag> --notes <utf8.md> [--force] [--skip-git]')
+  console.error('usage: node scripts/release.mjs --confirm-release --tag <tag> --notes <utf8.md> [--force] [--skip-git]')
   process.exit(2)
 }
 if (!/^\d+\.\d+\.\d+$/.test(tag)) {
   console.error('tag must be semver x.y.z, got ' + tag)
+  process.exit(2)
+}
+// Hard gate: must run before any git/API/filesystem side effect. Without the
+// explicit opt-in, only print the plan and refuse.
+if (!confirmRelease) {
+  console.error('refusing to release: --confirm-release was not passed.')
+  console.error('发布默认不 tag、不 release；用户未明确要求，不 tag/不 release。')
+  console.error('Only pass --confirm-release when the user explicitly asked to publish this release.')
+  console.error(`planned (nothing executed): tag ${tag}, push tag, create/update GitHub Release ${tag}, upload dsh-util-plugs-${tag}.tgz`)
   process.exit(2)
 }
 const notes = readFileSync(resolve(repoRoot, notesPath), 'utf8')

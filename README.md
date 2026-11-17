@@ -4,6 +4,8 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 一次安装，为 DeepSeek Harness 增加 11 个可独立启用的插件。
 
+> Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
+
 > Version: 2026.11.17-1 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
@@ -66,6 +68,10 @@ One shared client module powers three browser surfaces:
 - **Plugin Console** — plugin cards, live configuration, extension contributions and deep links to the native plugin manager.
 
 All surfaces are UI-only for the model: agents read or request the same information through tools but cannot click panels.
+
+### Memory recall
+
+At the start of a session/task, use `memory_search`/`memory_list` to recall project memory; persist stable conclusions with `memory_remember`. The archive reminder also asks for this. See [`docs/MEMORY_RECALL_PROTOCOL.md`](docs/MEMORY_RECALL_PROTOCOL.md).
 
 ### Configuration and data
 

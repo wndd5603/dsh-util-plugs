@@ -1,5 +1,9 @@
 # Release workflow (dev → master → tag → GitHub Release)
 
+> **默认不 tag、不 release。**
+> 只有用户明确要求发布，并且在命令中传入 `--confirm-release`，才允许执行 `scripts/release.mjs`。
+> 未传 `--confirm-release` 时脚本会打印说明并 `exit 2`，不产生任何 git/网络副作用。
+
 Everything is driven by `scripts/release.mjs`; do **not** paste release notes through the shell. Notes are read from a UTF-8 file, so Chinese/emoji/backticks are preserved.
 
 ## 1. Prepare notes on dev
@@ -20,8 +24,10 @@ git push origin dev
 ## 2. Run the script
 
 ```sh
-node scripts/release.mjs --tag 0.0.2 --notes docs/releases/0.0.2.md
+node scripts/release.mjs --confirm-release --tag 0.0.2 --notes docs/releases/0.0.2.md
 ```
+
+Without `--confirm-release` the script exits 2 before touching git or the network; it is the explicit "the user asked for this release" switch.
 
 What the script does:
 
@@ -37,7 +43,7 @@ Auth: `GITHUB_TOKEN`, or the password from `git credential fill` for github.com.
 ## 3. Verify
 
 ```sh
-node scripts/release.mjs --tag 0.0.2 --notes docs/releases/0.0.2.md --skip-git
+node scripts/release.mjs --confirm-release --tag 0.0.2 --notes docs/releases/0.0.2.md --skip-git
 ```
 
 or check the API/GitHub UI:
@@ -49,7 +55,7 @@ or check the API/GitHub UI:
 ## Re-release an existing tag
 
 ```sh
-node scripts/release.mjs --tag 0.0.2 --notes docs/releases/0.0.2.md --force
+node scripts/release.mjs --confirm-release --tag 0.0.2 --notes docs/releases/0.0.2.md --force
 ```
 
 This moves the tag to current master and replaces the release body/asset. Do not hand-edit release text with `gh release edit`/shell heredocs.

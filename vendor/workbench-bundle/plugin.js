@@ -10,8 +10,9 @@
  *    This is the answer to "is the plugin actually loaded, and is my fix live?"
  *    that the host's read-only plugin inventory does not provide.
  * 2. A one-time first-turn pointer injected through `agent/pre-step` (≤3 lines):
- *    what the workbench provides, how to read a message body, and where the
- *    status/disable switches are. Durable dedupe via a session-log marker, so
+ *    what the workbench provides, memory recall via memory_search/memory_list →
+ *    memory_remember, how to read a message body, and where the status/disable
+ *    switches are. Durable dedupe via a session-log marker, so
  *    resume/fork/compaction never re-inject.
  *
  * Zero npm imports; no network, no shell.
@@ -113,7 +114,7 @@ export function createPointerText(config = {}) {
     : [
       '[agent-workbench] DSH agent workbench 已启用（上下文守卫 + 工作流预设 + 团队总线）。',
       '能力：context_usage/context_guard_status 看上下文；team_hooks_status 看团队 hooks；message_* 收发跨会话消息（信封里用 message_read 取正文）；network_info 看交流网。',
-      '状态/开关：workbench_status() 查看版本/健康/开关；关闭组件用其 row id 的 config.enabled=false；不要同时安装组件包与元包。',
+      '记忆：先 memory_search/memory_list 召回项目记忆，稳定结论用 memory_remember 固化。状态/开关：workbench_status()；关闭组件用其 row id 的 config.enabled=false；勿同时安装组件包与元包。',
     ].join('\n')
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 3)
   let normalized = lines.join('\n')
@@ -307,7 +308,7 @@ export function apply(ctx, config) {
         + 'LICENSE / whether the loaded module differs from the file on disk (stale, useful right after an upgrade), '
         + 'known data file sizes, the first-turn pointer settings and the effective config. Use it to verify what is '
         + 'actually loaded before blaming a component. Capability index: skill("team-bootstrap") §2 / '
-        + 'CAPABILITY_AUDIT.md.',
+        + 'capability audit.',
       parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       output: {
         schema: { type: 'object', additionalProperties: true },

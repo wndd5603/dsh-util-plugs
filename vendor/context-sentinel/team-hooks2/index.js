@@ -182,10 +182,10 @@ const STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000
  * `{turns}`, `{everyNTurns}`, `{path}`, `{pathNote}` placeholders.
  */
 const DEFAULT_ARCHIVE_TEMPLATES = Object.freeze({
-  create: '[team-hooks2] 上下文归档提醒（自动，非用户消息）：当前占用 {percent}%（≥{threshold}%）⇒ 请立即创建本会话归档文件（如 team/members/<你的角色名>/ARCHIVE_<YYYYMMDD_HHMMSS>.md），记录：当前任务 / 已得结论（带 文件:行号）/ 未完成项 / 关键事实 / 下次从哪续。此后本周期内完工只更新该归档，不新建。',
-  remind: '[team-hooks2] 上下文归档提醒（自动）：本周期归档已创建；距上次提醒已 {turns} 轮（≥{everyNTurns}）⇒ 请更新归档文件（当前 {percent}%），不要新建。',
-  read: '[team-hooks2] 上下文占用从 {previous}% 骤降至 {percent}%（≥{dropThreshold} 点）⇒ 可能已触发记忆压缩：请读取最新归档文件并继续（已得结论/未完成项），把核对结果追加到归档；再次超过 {threshold}% 时会创建新归档。',
-  manualRead: '[team-hooks2] 检测到手动压缩（手动压缩会压缩完整会话，Agent 容易忘记归档位置）：本会话最新归档文件位置：{path}。请先读取该归档（核对已得结论/未完成项/关键事实），再继续当前任务；不要在此刻立即新建归档，只有之后再次超过 {threshold}% 才创建新周期。{pathNote}',
+  create: '[team-hooks2] 上下文归档提醒（自动，非用户消息）：当前占用 {percent}%（≥{threshold}%）⇒ 请立即创建本会话归档文件（如 team/members/<你的角色名>/ARCHIVE_<YYYYMMDD_HHMMSS>.md），记录：当前任务 / 已得结论（带 文件:行号）/ 未完成项 / 关键事实 / 下次从哪续；并把本轮稳定结论/关键事实用 memory_remember 固化（若记忆库无）。此后本周期内完工只更新该归档，不新建。',
+  remind: '[team-hooks2] 上下文归档提醒（自动）：本周期归档已创建；距上次提醒已 {turns} 轮（≥{everyNTurns}）⇒ 请更新归档文件（当前 {percent}%），不要新建；更新前先 memory_search 检查记忆库，有新结论先用 memory_remember 固化再更新。',
+  read: '[team-hooks2] 上下文占用从 {previous}% 骤降至 {percent}%（≥{dropThreshold} 点）⇒ 可能已触发记忆压缩：请读取最新归档文件并继续（已得结论/未完成项），把核对结果追加到归档；同时用 memory_search 核对项目记忆，再继续；再次超过 {threshold}% 时会创建新归档。',
+  manualRead: '[team-hooks2] 检测到手动压缩（手动压缩会压缩完整会话，Agent 容易忘记归档位置）：本会话最新归档文件位置：{path}。请先读取该归档（核对已得结论/未完成项/关键事实），并用 memory_search 召回项目记忆，再继续当前任务；不要在此刻立即新建归档，只有之后再次超过 {threshold}% 才创建新周期。{pathNote}',
 })
 
 const DEFAULT_ARCHIVE_REMINDER = Object.freeze({
@@ -2538,7 +2538,7 @@ export function apply(ctx, config) {
       + '(phase/cycle/archiveTurn/lastReminderTurn/pendingRead/pendingReadKind/lastAction/archivePath/'
       + 'lastManualCompactAt), and whether the turn-stopping listener is attached. Attaches the listener on '
       + 'call (self-heal), so calling this tool proves the hook can be attached. Read-only otherwise. Capability '
-      + 'index: skill("team-bootstrap") §2 / CAPABILITY_AUDIT.md.',
+      + 'index: skill("team-bootstrap") §2.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: {
       schema: { type: 'object', additionalProperties: true },
