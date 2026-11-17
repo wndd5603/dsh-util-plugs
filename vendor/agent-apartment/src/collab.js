@@ -1,0 +1,726 @@
+// P0 collaboration projections for dsh-agent-apartment.
+//
+// Everything in this module is read-only except the caller's own use of the
+// apartment store write helpers (bind/unbind live in src/store.js). The brief
+// deliberately never calls listLeases()/status(), because both reap expired
+// leases (UPDATE) and would break the read-only contract.
+import { existsSync, readdirSync } from 'node:fs'
+import { basename, join, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
+
+export const MAX_ALIAS_LENGTH = 16
+export const COLLAB_BRIEF_SOURCE_KIND = 'apartment-collab-brief'
+export const BRIEF_LIMITS = Object.freeze({
+  teams: 10,
+  roles: 10,
+  tasks: 10,
+  leases: 10,
+  experiences: 5,
+  // E2: every list in the model-facing brief is capped, including aliases.
+  aliases: 20,
+})
+export const COLLAB_ERROR_CODES = Object.freeze({
+  OPERATOR_REQUIRED: 'APARTMENT_OPERATOR_REQUIRED',
+  SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
+  AGENT_NOT_FOUND: 'AGENT_NOT_FOUND',
+  TEAM_NOT_FOUND: 'TEAM_NOT_FOUND',
+  TASK_NOT_FOUND: 'TASK_NOT_FOUND',
+  TASK_STORE_UNAVAILABLE: 'TASK_STORE_UNAVAILABLE',
+  TASK_BOARD_MISMATCH: 'TASK_BOARD_MISMATCH',
+  EXPERIENCE_FIELDS_REQUIRED: 'EXPERIENCE_FIELDS_REQUIRED',
+  ALIAS_TOO_LONG: 'ALIAS_TOO_LONG',
+  UNBOUND_SESSION: 'UNBOUND_SESSION',
+})
+export const COLLAB_WARNING_CODES = Object.freeze({
+  ORPHAN_TASK_ROLE: 'ORPHAN_TASK_ROLE',
+  TASK_UNVERIFIED: 'TASK_UNVERIFIED',
+  INVALID_EXPERIENCE: 'INVALID_EXPERIENCE',
+})
+
+const dshHome = () => process.env.DSH_HOME || join(homedir(), '.dsh')
+const nowIso = () => new Date().toISOString()
+const isNonEmptyString = value => typeof value === 'string' && value.trim() !== ''
+const unique = values => [...new Set(values.filter(isNonEmptyString))]
+const truncate = (items, limit) => ({
+  items: items.slice(0, limit),
+  truncated: items.length > limit,
+})
+
+const profileDirs = profileDir => {
+  const home = dshHome()
+  const explicit = isNonEmptyString(process.env.DSH_PROFILE_DIR)
+    ? process.env.DSH_PROFILE_DIR.trim()
+    : (isNonEmptyString(profileDir) ? profileDir.trim() : null)
+  // An explicit profile inside this DSH_HOME is authoritative. An explicit
+  // profile outside a (likely temporary) DSH_HOME is checked after the home
+  // profiles, so a test/isolated DSH_HOME never reads another live profile DB.
+  if (explicit !== null) {
+    const base = resolve(home)
+    const value = resolve(explicit)
+    if (value === base || value.startsWith(base + sep)) return [explicit]
+  }
+  const dirs = [join(home, 'profiles', 'web')]
+  try {
+    for (const name of readdirSync(join(home, 'profiles'))) dirs.push(join(home, 'profiles', name))
+  } catch { /* no profiles directory */ }
+  if (explicit !== null) dirs.push(explicit)
+  return [...new Set(dirs)]
+}
+
+/** Resolve the session-network DB read-only location (never creates it). */
+export function resolveNetworkDbPath(profileDir) {
+  if (isNonEmptyString(process.env.DSH_NETWORK_DB)) {
+    return { path: process.env.DSH_NETWORK_DB.trim(), source: 'env' }
+  }
+  const dirs = profileDirs(profileDir)
+  for (const dir of dirs) {
+    const path = join(dir, 'data', 'session-network', 'network.db')
+    if (existsSync(path)) return { path, source: 'profile' }
+  }
+  return {
+    path: join(dirs[0] ?? join(dshHome(), 'profiles', 'web'), 'data', 'session-network', 'network.db'),
+    source: 'default',
+  }
+}
+
+/** Resolve the bulletin-board DB read-only location (never creates it). */
+export function resolveBulletinDbPath() {
+  if (isNonEmptyString(process.env.DSH_BULLETIN_DB)) {
+    return { path: process.env.DSH_BULLETIN_DB.trim(), source: 'env' }
+  }
+  return { path: join(dshHome(), 'bulletin-board', 'board.sqlite'), source: 'default' }
+}
+
+const openReadOnly = path => {
+  if (!existsSync(path)) return { db: null, reason: 'missing' }
+  try {
+    return { db: new DatabaseSync(path, { readOnly: true }), reason: null }
+  } catch (error) {
+    return { db: null, reason: String(error?.message ?? error) }
+  }
+}
+
+const unavailable = (code, path, reason, extra = {}) => ({
+  code,
+  // Only the file name is surfaced: the brief is model-facing and must not leak
+  // absolute profile/home paths.
+  file: basename(path),
+  reason,
+  ...extra,
+})
+
+/**
+ * Read aliases for the given sessions from session-network (read-only).
+ * routeResolvable means: alias is active, not superseded, and points at that
+ * exact session. Session-row drift is reported separately by the drift check.
+ */
+export function readNetworkAliases({ sessionIds = [], profileDir } = {}) {
+  const resolved = resolveNetworkDbPath(profileDir)
+  const result = {
+    available: false,
+    path: resolved.path,
+    aliases: [],
+    warnings: [],
+    sessionsKnown: false,
+  }
+  const opened = openReadOnly(resolved.path)
+  if (opened.db === null) {
+    result.warnings.push(unavailable('NETWORK_UNAVAILABLE', resolved.path, opened.reason))
+    return result
+  }
+  const ids = unique(sessionIds)
+  try {
+    result.available = true
+    if (ids.length === 0) return result
+    const placeholders = ids.map(() => '?').join(',')
+    const rows = opened.db.prepare(`SELECT * FROM aliases WHERE session_id IN (${placeholders})
+      ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, alias`).all(...ids)
+    let knownSessions = null
+    try {
+      const sessionRows = opened.db.prepare(`SELECT session_id FROM sessions WHERE session_id IN (${placeholders})`).all(...ids)
+      knownSessions = new Set(sessionRows.map(row => row.session_id))
+      result.sessionsKnown = true
+    } catch { /* sessions table absent: route resolution degrades to alias status only */ }
+    const supersededBy = unique(rows.map(row => row.superseded_by))
+    const supersededSessions = new Map()
+    if (supersededBy.length > 0) {
+      try {
+        const targets = opened.db.prepare(`SELECT alias, session_id FROM aliases WHERE alias IN (${supersededBy.map(() => '?').join(',')})`)
+          .all(...supersededBy)
+        for (const row of targets) supersededSessions.set(row.alias, row.session_id ?? null)
+      } catch { /* advisory only */ }
+    }
+    for (const row of rows) {
+      const alias = typeof row.alias === 'string' ? row.alias : String(row.alias ?? '')
+      if (alias === '') continue
+      if (alias.length > MAX_ALIAS_LENGTH) {
+        result.warnings.push({
+          code: COLLAB_ERROR_CODES.ALIAS_TOO_LONG,
+          alias,
+          length: alias.length,
+          max: MAX_ALIAS_LENGTH,
+        })
+        continue
+      }
+      const sessionId = row.session_id ?? null
+      const sessionExists = knownSessions === null ? null : knownSessions.has(sessionId)
+      const routeResolvable = row.status === 'active'
+        && (row.superseded_by === null || row.superseded_by === undefined)
+        && sessionId !== null
+        && ids.includes(sessionId)
+      result.aliases.push({
+        alias,
+        sessionId,
+        status: row.status ?? null,
+        supersededBy: row.superseded_by ?? null,
+        supersededBySessionId: row.superseded_by === null || row.superseded_by === undefined
+          ? null
+          : (supersededSessions.get(row.superseded_by) ?? null),
+        supersededByFound: row.superseded_by === null || row.superseded_by === undefined
+          ? null
+          : supersededSessions.has(row.superseded_by),
+        sessionExists,
+        routeResolvable,
+        createdAt: row.created_at ?? null,
+      })
+    }
+    return result
+  } catch (error) {
+    result.available = false
+    result.aliases = []
+    result.warnings.push(unavailable('NETWORK_UNAVAILABLE', resolved.path, String(error?.message ?? error)))
+    return result
+  } finally {
+    try { opened.db.close() } catch { /* best effort */ }
+  }
+}
+
+const bulletinTask = row => ({
+  id: row.id,
+  boardId: row.board_id ?? null,
+  title: row.title ?? null,
+  status: row.status ?? null,
+  assigneeSession: row.assignee_session ?? null,
+  assigneeAlias: row.assignee_alias ?? null,
+  workspace: row.workspace ?? null,
+  priority: row.priority ?? 0,
+  updatedAt: row.updated_at ?? null,
+  createdAt: row.created_at ?? null,
+})
+
+/**
+ * Read tasks assigned to the agent's sessions or aliases from bulletin-board
+ * (read-only). Callers pass the agent's bound session ids and alias rows.
+ */
+export function readBulletinTasks({ sessionIds = [], aliases = [], taskId, boardId } = {}) {
+  const resolved = resolveBulletinDbPath()
+  const result = {
+    available: false,
+    path: resolved.path,
+    tasks: [],
+    total: 0,
+    truncated: false,
+    warnings: [],
+  }
+  const opened = openReadOnly(resolved.path)
+  if (opened.db === null) {
+    result.warnings.push(unavailable('BULLETIN_UNAVAILABLE', resolved.path, opened.reason))
+    return result
+  }
+  try {
+    result.available = true
+    const ids = unique(sessionIds)
+    const resolvableAliases = unique(aliases.filter(item => item?.routeResolvable === true).map(item => item.alias))
+    const unresolvedAliases = unique(aliases.filter(item => item?.routeResolvable !== true).map(item => item.alias))
+    const filters = []
+    const filterParams = []
+    if (isNonEmptyString(taskId)) { filters.push('id = ?'); filterParams.push(taskId.trim()) }
+    if (isNonEmptyString(boardId)) { filters.push('board_id = ?'); filterParams.push(boardId.trim()) }
+    const filterSql = filters.length > 0 ? ' AND ' + filters.join(' AND ') : ''
+
+    // Stable ownership: a task is ours when its session is bound, or when its
+    // alias is currently routable to one of those sessions. A task assigned to
+    // an unresolvable alias is not counted, but is surfaced as a warning below.
+    if (ids.length > 0 || resolvableAliases.length > 0) {
+      const where = []
+      const params = []
+      if (ids.length > 0) {
+        where.push(`assignee_session IN (${ids.map(() => '?').join(',')})`)
+        params.push(...ids)
+      }
+      if (resolvableAliases.length > 0) {
+        where.push(`assignee_alias IN (${resolvableAliases.map(() => '?').join(',')})`)
+        params.push(...resolvableAliases)
+      }
+      params.push(...filterParams)
+      const limit = BRIEF_LIMITS.tasks + 1
+      const scopeSql = `FROM tasks WHERE (${where.join(' OR ')})${filterSql}`
+      result.total = Number(opened.db.prepare('SELECT COUNT(*) AS n ' + scopeSql).get(...params).n)
+      const sql = `SELECT id, board_id, title, status, assignee_session, assignee_alias,
+          workspace, priority, updated_at, created_at
+        ${scopeSql}
+        ORDER BY CASE status
+          WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'pending' THEN 2
+          WHEN 'suspended' THEN 3 ELSE 4 END, updated_at DESC
+        LIMIT ${limit}`
+      const rows = opened.db.prepare(sql).all(...params)
+      result.truncated = result.total > BRIEF_LIMITS.tasks
+      result.tasks = rows.slice(0, BRIEF_LIMITS.tasks).map(row => ({
+        ...bulletinTask(row),
+        assigneeResolvable: true,
+      }))
+    }
+    if (unresolvedAliases.length > 0) {
+      const where = [`assignee_alias IN (${unresolvedAliases.map(() => '?').join(',')})`]
+      const params = [...unresolvedAliases]
+      if (ids.length > 0) {
+        where.push(`(assignee_session IS NULL OR assignee_session NOT IN (${ids.map(() => '?').join(',')}))`)
+        params.push(...ids)
+      }
+      params.push(...filterParams)
+      const rows = opened.db.prepare(`SELECT id, assignee_alias FROM tasks WHERE ${where.join(' AND ')}${filterSql}`).all(...params)
+      for (const row of rows) {
+        result.warnings.push({ code: 'TASK_ASSIGNEE_UNRESOLVED', taskId: row.id, assigneeAlias: row.assignee_alias })
+      }
+    }
+    return result
+  } catch (error) {
+    result.available = false
+    result.tasks = []
+    result.total = 0
+    result.warnings.push(unavailable('BULLETIN_UNAVAILABLE', resolved.path, String(error?.message ?? error)))
+    return result
+  } finally {
+    try { opened.db.close() } catch { /* best effort */ }
+  }
+}
+
+const BULLETIN_TASK_COLUMNS = `id, board_id, title, status, assignee_session, assignee_alias,
+  workspace, priority, updated_at, created_at`
+
+/**
+ * Read-only existence check for one bulletin task. `available` is true only when
+ * the tasks table could actually be queried; a missing/corrupt DB is a store
+ * availability problem, not a missing task.
+ */
+export function lookupBulletinTask(taskId) {
+  const resolved = resolveBulletinDbPath()
+  const result = { available: false, path: resolved.path, task: null, reason: null }
+  const opened = openReadOnly(resolved.path)
+  if (opened.db === null) {
+    result.reason = opened.reason
+    return result
+  }
+  try {
+    const row = opened.db.prepare(`SELECT ${BULLETIN_TASK_COLUMNS} FROM tasks WHERE id = ?`).get(taskId)
+    result.available = true
+    result.task = row === undefined ? null : bulletinTask(row)
+    return result
+  } catch (error) {
+    result.reason = String(error?.message ?? error)
+    return result
+  } finally {
+    try { opened.db.close() } catch { /* best effort */ }
+  }
+}
+
+/**
+ * Read-only task records for the given ids, used by the brief to enrich
+ * taskRoles with title/board and to detect orphan roles. It never writes.
+ */
+export function readBulletinTaskRecords({ taskIds = [] } = {}) {
+  const resolved = resolveBulletinDbPath()
+  const result = { available: false, path: resolved.path, tasks: new Map(), warnings: [] }
+  const opened = openReadOnly(resolved.path)
+  if (opened.db === null) {
+    result.warnings.push(unavailable('BULLETIN_UNAVAILABLE', resolved.path, opened.reason))
+    return result
+  }
+  try {
+    // Prove the tasks table is readable even when there is nothing to fetch.
+    opened.db.prepare('SELECT id FROM tasks LIMIT 0').all()
+    result.available = true
+    const ids = unique(taskIds)
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      const chunk = ids.slice(offset, offset + 500)
+      const rows = opened.db.prepare(`SELECT ${BULLETIN_TASK_COLUMNS} FROM tasks
+        WHERE id IN (${chunk.map(() => '?').join(',')})`).all(...chunk)
+      for (const row of rows) result.tasks.set(row.id, bulletinTask(row))
+    }
+    return result
+  } catch (error) {
+    result.available = false
+    result.tasks.clear()
+    result.warnings.push(unavailable('BULLETIN_UNAVAILABLE', resolved.path, String(error?.message ?? error)))
+    return result
+  } finally {
+    try { opened.db.close() } catch { /* best effort */ }
+  }
+}
+
+const parseSkills = value => {
+  if (value === null || value === undefined) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const leaseRow = row => {
+  const expiresAt = row.expires_at ?? null
+  const expiresMs = expiresAt === null ? NaN : Date.parse(expiresAt)
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    workspace: row.workspace,
+    workDir: row.work_dir,
+    taskId: row.task_id ?? null,
+    state: row.state,
+    expiresAt,
+    // Advisory only: computed without UPDATE. state stays whatever is stored.
+    expired: row.state === 'active' && Number.isFinite(expiresMs) && expiresMs < Date.now(),
+    createdAt: row.created_at,
+  }
+}
+
+const experienceRow = row => {
+  const invalid = row.task_id === null || row.task_id === undefined
+    || String(row.task_id).trim() === ''
+    || row.outcome === null || row.outcome === undefined
+    || String(row.outcome).trim() === ''
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    taskId: row.task_id ?? null,
+    summary: row.summary,
+    skills: parseSkills(row.skills),
+    outcome: row.outcome ?? null,
+    createdAt: row.created_at,
+    invalid,
+  }
+}
+
+const briefText = (agentId, counts) => '[collab] agent=' + agentId
+  + ' teams=' + counts.teams
+  + ' roles=' + counts.roles
+  + ' aliases=' + counts.aliases
+  + ' tasks=' + counts.tasks
+  + ' warnings=' + counts.warnings
+  + '; apartment_collaboration_brief()'
+
+/**
+ * Read-only Collaboration Brief for one session.
+ * Returns { ok:false, code:UNBOUND_SESSION } when the session has no binding.
+ */
+export function buildCollaborationBrief({ apartment, sessionId, taskId, boardId, profileDir, asOf = nowIso() } = {}) {
+  const requestedSession = isNonEmptyString(sessionId) ? sessionId.trim() : null
+  if (requestedSession === null) {
+    return {
+      ok: false, code: COLLAB_ERROR_CODES.UNBOUND_SESSION, sessionId: null, agentId: null,
+      warnings: [], asOf, text: '',
+    }
+  }
+  const binding = apartment.getAgentSession(requestedSession)
+  if (binding === undefined) {
+    return {
+      ok: false, code: COLLAB_ERROR_CODES.UNBOUND_SESSION, sessionId: requestedSession, agentId: null,
+      warnings: [], asOf, text: '',
+    }
+  }
+  const agents = apartment.listAgents()
+  const agent = agents.find(row => row.id === binding.agent_id) ?? null
+  const bindings = apartment.listAgentSessions(binding.agent_id)
+  const sessionIds = unique(bindings.map(row => row.session_id))
+  const network = readNetworkAliases({ sessionIds, profileDir })
+  const aliases = network.aliases
+  const warnings = [...network.warnings]
+  if (agent === null) warnings.push({ code: COLLAB_ERROR_CODES.AGENT_NOT_FOUND, agentId: binding.agent_id })
+  for (const alias of aliases) {
+    if (!alias.routeResolvable) {
+      warnings.push({
+        code: 'ALIAS_UNRESOLVED',
+        alias: alias.alias,
+        status: alias.status,
+        sessionId: alias.sessionId,
+        supersededBy: alias.supersededBy,
+      })
+    }
+  }
+
+  const teamsById = new Map(apartment.listTeams().map(team => [team.id, team]))
+  const memberships = apartment.listMemberships().filter(row => row.agent_id === binding.agent_id)
+  const taskIdFilter = isNonEmptyString(taskId) ? taskId.trim() : undefined
+  const taskRoles = apartment.listTaskRoles().filter(row => row.agent_id === binding.agent_id
+    && (taskIdFilter === undefined || row.task_id === taskIdFilter))
+  const leases = apartment.listLeasesReadOnly({ agentId: binding.agent_id })
+  const experiences = apartment.listExperiences(binding.agent_id)
+  const bulletin = readBulletinTasks({ sessionIds, aliases, taskId, boardId })
+  warnings.push(...bulletin.warnings)
+
+  const teamItems = memberships.map(row => ({
+    teamId: row.team_id,
+    name: teamsById.get(row.team_id)?.name ?? null,
+    role: row.role,
+  }))
+  const roleItems = unique(memberships.map(row => row.role))
+  const taskRoleItems = taskRoles.map(row => ({
+    taskId: row.task_id,
+    agentId: row.agent_id,
+    teamId: row.team_id ?? null,
+    boardId: row.board_id ?? null,
+    role: row.role,
+    // D2: pre-migration rows (verified undefined) are treated as verified.
+    verified: row.verified === undefined || row.verified === null ? true : Number(row.verified) !== 0,
+    taskTitle: null,
+  }))
+  // D2: an allowUnverified write is surfaced even when bulletin is unavailable,
+  // so the caller never has to rely on ORPHAN_TASK_ROLE to notice it.
+  for (const item of taskRoleItems) {
+    if (item.verified) continue
+    warnings.push({
+      code: COLLAB_WARNING_CODES.TASK_UNVERIFIED,
+      taskId: item.taskId,
+      agentId: item.agentId,
+      teamId: item.teamId,
+      role: item.role,
+    })
+  }
+  // Enrich task roles from bulletin (read-only) and flag roles whose task is
+  // gone as orphans. No warning is emitted when the store itself is unavailable:
+  // BULLETIN_UNAVAILABLE above already explains why titles are null.
+  if (taskRoleItems.length > 0) {
+    const taskRecords = readBulletinTaskRecords({ taskIds: taskRoleItems.map(item => item.taskId) })
+    if (taskRecords.available) {
+      for (const item of taskRoleItems) {
+        const task = taskRecords.tasks.get(item.taskId)
+        if (task === undefined) {
+          warnings.push({
+            code: COLLAB_WARNING_CODES.ORPHAN_TASK_ROLE,
+            taskId: item.taskId,
+            agentId: item.agentId,
+            teamId: item.teamId,
+            role: item.role,
+          })
+          continue
+        }
+        item.taskTitle = task.title ?? null
+        if (item.boardId === null) item.boardId = task.boardId ?? null
+      }
+    } else if (bulletin.available) {
+      warnings.push(...taskRecords.warnings)
+    }
+  }
+  const leaseItems = leases.map(leaseRow)
+  // Team tasks are derived from task_roles only (no team_tasks table), scoped to
+  // the teams this agent belongs to. Roles/agents are deduped per team+task.
+  const memberTeamIds = unique(memberships.map(row => row.team_id))
+  const teamTaskItems = []
+  if (memberTeamIds.length > 0) {
+    const byTeamTask = new Map()
+    for (const row of apartment.listTaskRoles()) {
+      if (row.team_id === null || row.team_id === undefined || !memberTeamIds.includes(row.team_id)) continue
+      const key = row.team_id + '\u0000' + row.task_id
+      let item = byTeamTask.get(key)
+      if (item === undefined) {
+        item = { teamId: row.team_id, taskId: row.task_id, boardId: row.board_id ?? null, roles: [], agents: [] }
+        byTeamTask.set(key, item)
+      }
+      if (item.boardId === null && row.board_id !== null && row.board_id !== undefined) item.boardId = row.board_id
+      if (!item.roles.includes(row.role)) item.roles.push(row.role)
+      if (!item.agents.includes(row.agent_id)) item.agents.push(row.agent_id)
+    }
+    teamTaskItems.push(...byTeamTask.values())
+  }
+  // P1: only valid experience entries participate in the brief; old rows that
+  // miss taskId/outcome are kept in the DB and surfaced as INVALID_EXPERIENCE.
+  const allExperienceItems = experiences.map(experienceRow)
+  const experienceItems = allExperienceItems.filter(experience => !experience.invalid)
+  for (const experience of allExperienceItems) {
+    if (!experience.invalid) continue
+    warnings.push({
+      code: COLLAB_WARNING_CODES.INVALID_EXPERIENCE,
+      experienceId: experience.id,
+      agentId: experience.agentId,
+    })
+  }
+
+  const teams = truncate(teamItems, BRIEF_LIMITS.teams)
+  const roles = truncate(roleItems, BRIEF_LIMITS.roles)
+  const aliasBox = truncate(aliases, BRIEF_LIMITS.aliases)
+  const taskRoleBox = truncate(taskRoleItems, BRIEF_LIMITS.tasks)
+  const teamTaskBox = truncate(teamTaskItems, BRIEF_LIMITS.tasks)
+  const leaseBox = truncate(leaseItems, BRIEF_LIMITS.leases)
+  const experienceBox = truncate(experienceItems, BRIEF_LIMITS.experiences)
+  const counts = {
+    teams: teamItems.length,
+    roles: roleItems.length,
+    aliases: aliases.length,
+    tasks: bulletin.total,
+    leases: leaseItems.length,
+    experiences: experienceItems.length,
+    warnings: warnings.length,
+    taskRoles: taskRoleItems.length,
+    teamTasks: teamTaskItems.length,
+  }
+  const text = briefText(binding.agent_id, counts)
+  return {
+    ok: true,
+    sessionId: requestedSession,
+    agentId: binding.agent_id,
+    binding: {
+      agentId: binding.agent_id,
+      sessionId: binding.session_id,
+      isPrimary: Number(binding.is_primary) === 1,
+      createdAt: binding.created_at,
+      updatedAt: binding.updated_at,
+    },
+    agent: agent === null ? null : {
+      id: agent.id,
+      name: agent.name,
+      status: agent.status,
+      // Only the basename is exposed: never leak the absolute home path.
+      home: isNonEmptyString(binding.agent_home) ? basename(binding.agent_home) : null,
+      homeBasename: isNonEmptyString(binding.agent_home) ? basename(binding.agent_home) : null,
+    },
+    aliases: aliasBox.items,
+    teams: teams.items,
+    roles: roles.items,
+    taskRoles: taskRoleBox.items,
+    teamTasks: teamTaskBox.items,
+    leases: leaseBox.items,
+    assignedTasks: bulletin.tasks,
+    experiences: experienceBox.items,
+    warnings,
+    counts,
+    truncated: {
+      teams: teams.truncated,
+      roles: roles.truncated,
+      aliases: aliasBox.truncated,
+      tasks: bulletin.truncated,
+      taskRoles: taskRoleBox.truncated,
+      teamTasks: teamTaskBox.truncated,
+      leases: leaseBox.truncated,
+      experiences: experienceBox.truncated,
+      warnings: false,
+    },
+    asOf,
+    text,
+  }
+}
+
+/** Read-only binding list with session-network aliases and route resolvability. */
+export function buildBindingList({ apartment, agentId, profileDir, asOf = nowIso() } = {}) {
+  const bindings = apartment.listAgentSessions(agentId)
+  const network = readNetworkAliases({
+    sessionIds: bindings.map(row => row.session_id),
+    profileDir,
+  })
+  const aliasesBySession = new Map()
+  for (const alias of network.aliases) {
+    const list = aliasesBySession.get(alias.sessionId) ?? []
+    list.push(alias)
+    aliasesBySession.set(alias.sessionId, list)
+  }
+  const warnings = [...network.warnings]
+  const items = bindings.map(row => {
+    const aliases = aliasesBySession.get(row.session_id) ?? []
+    if (row.agent_name === null || row.agent_name === undefined) {
+      warnings.push({ code: COLLAB_ERROR_CODES.AGENT_NOT_FOUND, agentId: row.agent_id, sessionId: row.session_id })
+    }
+    return {
+      agentId: row.agent_id,
+      agentName: row.agent_name ?? null,
+      agentStatus: row.agent_status ?? null,
+      homeBasename: isNonEmptyString(row.agent_home) ? basename(row.agent_home) : null,
+      sessionId: row.session_id,
+      isPrimary: Number(row.is_primary) === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      aliases,
+      routeResolvable: aliases.some(alias => alias.routeResolvable),
+    }
+  })
+  return {
+    ok: true,
+    bindings: items,
+    networkAvailable: network.available,
+    warnings,
+    asOf,
+  }
+}
+
+/**
+ * Read-only drift report: apartment agents / live sessions / network aliases.
+ * Never modifies any table; issues are advisory.
+ */
+export function buildDriftReport({ apartment, resolveSession, profileDir, asOf = nowIso() } = {}) {
+  const bindings = apartment.listAgentSessions()
+  const agents = new Map(apartment.listAgents().map(row => [row.id, row]))
+  const network = readNetworkAliases({
+    sessionIds: bindings.map(row => row.session_id),
+    profileDir,
+  })
+  const issues = [...network.warnings]
+  const primaryCounts = new Map()
+  for (const row of bindings) {
+    const count = (primaryCounts.get(row.agent_id) ?? 0) + (Number(row.is_primary) === 1 ? 1 : 0)
+    primaryCounts.set(row.agent_id, count)
+  }
+  for (const [agentId, count] of primaryCounts) {
+    if (count > 1) issues.push({ code: 'MULTIPLE_PRIMARY', agentId, count })
+  }
+  for (const row of bindings) {
+    if (!agents.has(row.agent_id)) {
+      issues.push({ code: COLLAB_ERROR_CODES.AGENT_NOT_FOUND, agentId: row.agent_id, sessionId: row.session_id })
+    }
+    let resolved = false
+    try {
+      resolved = typeof resolveSession === 'function' ? Boolean(resolveSession(row.session_id)) : false
+    } catch {
+      resolved = false
+    }
+    if (!resolved) {
+      issues.push({ code: COLLAB_ERROR_CODES.SESSION_NOT_FOUND, agentId: row.agent_id, sessionId: row.session_id })
+    }
+  }
+  const boundSessions = new Set(bindings.map(row => row.session_id))
+  for (const alias of network.aliases) {
+    if (!boundSessions.has(alias.sessionId)) continue
+    if (alias.status !== 'active') {
+      issues.push({
+        code: 'ALIAS_NOT_ACTIVE',
+        alias: alias.alias,
+        status: alias.status,
+        sessionId: alias.sessionId,
+        supersededBy: alias.supersededBy,
+      })
+    }
+    if (alias.sessionExists === false) {
+      issues.push({ code: 'ALIAS_SESSION_MISSING', alias: alias.alias, sessionId: alias.sessionId })
+    }
+    if (alias.supersededBy !== null) {
+      if (alias.status === 'active') {
+        issues.push({ code: 'ALIAS_SUPERSEDED_MISMATCH', alias: alias.alias, supersededBy: alias.supersededBy, sessionId: alias.sessionId })
+      } else if (alias.supersededByFound === false) {
+        issues.push({ code: 'ALIAS_SUPERSEDED_MISSING', alias: alias.alias, supersededBy: alias.supersededBy, sessionId: alias.sessionId })
+      } else if (alias.supersededBySessionId !== null && alias.supersededBySessionId !== alias.sessionId) {
+        issues.push({ code: 'ALIAS_SUPERSEDED_MISMATCH', alias: alias.alias, supersededBy: alias.supersededBy, sessionId: alias.sessionId })
+      }
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    issues,
+    counts: {
+      bindings: bindings.length,
+      agents: agents.size,
+      sessions: bindings.length,
+      aliases: network.aliases.length,
+    },
+    networkAvailable: network.available,
+    asOf,
+  }
+}

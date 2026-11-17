@@ -8,6 +8,11 @@ import { dirname, join, resolve, sep } from 'node:path'
 
 const now = () => new Date().toISOString()
 const sha256 = text => createHash('sha256').update(text).digest('hex')
+const codedError = (code, message) => {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
 const dshHome = () => process.env.DSH_HOME || join(homedir(), '.dsh')
 const defaultRoot = () => join(dshHome(), 'apartment')
 const pointerPath = () => join(dshHome(), 'apartment-root.json')
@@ -36,6 +41,17 @@ CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, home TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
   capabilities TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (agent_id, session_id),
+  UNIQUE (session_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_primary
+  ON agent_sessions(agent_id) WHERE is_primary = 1;
 CREATE TABLE IF NOT EXISTS leases (
   id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, workspace TEXT NOT NULL, work_dir TEXT NOT NULL,
   task_id TEXT, state TEXT NOT NULL DEFAULT 'active', expires_at TEXT, created_at TEXT NOT NULL
@@ -48,7 +64,8 @@ CREATE TABLE IF NOT EXISTS memberships (
   created_at TEXT NOT NULL, PRIMARY KEY (team_id, agent_id, role)
 );
 CREATE TABLE IF NOT EXISTS task_roles (
-  task_id TEXT NOT NULL, agent_id TEXT NOT NULL, team_id TEXT, role TEXT NOT NULL,
+  task_id TEXT NOT NULL, agent_id TEXT NOT NULL, team_id TEXT, board_id TEXT,
+  verified INTEGER NOT NULL DEFAULT 1, role TEXT NOT NULL,
   created_at TEXT NOT NULL, PRIMARY KEY (task_id, agent_id, role)
 );
 CREATE TABLE IF NOT EXISTS experiences (
@@ -151,6 +168,20 @@ export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {
   }
   const db = new DatabaseSync(dbPath || dbFile)
   db.exec(schema)
+  // Additive migration for databases created before P1: CREATE TABLE IF NOT
+  // EXISTS never alters an existing table, so board_id must be added in place.
+  // Old task_roles rows keep board_id = NULL and stay readable. `verified`
+  // (D2) was added later: default 1 keeps pre-existing rows non-warning, while
+  // an allowUnverified write stores 0.
+  {
+    const columns = db.prepare('PRAGMA table_info(task_roles)').all()
+    if (!columns.some(column => column.name === 'board_id')) {
+      db.exec('ALTER TABLE task_roles ADD COLUMN board_id TEXT')
+    }
+    if (!columns.some(column => column.name === 'verified')) {
+      db.exec('ALTER TABLE task_roles ADD COLUMN verified INTEGER NOT NULL DEFAULT 1')
+    }
+  }
   const reapExpired = () => {
     const result = db.prepare("UPDATE leases SET state='expired' WHERE state='active' AND expires_at IS NOT NULL AND expires_at < ?").run(now())
     return { expired: result.changes }
@@ -214,6 +245,7 @@ export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {
     return {
       root: resolvedRoot,
       agents: db.prepare('SELECT COUNT(*) AS n FROM agents').get().n,
+      agentSessions: db.prepare('SELECT COUNT(*) AS n FROM agent_sessions').get().n,
       teams: db.prepare('SELECT COUNT(*) AS n FROM teams').get().n,
       leases: db.prepare("SELECT COUNT(*) AS n FROM leases WHERE state='active'").get().n,
       taskRoles: db.prepare('SELECT COUNT(*) AS n FROM task_roles').get().n,
@@ -241,18 +273,85 @@ export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {
       return db.prepare('SELECT * FROM agents WHERE id=?').get(agentId)
     },
     listAgents() { return db.prepare('SELECT * FROM agents ORDER BY name').all() },
+    // ---- P0 identity mapping: agent <-> session (never network aliases) ----
+    getAgentSession(sessionId) {
+      return db.prepare(`SELECT s.*, a.name AS agent_name, a.home AS agent_home, a.status AS agent_status
+        FROM agent_sessions s LEFT JOIN agents a ON a.id = s.agent_id
+        WHERE s.session_id = ?`).get(sessionId)
+    },
+    listAgentSessions(agentId) {
+      const base = `SELECT s.*, a.name AS agent_name, a.home AS agent_home, a.status AS agent_status
+        FROM agent_sessions s LEFT JOIN agents a ON a.id = s.agent_id`
+      return agentId === undefined
+        ? db.prepare(base + ' ORDER BY s.agent_id, s.is_primary DESC, s.session_id').all()
+        : db.prepare(base + ' WHERE s.agent_id = ? ORDER BY s.is_primary DESC, s.session_id').all(agentId)
+    },
+    /**
+     * Upsert one agent/session binding. A session may belong to only one agent
+     * (UNIQUE session_id): binding it to a different agent transfers it. Setting
+     * isPrimary clears the agent's other primary in the same transaction; the
+     * partial unique index is the final guard against two primaries.
+     */
+    bindAgentSession({ agentId, sessionId, isPrimary }) {
+      if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+        throw codedError('SESSION_NOT_FOUND', 'apartment: sessionId is required')
+      }
+      const agent = db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId)
+      if (agent === undefined) throw codedError('AGENT_NOT_FOUND', 'apartment: agent not found: ' + agentId)
+      const stamp = now()
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const current = db.prepare('SELECT * FROM agent_sessions WHERE agent_id = ? AND session_id = ?').get(agentId, sessionId)
+        const occupying = db.prepare('SELECT * FROM agent_sessions WHERE session_id = ?').get(sessionId)
+        const primary = isPrimary === undefined || isPrimary === null
+          ? Number(current?.is_primary ?? 0)
+          : (isPrimary === true ? 1 : 0)
+        if (occupying !== undefined && occupying.agent_id !== agentId) {
+          db.prepare('DELETE FROM agent_sessions WHERE session_id = ?').run(sessionId)
+        }
+        if (primary === 1) {
+          db.prepare('UPDATE agent_sessions SET is_primary = 0, updated_at = ? WHERE agent_id = ? AND is_primary = 1 AND session_id <> ?')
+            .run(stamp, agentId, sessionId)
+        }
+        if (current !== undefined) {
+          db.prepare('UPDATE agent_sessions SET is_primary = ?, updated_at = ? WHERE agent_id = ? AND session_id = ?')
+            .run(primary, stamp, agentId, sessionId)
+        } else {
+          db.prepare('INSERT INTO agent_sessions (agent_id, session_id, is_primary, created_at, updated_at) VALUES (?,?,?,?,?)')
+            .run(agentId, sessionId, primary, stamp, stamp)
+        }
+        db.exec('COMMIT')
+      } catch (error) {
+        try { db.exec('ROLLBACK') } catch { /* transaction already gone */ }
+        throw error
+      }
+      return db.prepare(`SELECT s.*, a.name AS agent_name, a.home AS agent_home, a.status AS agent_status
+        FROM agent_sessions s LEFT JOIN agents a ON a.id = s.agent_id
+        WHERE s.agent_id = ? AND s.session_id = ?`).get(agentId, sessionId)
+    },
+    unbindAgentSession({ agentId, sessionId }) {
+      const result = db.prepare('DELETE FROM agent_sessions WHERE agent_id = ? AND session_id = ?').run(agentId, sessionId)
+      return { agentId, sessionId, removed: Number(result.changes) > 0 }
+    },
     createTeam({ id, name, purpose = null, workspace = null }) {
       const teamId = id || 'team-' + randomUUID().slice(0, 8)
       db.prepare('INSERT OR IGNORE INTO teams (id,name,purpose,workspace,created_at) VALUES (?,?,?,?,?)').run(teamId, name, purpose, workspace, now())
       return db.prepare('SELECT * FROM teams WHERE id=?').get(teamId)
     },
     addMember({ teamId, agentId, role }) {
-      db.prepare('INSERT OR IGNORE INTO memberships (team_id,agent_id,role,created_at) VALUES (?,?,?,?)').run(teamId, agentId, role, now())
-      return { teamId, agentId, role }
+      // Membership must never create a roster row for a ghost team/agent; the
+      // caller-facing add is idempotent, so a duplicate returns changes = 0.
+      const team = db.prepare('SELECT id FROM teams WHERE id = ?').get(teamId)
+      if (team === undefined) throw codedError('TEAM_NOT_FOUND', 'apartment: team not found: ' + (teamId ?? '<empty>'))
+      const agent = db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId)
+      if (agent === undefined) throw codedError('AGENT_NOT_FOUND', 'apartment: agent not found: ' + (agentId ?? '<empty>'))
+      const result = db.prepare('INSERT OR IGNORE INTO memberships (team_id,agent_id,role,created_at) VALUES (?,?,?,?)').run(teamId, agentId, role, now())
+      return { teamId, agentId, role, changes: Number(result.changes), added: Number(result.changes) > 0 }
     },
     removeMember({ teamId, agentId, role }) {
-      db.prepare('DELETE FROM memberships WHERE team_id=? AND agent_id=? AND role=?').run(teamId, agentId, role)
-      return { removed: true }
+      const result = db.prepare('DELETE FROM memberships WHERE team_id=? AND agent_id=? AND role=?').run(teamId, agentId, role)
+      const changes = Number(result.changes)
+      return { teamId, agentId, role, changes, removed: changes > 0 }
     },
     listTeams() { return db.prepare('SELECT * FROM teams ORDER BY name').all() },
     listMemberships(teamId) { return teamId === undefined ? db.prepare('SELECT * FROM memberships').all() : db.prepare('SELECT * FROM memberships WHERE team_id=?').all(teamId) },
@@ -267,12 +366,95 @@ export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {
     },
     releaseLease(id) { db.prepare("UPDATE leases SET state='released' WHERE id=?").run(id); return { released: true } },
     listLeases(agentId) { reapExpired(); return agentId === undefined ? db.prepare('SELECT * FROM leases').all() : db.prepare('SELECT * FROM leases WHERE agent_id=?').all(agentId) },
-    assignTaskRole({ taskId, agentId, teamId = null, role }) {
-      db.prepare('INSERT OR REPLACE INTO task_roles (task_id,agent_id,team_id,role,created_at) VALUES (?,?,?,?,?)').run(taskId, agentId, teamId, role, now())
-      return { taskId, agentId, teamId, role }
+    // Read-only lease view: never calls reapExpired and never UPDATEs. Used by
+    // apartment_collaboration_brief, whose read-only contract is load-bearing.
+    listLeasesReadOnly(options = {}) {
+      const agentId = typeof options === 'string' ? options : options?.agentId
+      // Surface active/expired-first so an overdue lease is visible in the capped
+      // brief, but only SELECT: no reap, no UPDATE, no state rewrite.
+      const order = ` ORDER BY CASE WHEN state = 'active' THEN 0 ELSE 1 END,
+        CASE WHEN expires_at IS NULL THEN 1 ELSE 0 END, expires_at ASC, created_at DESC`
+      return agentId === undefined
+        ? db.prepare('SELECT * FROM leases' + order).all()
+        : db.prepare('SELECT * FROM leases WHERE agent_id = ?' + order).all(agentId)
     },
-    listTaskRoles(taskId) { return taskId === undefined ? db.prepare('SELECT * FROM task_roles').all() : db.prepare('SELECT * FROM task_roles WHERE task_id=?').all(taskId) },
-    recordExperience({ agentId, taskId = null, summary, skills = [], outcome = null }) {
+    assignTaskRole({ taskId, agentId, teamId = null, boardId = null, role, verified = true }) {
+      if (typeof taskId !== 'string' || taskId.trim() === '') throw codedError('INVALID_ARGUMENT', 'apartment: taskId is required')
+      if (typeof agentId !== 'string' || agentId.trim() === '') throw codedError('AGENT_NOT_FOUND', 'apartment: agentId is required')
+      if (typeof role !== 'string' || role.trim() === '') throw codedError('INVALID_ARGUMENT', 'apartment: role is required')
+      const agent = db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId)
+      if (agent === undefined) throw codedError('AGENT_NOT_FOUND', 'apartment: agent not found: ' + agentId)
+      if (teamId !== null && teamId !== undefined) {
+        const team = db.prepare('SELECT id FROM teams WHERE id = ?').get(teamId)
+        if (team === undefined) throw codedError('TEAM_NOT_FOUND', 'apartment: team not found: ' + teamId)
+      }
+      // D2: only an explicit allowUnverified write stores verified=0; every
+      // other write (and every pre-migration row) stays verified=1.
+      const verifiedFlag = verified === false ? 0 : 1
+      // Idempotent: the same (task, agent, role) keeps its original created_at;
+      // only the optional team/board/verified pointers are refreshed.
+      db.prepare(`INSERT INTO task_roles (task_id,agent_id,team_id,board_id,verified,role,created_at) VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(task_id,agent_id,role) DO UPDATE SET team_id=excluded.team_id, board_id=excluded.board_id, verified=excluded.verified`)
+        .run(taskId, agentId, teamId ?? null, boardId ?? null, verifiedFlag, role, now())
+      const row = db.prepare('SELECT * FROM task_roles WHERE task_id=? AND agent_id=? AND role=?').get(taskId, agentId, role)
+      return {
+        taskId: row.task_id,
+        agentId: row.agent_id,
+        teamId: row.team_id ?? null,
+        boardId: row.board_id ?? null,
+        verified: Number(row.verified) !== 0,
+        role: row.role,
+        createdAt: row.created_at,
+      }
+    },
+    listTaskRoles(filters = {}) {
+      // Backwards compatible: a bare string means taskId.
+      const query = typeof filters === 'string' ? { taskId: filters } : (filters ?? {})
+      const clauses = []
+      const params = []
+      for (const [key, column] of [['taskId', 'task_id'], ['agentId', 'agent_id'], ['teamId', 'team_id'], ['boardId', 'board_id']]) {
+        const value = query[key]
+        if (typeof value === 'string' && value.trim() !== '') {
+          clauses.push(column + ' = ?')
+          params.push(value.trim())
+        }
+      }
+      const sql = 'SELECT * FROM task_roles' + (clauses.length > 0 ? ' WHERE ' + clauses.join(' AND ') : '')
+        + ' ORDER BY task_id, agent_id, role'
+      return db.prepare(sql).all(...params)
+    },
+    // Team -> task projection derived only from task_roles (no team_tasks table).
+    listTeamTasks({ teamId, boardId } = {}) {
+      const team = db.prepare('SELECT id FROM teams WHERE id = ?').get(teamId)
+      if (team === undefined) throw codedError('TEAM_NOT_FOUND', 'apartment: team not found: ' + (teamId ?? '<empty>'))
+      const rows = this.listTaskRoles({ teamId, boardId })
+      const tasks = new Map()
+      for (const row of rows) {
+        let item = tasks.get(row.task_id)
+        if (item === undefined) {
+          item = { taskId: row.task_id, boardId: row.board_id ?? null, roles: [], agents: [] }
+          tasks.set(row.task_id, item)
+        }
+        if (item.boardId === null && row.board_id !== null && row.board_id !== undefined) item.boardId = row.board_id
+        if (!item.roles.includes(row.role)) item.roles.push(row.role)
+        if (!item.agents.includes(row.agent_id)) item.agents.push(row.agent_id)
+      }
+      return { teamId, boardId: boardId ?? null, tasks: [...tasks.values()], total: tasks.size }
+    },
+    recordExperience({ agentId, taskId, summary, skills = [], outcome }) {
+      // P1 evidence contract: new writes must carry a task and an outcome. Old
+      // rows with NULL fields are kept and reported as invalid by the brief.
+      if (typeof taskId !== 'string' || taskId.trim() === '') {
+        throw codedError('EXPERIENCE_FIELDS_REQUIRED', 'apartment: experience taskId is required')
+      }
+      if (typeof outcome !== 'string' || outcome.trim() === '') {
+        throw codedError('EXPERIENCE_FIELDS_REQUIRED', 'apartment: experience outcome is required')
+      }
+      if (typeof summary !== 'string' || summary.trim() === '') {
+        throw codedError('EXPERIENCE_FIELDS_REQUIRED', 'apartment: experience summary is required')
+      }
+      const agent = db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId)
+      if (agent === undefined) throw codedError('AGENT_NOT_FOUND', 'apartment: agent not found: ' + (agentId ?? '<empty>'))
       const id = 'exp-' + randomUUID().slice(0, 8)
       db.prepare('INSERT INTO experiences (id,agent_id,task_id,summary,skills,outcome,created_at) VALUES (?,?,?,?,?,?,?)').run(id, agentId, taskId, summary, JSON.stringify(skills), outcome, now())
       writeFileSync(safeJoin(resolvedRoot, 'agents', agentId, 'EXPERIENCE.md'), `# Experience\n\n- ${now()} ${summary}\n`, { flag: 'a' })

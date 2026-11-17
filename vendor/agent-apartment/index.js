@@ -4,9 +4,14 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApartment, getActiveRoot, setActiveRoot } from './src/store.js'
+import { buildBindingList, buildCollaborationBrief, buildDriftReport, COLLAB_ERROR_CODES, lookupBulletinTask } from './src/collab.js'
+import { createCollabInjector } from './src/inject.js'
 import { boolean, number, objectSchema, string } from './lib/standard-schema.js'
 
-export const inject = ['tools']
+// Public constants for callers/tests that need the P0 collaboration contract.
+export { COLLAB_ERROR_CODES, MAX_ALIAS_LENGTH } from './src/collab.js'
+
+export const inject = ['tools', 'agents']
 
 const REMOTE_SERVICE_KEY = 'agentApartmentRemote'
 const REMOTE_NAMESPACE = 'agentApartment'
@@ -29,6 +34,7 @@ export const Config = objectSchema({
   }),
   backupKeep: number(5, { description: 'Number of backup snapshots to retain.', int: true, min: 1, max: 100 }),
   backupMaxAgeDays: number(8, { description: 'Maximum age in days of the latest normal backup before apartment_backup_verify reports it stale.', int: true, min: 1, max: 365 }),
+  briefInjection: boolean(true, { description: 'Inject one collaboration-brief line once per bound session on agent/pre-step.' }),
 }, { description: 'Centralized Agent Apartment configuration.', schemaVersion: 1 })
 
 const output = {
@@ -96,6 +102,96 @@ export function apply(ctx, config) {
       throw error
     }
   }
+  const codedError = (code, message) => {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
+  const callerSessionId = exec => {
+    const session = exec?.agent?.session
+    for (const value of [session?.id, session?.sessionId, exec?.agent?.sessionId, exec?.session?.id]) {
+      if (typeof value === 'string' && value.trim() !== '') return value.trim()
+    }
+    return null
+  }
+  const profileDir = (() => {
+    try {
+      const dir = ctx.get?.('profileContext')?.dir
+      if (typeof dir === 'string' && dir.trim() !== '') return dir.trim()
+    } catch { /* profile context is optional */ }
+    return typeof process.env.DSH_PROFILE_DIR === 'string' && process.env.DSH_PROFILE_DIR.trim() !== ''
+      ? process.env.DSH_PROFILE_DIR.trim()
+      : undefined
+  })()
+  const resolveLiveSession = sessionId => {
+    try {
+      return ctx.get?.('agents')?.get?.(sessionId)
+    } catch {
+      return undefined
+    }
+  }
+  const optionalText = value => typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+  const assertAgentExists = agentId => {
+    if (agentId === undefined || !apartment.listAgents().some(row => row.id === agentId)) {
+      throw codedError(COLLAB_ERROR_CODES.AGENT_NOT_FOUND, 'apartment: agent not found: ' + (agentId ?? '<empty>'))
+    }
+  }
+  const assertTeamExists = teamId => {
+    if (teamId !== undefined && !apartment.listTeams().some(row => row.id === teamId)) {
+      throw codedError(COLLAB_ERROR_CODES.TEAM_NOT_FOUND, 'apartment: team not found: ' + teamId)
+    }
+  }
+  /**
+   * P1 cross-store task check. A readable bulletin DB is authoritative: an
+   * unknown task is TASK_NOT_FOUND. An unavailable store fails closed with
+   * TASK_STORE_UNAVAILABLE unless the caller explicitly opts into an
+   * unverified write with allowUnverified=true.
+   */
+  const resolveTaskTarget = ({ taskId, boardId, allowUnverified }) => {
+    const checked = lookupBulletinTask(taskId)
+    if (!checked.available) {
+      if (allowUnverified !== true) {
+        const error = codedError(
+          COLLAB_ERROR_CODES.TASK_STORE_UNAVAILABLE,
+          'apartment: bulletin task store unavailable; pass allowUnverified=true to write without verifying task ' + taskId,
+        )
+        error.reason = checked.reason ?? null
+        throw error
+      }
+      return { taskId, boardId: optionalText(boardId) ?? null, verified: false }
+    }
+    if (checked.task === null) {
+      throw codedError(COLLAB_ERROR_CODES.TASK_NOT_FOUND, 'apartment: task not found: ' + taskId)
+    }
+    // E1: an explicit boardId must agree with the authoritative bulletin row.
+    // A mismatch is refused before any write instead of silently forking scope.
+    const explicitBoardId = optionalText(boardId)
+    if (explicitBoardId !== undefined && checked.task.boardId !== null && explicitBoardId !== checked.task.boardId) {
+      const error = codedError(
+        COLLAB_ERROR_CODES.TASK_BOARD_MISMATCH,
+        'apartment: boardId ' + explicitBoardId + ' does not match the bulletin task board '
+          + checked.task.boardId + ' for task ' + taskId,
+      )
+      error.taskId = taskId
+      error.boardId = explicitBoardId
+      error.taskBoardId = checked.task.boardId
+      throw error
+    }
+    // An omitted boardId is backfilled from the verified task; an explicit
+    // matching boardId is preserved for caller-scoped filtering.
+    return { taskId, boardId: explicitBoardId ?? checked.task.boardId ?? null, verified: true }
+  }
+  /**
+   * A caller may bind/unbind its own session; any other session id is an
+   * operator action. The caller's own session still has to resolve live.
+   */
+  const assertSessionPermission = (requestedSessionId, exec) => {
+    const caller = callerSessionId(exec)
+    if (requestedSessionId === null) return caller
+    if (caller !== null && requestedSessionId === caller) return requestedSessionId
+    assertOperator(exec)
+    return requestedSessionId
+  }
   const migrate = (toArg) => {
     const from = apartment.root
     const to = resolve(toArg)
@@ -156,6 +252,69 @@ export function apply(ctx, config) {
     id: str('Optional stable id.'), name: str('Agent name.'), capabilities: arr('Capabilities.'),
   }, ['name']), async args => { assertWritable('apartment_agent_register'); return apartment.registerAgent(args) })
   register(desc('apartment_agent_list', 'List apartment agents.'), async () => ({ agents: apartment.listAgents() }))
+  register(desc('apartment_agent_bind', 'Bind an agent to a session (defaults to the caller); binding another session needs danger-full-access.', {
+    agentId: str('Agent id.'),
+    sessionId: str('Session id; defaults to the caller session.'),
+    isPrimary: { type: 'boolean', description: 'Mark this binding as the agent primary; clears the previous primary.' },
+  }, ['agentId']), async (args, exec) => {
+    assertWritable('apartment_agent_bind')
+    const requested = optionalText(args?.sessionId)
+    const sessionId = assertSessionPermission(requested ?? null, exec)
+    if (sessionId === null) throw codedError(COLLAB_ERROR_CODES.SESSION_NOT_FOUND, 'apartment: no session to bind')
+    const agentId = optionalText(args?.agentId)
+    if (agentId === undefined || !apartment.listAgents().some(row => row.id === agentId)) {
+      throw codedError(COLLAB_ERROR_CODES.AGENT_NOT_FOUND, 'apartment: agent not found: ' + (agentId ?? '<empty>'))
+    }
+    const liveSession = resolveLiveSession(sessionId)
+    if (liveSession === undefined || liveSession === null) {
+      throw codedError(COLLAB_ERROR_CODES.SESSION_NOT_FOUND, 'apartment: session not found: ' + sessionId)
+    }
+    return apartment.bindAgentSession({
+      agentId,
+      sessionId,
+      isPrimary: typeof args?.isPrimary === 'boolean' ? args.isPrimary : undefined,
+    })
+  })
+  register(desc('apartment_agent_unbind', 'Remove an agent/session binding (defaults to the caller session).', {
+    agentId: str('Agent id.'),
+    sessionId: str('Session id; defaults to the caller session.'),
+  }, ['agentId']), async (args, exec) => {
+    assertWritable('apartment_agent_unbind')
+    const agentId = optionalText(args?.agentId)
+    if (agentId === undefined) throw codedError(COLLAB_ERROR_CODES.AGENT_NOT_FOUND, 'apartment: agentId is required')
+    const requested = optionalText(args?.sessionId)
+    const sessionId = assertSessionPermission(requested ?? null, exec)
+    if (sessionId === null) throw codedError(COLLAB_ERROR_CODES.SESSION_NOT_FOUND, 'apartment: no session to unbind')
+    return apartment.unbindAgentSession({ agentId, sessionId })
+  })
+  register(desc('apartment_binding_list', 'Read-only: list agent/session bindings with session-network aliases and routeResolvable.', {
+    agentId: str('Optional agent id filter.'),
+  }), async args => buildBindingList({ apartment, agentId: optionalText(args?.agentId), profileDir }))
+  register(desc('apartment_bind_drift_check', 'Read-only: compare bindings with agents, live sessions and network aliases; reports issues, never fixes.'), async () => buildDriftReport({
+    apartment,
+    resolveSession: resolveLiveSession,
+    profileDir,
+  }))
+  register(desc('apartment_collaboration_brief', 'Read-only aggregated collaboration brief for a session (defaults to the caller).', {
+    sessionId: str('Session id; defaults to the caller session.'),
+    taskId: str('Optional task id filter for task roles and assigned tasks.'),
+    boardId: str('Optional bulletin board id filter for assigned tasks.'),
+  }), async (args, exec) => {
+    const requested = optionalText(args?.sessionId) ?? callerSessionId(exec)
+    if (requested === null) {
+      return {
+        ok: false, code: COLLAB_ERROR_CODES.UNBOUND_SESSION, sessionId: null, agentId: null,
+        warnings: [], asOf: new Date().toISOString(), text: '',
+      }
+    }
+    return buildCollaborationBrief({
+      apartment,
+      sessionId: requested,
+      taskId: optionalText(args?.taskId),
+      boardId: optionalText(args?.boardId),
+      profileDir,
+    })
+  })
   register(desc('apartment_team_create', 'Create a team decoupled from workspace.', {
     id: str('Optional id.'), name: str('Team name.'), purpose: str('Purpose.'), workspace: str('Optional associated workspace.'),
   }, ['name']), async args => { assertWritable('apartment_team_create'); return apartment.createTeam(args) })
@@ -174,13 +333,82 @@ export function apply(ctx, config) {
   register(desc('apartment_lease_release', 'Release a lease.', { leaseId: str('Lease id.') }, ['leaseId']), async args => { assertWritable('apartment_lease_release'); return apartment.releaseLease(args.leaseId) })
   register(desc('apartment_lease_list', 'List leases.', { agentId: str('Optional agent id.') }), async args => ({ leases: apartment.listLeases(args.agentId) }))
   register(desc('apartment_lease_reap', 'Expire leases whose TTL has passed.'), async () => { assertWritable('apartment_lease_reap'); return apartment.reapExpired() })
-  register(desc('apartment_task_role_assign', 'Bind an agent/team to a role on one task.', {
-    taskId: str('Task id.'), agentId: str('Agent id.'), teamId: str('Optional team id.'), role: str('Role.'),
-  }, ['taskId', 'agentId', 'role']), async args => { assertWritable('apartment_task_role_assign'); return apartment.assignTaskRole(args) })
-  register(desc('apartment_task_role_list', 'List task-role bindings.', { taskId: str('Optional task id.') }), async args => ({ roles: apartment.listTaskRoles(args.taskId) }))
-  register(desc('apartment_experience_record', 'Record reusable experience for an agent.', {
-    agentId: str('Agent id.'), taskId: str('Optional task id.'), summary: str('Summary.'), skills: arr('Skills.'), outcome: str('Outcome.'),
-  }, ['agentId', 'summary']), async args => { assertWritable('apartment_experience_record'); return apartment.recordExperience(args) })
+  register(desc('apartment_task_role_assign', 'Bind an agent/team to a role on one task (operator-only: requires danger-full-access); validates agent/team and verifies the task and board in bulletin unless allowUnverified.', {
+    taskId: str('Task id.'),
+    agentId: str('Agent id.'),
+    teamId: str('Optional team id.'),
+    boardId: str('Optional bulletin board id; must match the verified task board and is derived from the task when omitted.'),
+    role: str('Role.'),
+    allowUnverified: { type: 'boolean', description: 'Allow writing when the bulletin task store is unavailable (never when it is readable and the task is missing).' },
+  }, ['taskId', 'agentId', 'role']), async (args, exec) => {
+    assertOperator(exec)
+    assertWritable('apartment_task_role_assign')
+    const taskId = optionalText(args?.taskId)
+    if (taskId === undefined) throw codedError('INVALID_ARGUMENT', 'apartment: taskId is required')
+    const agentId = optionalText(args?.agentId)
+    assertAgentExists(agentId)
+    const teamId = optionalText(args?.teamId)
+    assertTeamExists(teamId)
+    const target = resolveTaskTarget({
+      taskId,
+      boardId: args?.boardId,
+      allowUnverified: args?.allowUnverified === true,
+    })
+    return apartment.assignTaskRole({
+      taskId,
+      agentId,
+      teamId: teamId ?? null,
+      boardId: target.boardId,
+      verified: target.verified,
+      role: args?.role,
+    })
+  })
+  register(desc('apartment_task_role_list', 'List task-role bindings; filters: taskId/agentId/teamId/boardId.', {
+    taskId: str('Optional task id filter.'),
+    agentId: str('Optional agent id filter.'),
+    teamId: str('Optional team id filter.'),
+    boardId: str('Optional board id filter.'),
+  }), async args => ({
+    roles: apartment.listTaskRoles({
+      taskId: optionalText(args?.taskId),
+      agentId: optionalText(args?.agentId),
+      teamId: optionalText(args?.teamId),
+      boardId: optionalText(args?.boardId),
+    }),
+  }))
+  register(desc('apartment_team_task_list', 'Read-only: derive a team task list from task_roles (deduped), with roles and agents.', {
+    teamId: str('Team id.'),
+    boardId: str('Optional board id filter.'),
+  }, ['teamId']), async args => apartment.listTeamTasks({
+    teamId: optionalText(args?.teamId),
+    boardId: optionalText(args?.boardId),
+  }))
+  register(desc('apartment_experience_record', 'Record reusable experience for an agent; taskId and outcome are required and the task is verified in bulletin unless allowUnverified.', {
+    agentId: str('Agent id.'),
+    taskId: str('Task id (required).'),
+    summary: str('Summary.'),
+    skills: arr('Skills.'),
+    outcome: str('Outcome (required).'),
+    allowUnverified: { type: 'boolean', description: 'Allow writing when the bulletin task store is unavailable.' },
+  }, ['agentId', 'taskId', 'summary', 'outcome']), async args => {
+    assertWritable('apartment_experience_record')
+    const agentId = optionalText(args?.agentId)
+    assertAgentExists(agentId)
+    const taskId = optionalText(args?.taskId)
+    if (taskId === undefined) throw codedError(COLLAB_ERROR_CODES.EXPERIENCE_FIELDS_REQUIRED, 'apartment: experience taskId is required')
+    const outcome = optionalText(args?.outcome)
+    if (outcome === undefined) throw codedError(COLLAB_ERROR_CODES.EXPERIENCE_FIELDS_REQUIRED, 'apartment: experience outcome is required')
+    const summary = optionalText(args?.summary)
+    if (summary === undefined) throw codedError(COLLAB_ERROR_CODES.EXPERIENCE_FIELDS_REQUIRED, 'apartment: experience summary is required')
+    resolveTaskTarget({ taskId, allowUnverified: args?.allowUnverified === true })
+    return apartment.recordExperience({
+      agentId,
+      taskId,
+      summary,
+      skills: Array.isArray(args?.skills) ? args.skills : [],
+      outcome,
+    })
+  })
   register(desc('apartment_experience_list', 'List experience entries.', { agentId: str('Optional agent id.') }), async args => ({ experiences: apartment.listExperiences(args.agentId) }))
   register(desc('apartment_import_legacy', 'Read team/members/*/AGENTS.md into agent homes + memberships (imports write homes/roster).', { workspace: str('Workspace root.') }, ['workspace']), async args => { assertWritable('apartment_import_legacy'); return apartment.importLegacy(args.workspace) })
   register(desc('apartment_backup', 'Create a backup snapshot with manifest/sha256.', { label: str('Optional label.') }), async args => { assertWritable('apartment_backup'); return apartment.backup(args.label ?? 'manual') })
@@ -213,6 +441,20 @@ export function apply(ctx, config) {
     assertWritable('apartment_migrate')
     return migrate(args.to)
   })
+
+  // P0 auto-recall: one line, once per (process-local) session, only when the
+  // session is bound. Any read failure injects an explicit unavailable warning;
+  // all failures are fail-open and never block the pre-step.
+  const injector = createCollabInjector({
+    enabled: cfg.briefInjection !== false,
+    logger: ctx.logger,
+    getBrief: sessionId => buildCollaborationBrief({ apartment, sessionId, profileDir }),
+  })
+  try {
+    if (typeof ctx.on === 'function') ctx.on('agent/pre-step', injector.handler)
+  } catch (error) {
+    try { ctx.logger?.warn?.('apartment: collaboration brief injection unavailable (fail-open)', error) } catch { /* best effort */ }
+  }
 
   class AgentApartmentRemote {
     status() { return { ...apartment.status(), verify: apartment.verify(), ...lifecycle() } }
