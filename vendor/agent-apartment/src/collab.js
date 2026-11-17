@@ -196,6 +196,46 @@ export function readNetworkAliases({ sessionIds = [], profileDir } = {}) {
   }
 }
 
+/**
+ * Read session rows (display_name/status) from session-network, read-only.
+ * Used only to enrich live-session candidates. A missing/partial sessions table
+ * is not an error: the caller still has the live agent header and aliases.
+ */
+export function readNetworkSessions({ sessionIds = [], profileDir } = {}) {
+  const resolved = resolveNetworkDbPath(profileDir)
+  const result = { available: false, sessions: [] }
+  const opened = openReadOnly(resolved.path)
+  if (opened.db === null) return result
+  try {
+    result.available = true
+    const ids = unique(sessionIds)
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      const chunk = ids.slice(offset, offset + 500)
+      let rows
+      try {
+        rows = opened.db.prepare(`SELECT * FROM sessions
+          WHERE session_id IN (${chunk.map(() => '?').join(',')})`).all(...chunk)
+      } catch {
+        // Older or partial network DBs may lack the sessions table/columns.
+        return result
+      }
+      for (const row of rows) {
+        result.sessions.push({
+          sessionId: row.session_id,
+          displayName: isNonEmptyString(row.display_name) ? row.display_name.trim() : null,
+          status: isNonEmptyString(row.status) ? row.status.trim() : null,
+          lastSeen: row.last_seen ?? null,
+        })
+      }
+    }
+    return result
+  } catch {
+    return result
+  } finally {
+    try { opened.db.close() } catch { /* best effort */ }
+  }
+}
+
 const bulletinTask = row => ({
   id: row.id,
   boardId: row.board_id ?? null,
@@ -721,6 +761,348 @@ export function buildDriftReport({ apartment, resolveSession, profileDir, asOf =
       aliases: network.aliases.length,
     },
     networkAvailable: network.available,
+    asOf,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P2 onboarding: read-only binding candidates
+//
+// Candidates are evidence for a human/operator decision, never an automatic
+// binding. The matcher never uses cwd as identity evidence. Confidence levels:
+//   exact      - a route/declared alias equals agent id/name, or displayName
+//                equals the (unique) agent id.
+//   normalized - the same comparison after lowercasing and dropping spaces,
+//                hyphens and underscores.
+//   low        - only the human name (displayName vs agent.name) matches.
+//   ambiguous  - a name-based match while several agents share that name; the
+//                caller must pick an agentId explicitly.
+// ---------------------------------------------------------------------------
+
+export const CANDIDATE_LIMIT = 50
+export const CANDIDATE_CONFIDENCE = Object.freeze({
+  EXACT: 'exact',
+  NORMALIZED: 'normalized',
+  LOW: 'low',
+  AMBIGUOUS: 'ambiguous',
+})
+const CANDIDATE_RANK = Object.freeze({
+  [CANDIDATE_CONFIDENCE.EXACT]: 0,
+  [CANDIDATE_CONFIDENCE.AMBIGUOUS]: 1,
+  [CANDIDATE_CONFIDENCE.NORMALIZED]: 2,
+  [CANDIDATE_CONFIDENCE.LOW]: 3,
+})
+
+const candidateText = value => (isNonEmptyString(value) ? value.trim() : null)
+const normalizeCandidateText = value => {
+  const text = candidateText(value)
+  return text === null ? '' : text.toLowerCase().replace(/[\s\-_]+/g, '')
+}
+const normalizeLiveStatus = value => {
+  const status = candidateText(value)
+  if (status === null) return null
+  const lower = status.toLowerCase()
+  if (lower === 'active' || lower === 'running') return 'live'
+  return lower
+}
+
+/**
+ * Normalize one item from ctx.get('agents').list(). The live DSH agent exposes
+ * `session.header`, while lightweight test/team projections may expose the
+ * same fields on the wrapper; accept all documented shapes without guessing.
+ */
+const candidateSessionEntry = raw => {
+  if (raw === null || typeof raw !== 'object') return null
+  const session = raw.session !== null && typeof raw.session === 'object' ? raw.session : raw
+  const header = raw.header !== null && typeof raw.header === 'object'
+    ? raw.header
+    : (session.header !== null && typeof session.header === 'object' ? session.header : {})
+  const sessionId = candidateText(session.id) ?? candidateText(raw.sessionId) ?? candidateText(raw.id)
+  if (sessionId === null) return null
+  return {
+    sessionId,
+    displayName: candidateText(raw.displayName) ?? candidateText(header.displayName) ?? candidateText(header.name)
+      ?? candidateText(session.displayName) ?? candidateText(session.name) ?? candidateText(raw.name),
+    alias: candidateText(raw.alias) ?? candidateText(header.alias) ?? candidateText(session.alias),
+    cwd: candidateText(header.cwd) ?? candidateText(session.cwd) ?? candidateText(raw.cwd),
+    status: normalizeLiveStatus(raw.status ?? raw.phase ?? raw.liveStatus ?? session.status ?? session.phase),
+  }
+}
+
+const mergeCandidateSession = (current, incoming) => ({
+  sessionId: current.sessionId,
+  displayName: current.displayName ?? incoming.displayName,
+  alias: current.alias ?? incoming.alias,
+  cwd: current.cwd ?? incoming.cwd,
+  status: current.status ?? incoming.status,
+})
+
+const groupAliasesBySession = aliases => {
+  const map = new Map()
+  for (const item of aliases) {
+    const list = map.get(item.sessionId) ?? []
+    list.push(item)
+    map.set(item.sessionId, list)
+  }
+  return map
+}
+
+const primarySessionAlias = aliases => {
+  const active = aliases.find(item => item.status === 'active'
+    && (item.supersededBy === null || item.supersededBy === undefined))
+  const fallback = active ?? aliases.find(item => item.status === 'active') ?? aliases[0]
+  return fallback?.alias ?? null
+}
+
+const candidateAliasEntries = (aliases, headerAlias) => {
+  const entries = []
+  const seen = new Set()
+  for (const item of aliases) {
+    if (item.status !== 'active') continue
+    if (item.supersededBy !== null && item.supersededBy !== undefined) continue
+    const alias = candidateText(item.alias)
+    if (alias === null || seen.has(alias)) continue
+    seen.add(alias)
+    entries.push({
+      value: alias,
+      source: item.routeResolvable === true ? 'network alias' : 'network alias (route unresolved)',
+    })
+  }
+  if (headerAlias !== null && !seen.has(headerAlias)) {
+    entries.push({ value: headerAlias, source: 'header alias' })
+  }
+  return entries
+}
+
+/** Match one unbound agent against one unbound session; null means no match. */
+const matchCandidate = ({ agent, aliases, displayName, headerAlias }) => {
+  const agentId = candidateText(agent.id)
+  if (agentId === null) return null
+  const agentName = candidateText(agent.name)
+  const aliasEntries = candidateAliasEntries(aliases, headerAlias)
+  for (const entry of aliasEntries) {
+    if (entry.value === agentId) {
+      return {
+        confidence: CANDIDATE_CONFIDENCE.EXACT,
+        matchedOn: 'id',
+        reason: `${entry.source} '${entry.value}' exactly matches agent id '${agentId}'`,
+      }
+    }
+    if (agentName !== null && entry.value === agentName) {
+      return {
+        confidence: CANDIDATE_CONFIDENCE.EXACT,
+        matchedOn: 'name',
+        reason: `${entry.source} '${entry.value}' exactly matches agent name '${agentName}'`,
+      }
+    }
+  }
+  if (displayName !== null && displayName === agentId) {
+    return {
+      confidence: CANDIDATE_CONFIDENCE.EXACT,
+      matchedOn: 'id',
+      reason: `session displayName '${displayName}' exactly matches agent id '${agentId}'`,
+    }
+  }
+
+  const normalizedId = normalizeCandidateText(agentId)
+  const normalizedName = normalizeCandidateText(agentName)
+  for (const entry of aliasEntries) {
+    const normalizedAlias = normalizeCandidateText(entry.value)
+    if (normalizedAlias !== '' && normalizedAlias === normalizedId) {
+      return {
+        confidence: CANDIDATE_CONFIDENCE.NORMALIZED,
+        matchedOn: 'id',
+        reason: `${entry.source} '${entry.value}' normalizes to agent id '${agentId}'`,
+      }
+    }
+    if (normalizedAlias !== '' && normalizedName !== '' && normalizedAlias === normalizedName) {
+      return {
+        confidence: CANDIDATE_CONFIDENCE.NORMALIZED,
+        matchedOn: 'name',
+        reason: `${entry.source} '${entry.value}' normalizes to agent name '${agentName}'`,
+      }
+    }
+  }
+  if (displayName !== null) {
+    const normalizedDisplay = normalizeCandidateText(displayName)
+    if (normalizedDisplay !== '' && normalizedDisplay === normalizedId) {
+      return {
+        confidence: CANDIDATE_CONFIDENCE.NORMALIZED,
+        matchedOn: 'id',
+        reason: `session displayName '${displayName}' normalizes to agent id '${agentId}'`,
+      }
+    }
+  }
+  if (displayName !== null && normalizedName !== '' && normalizeCandidateText(displayName) === normalizedName) {
+    return {
+      confidence: CANDIDATE_CONFIDENCE.LOW,
+      matchedOn: 'name',
+      reason: `session displayName '${displayName}' matches agent name '${agentName}' only; displayName is not unique`,
+    }
+  }
+  return null
+}
+
+const applyNameAmbiguity = (match, agent, nameGroups) => {
+  const nameKey = normalizeCandidateText(agent.name)
+  const sameName = nameKey === '' ? [] : (nameGroups.get(nameKey) ?? [])
+  if (match.matchedOn !== 'name' || sameName.length < 2) return match
+  return {
+    confidence: CANDIDATE_CONFIDENCE.AMBIGUOUS,
+    matchedOn: match.matchedOn,
+    reason: match.reason + `; ambiguous: ${sameName.length} agents share name '${agent.name}' (`
+      + sameName.map(item => item.id).join(', ') + '); choose agentId explicitly',
+  }
+}
+
+const candidateSortOrder = (a, b) => {
+  const rank = (CANDIDATE_RANK[a.confidence] ?? 9) - (CANDIDATE_RANK[b.confidence] ?? 9)
+  return rank !== 0 ? rank : String(a.agentId).localeCompare(String(b.agentId))
+}
+
+/**
+ * Read-only onboarding candidates for unbound live sessions and unbound agents.
+ * It never binds a session, never writes session-network aliases/routes, and
+ * never treats cwd as identity evidence. List sizes are capped at 50.
+ */
+export function buildBindingCandidates({
+  apartment,
+  listLiveSessions,
+  profileDir,
+  asOf = nowIso(),
+  limit = CANDIDATE_LIMIT,
+} = {}) {
+  const cap = Number.isFinite(Number(limit))
+    ? Math.max(1, Math.min(CANDIDATE_LIMIT, Math.trunc(Number(limit))))
+    : CANDIDATE_LIMIT
+  const warnings = []
+  const bindingRows = apartment.listAgentSessions()
+  const agents = apartment.listAgents()
+  const boundSessionIds = new Set(bindingRows.map(row => row.session_id))
+  const boundAgentIds = new Set(bindingRows.map(row => row.agent_id))
+
+  let rawSessions = []
+  try {
+    const listed = typeof listLiveSessions === 'function' ? listLiveSessions() : []
+    rawSessions = Array.isArray(listed) ? listed : []
+  } catch (error) {
+    warnings.push({ code: 'LIVE_SESSIONS_UNAVAILABLE', reason: String(error?.message ?? error) })
+  }
+
+  const liveSessionMap = new Map()
+  for (const raw of rawSessions) {
+    const entry = candidateSessionEntry(raw)
+    if (entry === null) continue
+    const current = liveSessionMap.get(entry.sessionId)
+    liveSessionMap.set(entry.sessionId, current === undefined ? entry : mergeCandidateSession(current, entry))
+  }
+  const liveSessions = [...liveSessionMap.values()]
+  const unboundSessions = liveSessions
+    .filter(entry => !boundSessionIds.has(entry.sessionId))
+    .sort((a, b) => String(a.displayName ?? a.sessionId).localeCompare(String(b.displayName ?? b.sessionId))
+      || a.sessionId.localeCompare(b.sessionId))
+
+  const unboundAgentRows = agents
+    .filter(agent => !boundAgentIds.has(agent.id))
+    .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''))
+      || String(a.id).localeCompare(String(b.id)))
+
+  const sessionPage = unboundSessions.slice(0, cap)
+  const agentPage = unboundAgentRows.slice(0, cap)
+  const sessionIds = sessionPage.map(entry => entry.sessionId)
+  const network = readNetworkAliases({ sessionIds, profileDir })
+  const networkSessions = readNetworkSessions({ sessionIds, profileDir })
+  warnings.push(...network.warnings)
+  const networkSessionById = new Map(networkSessions.sessions.map(row => [row.sessionId, row]))
+  const aliasesBySession = groupAliasesBySession(network.aliases)
+
+  const nameGroups = new Map()
+  for (const agent of agents) {
+    const key = normalizeCandidateText(agent.name)
+    if (key === '') continue
+    const list = nameGroups.get(key) ?? []
+    list.push(agent)
+    nameGroups.set(key, list)
+  }
+
+  const agentCandidates = new Map(agentPage.map(agent => [agent.id, []]))
+  const sessions = []
+  let candidateCount = 0
+  let ambiguousCount = 0
+  let sessionsWithCandidates = 0
+
+  for (const session of sessionPage) {
+    const aliases = aliasesBySession.get(session.sessionId) ?? []
+    const networkSession = networkSessionById.get(session.sessionId)
+    const displayName = session.displayName ?? networkSession?.displayName ?? null
+    const headerAlias = session.alias
+    const alias = primarySessionAlias(aliases) ?? headerAlias ?? null
+    const status = session.status ?? normalizeLiveStatus(networkSession?.status) ?? 'live'
+    const candidates = []
+    for (const agent of agentPage) {
+      const match = matchCandidate({ agent, aliases, displayName, headerAlias })
+      if (match === null) continue
+      const resolved = applyNameAmbiguity(match, agent, nameGroups)
+      const candidate = {
+        agentId: agent.id,
+        agentName: agent.name,
+        confidence: resolved.confidence,
+        reason: resolved.reason,
+      }
+      candidates.push(candidate)
+      candidateCount += 1
+      if (candidate.confidence === CANDIDATE_CONFIDENCE.AMBIGUOUS) ambiguousCount += 1
+      agentCandidates.get(agent.id).push({
+        sessionId: session.sessionId,
+        displayName,
+        confidence: candidate.confidence,
+        reason: candidate.reason,
+      })
+    }
+    candidates.sort(candidateSortOrder)
+    if (candidates.length > 0) sessionsWithCandidates += 1
+    sessions.push({
+      sessionId: session.sessionId,
+      displayName,
+      alias,
+      cwd: session.cwd,
+      status,
+      candidates,
+    })
+  }
+
+  const unboundAgents = agentPage.map(agent => ({
+    agentId: agent.id,
+    agentName: agent.name,
+    status: agent.status ?? null,
+    candidates: (agentCandidates.get(agent.id) ?? []).sort((a, b) => {
+      const rank = (CANDIDATE_RANK[a.confidence] ?? 9) - (CANDIDATE_RANK[b.confidence] ?? 9)
+      return rank !== 0 ? rank : String(a.sessionId).localeCompare(String(b.sessionId))
+    }),
+  }))
+
+  return {
+    ok: true,
+    sessions,
+    unboundAgents,
+    counts: {
+      agents: agents.length,
+      bindings: bindingRows.length,
+      boundSessions: boundSessionIds.size,
+      boundAgents: boundAgentIds.size,
+      liveSessions: liveSessions.length,
+      unboundSessions: unboundSessions.length,
+      sessionsReturned: sessions.length,
+      unboundAgents: unboundAgentRows.length,
+      unboundAgentsReturned: unboundAgents.length,
+      sessionsWithCandidates,
+      candidates: candidateCount,
+      ambiguous: ambiguousCount,
+      networkAvailable: network.available,
+      truncated: unboundSessions.length > cap || unboundAgentRows.length > cap,
+      limit: cap,
+    },
+    warnings,
     asOf,
   }
 }

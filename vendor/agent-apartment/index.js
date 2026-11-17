@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApartment, getActiveRoot, setActiveRoot } from './src/store.js'
-import { buildBindingList, buildCollaborationBrief, buildDriftReport, COLLAB_ERROR_CODES, lookupBulletinTask } from './src/collab.js'
+import { buildBindingCandidates, buildBindingList, buildCollaborationBrief, buildDriftReport, COLLAB_ERROR_CODES, lookupBulletinTask } from './src/collab.js'
 import { createCollabInjector } from './src/inject.js'
 import { boolean, number, objectSchema, string } from './lib/standard-schema.js'
 
@@ -129,6 +129,15 @@ export function apply(ctx, config) {
     } catch {
       return undefined
     }
+  }
+  // Read-only source for onboarding candidates. ctx.agents.list() is the live
+  // registry; a missing service is an empty list, never a write. A throwing
+  // registry is surfaced by buildBindingCandidates as a warning.
+  const listLiveSessions = () => {
+    const agents = ctx.get?.('agents')
+    if (agents === null || agents === undefined || typeof agents.list !== 'function') return []
+    const listed = agents.list()
+    return Array.isArray(listed) ? listed : []
   }
   const optionalText = value => typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
   const assertAgentExists = agentId => {
@@ -290,6 +299,11 @@ export function apply(ctx, config) {
   register(desc('apartment_binding_list', 'Read-only: list agent/session bindings with session-network aliases and routeResolvable.', {
     agentId: str('Optional agent id filter.'),
   }), async args => buildBindingList({ apartment, agentId: optionalText(args?.agentId), profileDir }))
+  register(desc('apartment_binding_candidates', 'Read-only: list unbound live/idle sessions and unbound agents with candidate matches (exact/normalized/name-only/ambiguous); never binds, writes aliases or routes.', {}), async () => buildBindingCandidates({
+    apartment,
+    listLiveSessions,
+    profileDir,
+  }))
   register(desc('apartment_bind_drift_check', 'Read-only: compare bindings with agents, live sessions and network aliases; reports issues, never fixes.'), async () => buildDriftReport({
     apartment,
     resolveSession: resolveLiveSession,
