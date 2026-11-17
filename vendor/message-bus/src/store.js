@@ -457,25 +457,28 @@ export function openMessageStore(dbPath, options = {}) {
     return { messages: ids.length, all: false, before }
   }
 
-  /** Row counts for the read-only status tool (single cheap query batch). */
-  const counts = () => {
-    const one = (sql) => {
-      const row = db.prepare(sql).get()
-      return row === undefined || row === null ? 0 : Number(Object.values(row)[0])
-    }
-    // Q2-A pending inventory: stored messages whose latest delivery is neither
-    // delivered nor a suppressed duplicate. Read-only; no state rewriting.
+  /**
+   * Q2-A pending inventory: stored messages whose latest delivery is neither
+   * delivered nor a suppressed duplicate. Read-only; no state rewriting.
+   * A non-empty `toSession` scopes the summary to one target (P0-1); the
+   * unscoped call is exactly the status tool's `counts().pending`.
+   * @param {string | null} [toSession] - optional target session id.
+   * @returns {{total: number, queued: number, undeliverable: number, expired: number, oldestAt: string | null, byReason: Record<string, number>}}
+   */
+  const pendingSummary = (toSession = null) => {
     const pending = { total: 0, queued: 0, undeliverable: 0, expired: 0, oldestAt: null, byReason: {} }
     try {
       // Read the Q2-A columns only when they exist; a degraded (legacy) schema
       // classifies rows from error/delivered/suppressed instead of failing.
       const stateColumn = deliveryColumns.has('delivery_state') ? 'd.delivery_state' : 'NULL AS delivery_state'
       const reasonColumn = deliveryColumns.has('reason_code') ? 'd.reason_code' : 'NULL AS reason_code'
+      const scoped = typeof toSession === 'string' && toSession.length > 0
       const rows = db.prepare(`SELECT d.id, d.at, d.delivered, d.suppressed, ${stateColumn}, ${reasonColumn},
         d.error FROM deliveries d
         WHERE d.delivered = 0 AND d.suppressed = 0 AND d.message_id IS NOT NULL
+          ${scoped ? 'AND d.to_session = ?' : ''}
           AND d.id = (SELECT MAX(d2.id) FROM deliveries d2 WHERE d2.message_id = d.message_id)`
-      ).all()
+      ).all(...(scoped ? [toSession] : []))
       for (const row of rows) {
         const state = deriveDeliveryState(row)
         const reason = deriveReasonCode(row)
@@ -487,6 +490,15 @@ export function openMessageStore(dbPath, options = {}) {
         if (reason !== null) pending.byReason[reason] = (pending.byReason[reason] ?? 0) + 1
       }
     } catch { /* best effort: status must never fail because of the pending view */ }
+    return pending
+  }
+
+  /** Row counts for the read-only status tool (single cheap query batch). */
+  const counts = () => {
+    const one = (sql) => {
+      const row = db.prepare(sql).get()
+      return row === undefined || row === null ? 0 : Number(Object.values(row)[0])
+    }
     return {
       messages: one('SELECT COUNT(*) AS n FROM messages'),
       deliveries: one('SELECT COUNT(*) AS n FROM deliveries'),
@@ -494,7 +506,7 @@ export function openMessageStore(dbPath, options = {}) {
       undeliveredDeliveries: one('SELECT COUNT(*) AS n FROM deliveries WHERE delivered = 0 AND suppressed = 0 AND message_id IS NOT NULL'),
       readState: one('SELECT COUNT(*) AS n FROM read_state'),
       routes: one('SELECT COUNT(*) AS n FROM routes'),
-      pending,
+      pending: pendingSummary(),
     }
   }
 
@@ -553,7 +565,7 @@ export function openMessageStore(dbPath, options = {}) {
     insertMessage, insertDelivery, findDuplicate, getMessage, listMessages, countMessages,
     deleteMessage, listSuppressed, countSuppressed, latestDeliveries,
     pendingDeliveries, markDeliveryDelivered, deliveryView,
-    markRead, getReadAt, upsertRoute, resolveRoute, listRoutes, counts, purge,
+    markRead, getReadAt, upsertRoute, resolveRoute, listRoutes, counts, pendingSummary, purge,
     envelopeState, markEnvelopeDelivered, markEnvelopeConsumed, envelopeCounts,
     databaseFacts, checkpoint,
     close: () => { try { db.close() } catch { /* already closed */ } },

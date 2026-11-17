@@ -3,6 +3,14 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, 
 import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import {
+  MEETING_DIGEST_DEFAULT_LIMIT,
+  MEETING_DIGEST_MAX_LIMIT,
+  buildMeetingDigest,
+  emptyMeetingDigest,
+  parseDigestNow,
+  validateMeetingDeadline,
+} from './meeting-digest.js'
 
 export const AGENTS_AUTO_MARKER = '<!-- session-network:auto:v1 -->'
 export const AGENTS_MANAGED_MARKER = '<!-- session-network:managed:v1 -->'
@@ -1015,7 +1023,7 @@ export function registerTools(ctx, deps) {
       convenerSession: store?.convenerSession ?? null,
       createdAt: toIsoTime(row?.created_at) ?? store?.createdAt ?? null,
       updatedAt: toIsoTime(row?.updated_at) ?? store?.updatedAt ?? null,
-      deadline: toIsoTime(row?.deadline) ?? null,
+      deadline: toIsoTime(row?.deadline ?? store?.deadline) ?? null,
       dirPath: row?.dir_path ?? store?.dirPath ?? null,
       participantCount: participantList.length,
       messageCount: messageList.length,
@@ -1154,7 +1162,7 @@ export function registerTools(ctx, deps) {
     description:
       'Read-only snapshot of the local cross-session network: available sessions, aliases/roles, availability and contact route. '
       + 'Never returns cwd, titles, task text or message bodies. Capability index: skill("team-bootstrap") §2 / '
-      + '.',
+      + 'capability audit.',
     parameters: baseParams({
       section: {
         type: 'string',
@@ -1328,7 +1336,7 @@ export function registerTools(ctx, deps) {
       + 'Only the caller session may register/rename itself; wildcards are rejected; no PEERS.json/ACL/workspace writes. '
       + 'Rename limit is 2 per session (the 3rd rename is rejected); old aliases stay resolvable as legacy. '
       + 'Human confirmation required: preview with dryRun and confirm before changing routing; see '
-      + 'operator-only boundaries.',
+      + 'release notes.',
     parameters: baseParams({
       alias: { type: 'string', description: 'Optional proposed alias (lowercase kebab, <=16 chars); omit to auto-derive.' },
       sessionId: { type: 'string', description: 'Optional target session id (defaults to the calling session).' },
@@ -1374,6 +1382,7 @@ export function registerTools(ctx, deps) {
     body: { type: 'string', description: 'meeting_open: R1 body; meeting_post: position/minutes; meeting_finalize: decisions/actions (JSON or Markdown).' },
     dedupeKey: { type: 'string', description: 'Idempotency key; a duplicate returns the existing meeting/message.' },
     round: { type: 'string', description: 'R1 | R2 | R3 | notes. meeting_post defaults to notes; meeting_collect may filter by it.' },
+    deadline: { type: 'string', description: 'meeting_open only: optional ISO date/time deadline, e.g. 2026-11-18T12:00:00+08:00 (invalid values are rejected).' },
   })
 
   ctx.tools.register({
@@ -1385,6 +1394,8 @@ export function registerTools(ctx, deps) {
     output: jsonOut,
     async execute(args = {}, exec = {}) {
       if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
+      const deadlineInput = validateMeetingDeadline(args.deadline)
+      if (!deadlineInput.ok) return meetingInvalid(deadlineInput.message, deadlineInput.code)
       const meetingId = firstString(args.meetingId) ?? generateMeetingId()
       const dedupeKey = firstString(args.dedupeKey) ?? null
       if (dedupeKey !== null) {
@@ -1480,7 +1491,7 @@ export function registerTools(ctx, deps) {
         at: atIso,
       }
       const created = withWriteDb(() => {
-        modules.db.createMeeting({ meetingId, title, convener, dirPath, at: atMs })
+        modules.db.createMeeting({ meetingId, title, convener, dirPath, deadline: deadlineInput.deadline?.ms ?? null, at: atMs })
         for (const participant of participants) {
           modules.db.addMeetingParticipant({
             meetingId,
@@ -1519,6 +1530,7 @@ export function registerTools(ctx, deps) {
         convenerSession,
         dedupeKey,
         dirPath,
+        deadline: deadlineInput.deadline?.iso ?? null,
         createdAt: atIso,
         updatedAt: atIso,
         status: 'open',
@@ -1764,6 +1776,39 @@ export function registerTools(ctx, deps) {
   })
 
   ctx.tools.register({
+    name: 'meeting_digest',
+    description:
+      'Read-only meeting recall digest. Lists active (open/R1/R2) meetings whose deadline is expired or due within '
+      + '24h, plus any non-cancelled meeting with pending actions (actions produced by meeting_finalize stay '
+      + 'recallable until closed). Supports limit/now; never writes. Returns counts + meetings.',
+    parameters: baseParams({
+      limit: { type: 'number', description: `Max meetings to return (1-${MEETING_DIGEST_MAX_LIMIT}, default ${MEETING_DIGEST_DEFAULT_LIMIT}).` },
+      now: { type: 'string', description: 'Optional ISO date/time or epoch milliseconds used to evaluate deadlines (default: now).' },
+    }),
+    output: jsonOut,
+    async execute(args = {}) {
+      const nowMs = parseDigestNow(args.now)
+      if (nowMs === null) {
+        return meetingInvalid('now must be an ISO date/time or epoch milliseconds', 'MEETING_INVALID_NOW')
+      }
+      const rawLimit = Number(args.limit)
+      const limit = Number.isFinite(rawLimit)
+        ? Math.min(MEETING_DIGEST_MAX_LIMIT, Math.max(1, Math.trunc(rawLimit)))
+        : MEETING_DIGEST_DEFAULT_LIMIT
+      // Read-only: no audit write, no DB creation. A missing registry means an
+      // empty digest, not an error (the "no meetings" negative case).
+      const read = withReadDb(() => buildMeetingDigest({ db: modules.db, dataDir, now: nowMs, limit }))
+      if (!read.ok) {
+        if (read.error?.code === 'NO_DB' || read.error?.code === 'DB_NOT_FOUND' || read.error?.code === 'DB_NOT_BOUND') {
+          return emptyMeetingDigest(nowMs, { limit })
+        }
+        return meetingError(read.error)
+      }
+      return read.value
+    },
+  })
+
+  ctx.tools.register({
     name: 'meeting_finalize',
     description:
       'Finalize a meeting (status finalized) and record decisions/actions parsed from body (JSON or Markdown) '
@@ -1888,7 +1933,7 @@ export function registerTools(ctx, deps) {
     description:
       'Initialize the workspace-root AGENTS.md once. X4 order: auto-create a minimal file first, then the model may ask '
       + 'the user (non-blocking, <=30s) and call again with purpose to upgrade the auto template. Existing files are never overwritten. '
-      + 'Human confirmation required before the first write (team-bootstrap §2 / operator-only boundaries).',
+      + 'Human confirmation required before the first write (team-bootstrap §2 / release notes).',
     parameters: baseParams({
       purpose: { type: 'string', description: 'One-line purpose answered by the user; upgrades an auto template.' },
       skip: { type: 'boolean', description: 'Skip asking and remember the skip for this project root.' },

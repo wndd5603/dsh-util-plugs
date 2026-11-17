@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, resolve } from 'node:path'
 import { resolveDataDir, readConfig } from './src/config.js'
 import { readLiveAgents, registerTools } from './src/tools.js'
+import { buildMeetingDigest } from './src/meeting-digest.js'
 import { boolean, number, string, defaultsOf, objectSchema } from '../lib/standard-schema.js'
 
 const PLUGIN_VERSION = (() => {
@@ -331,6 +332,17 @@ export async function apply(ctx, config = {}) {
             modules.db.useDb?.(injectorDb)
             modules.db.upsertHeartbeat({ sessionId, at })
           } catch { /* heartbeat is advisory; fail-open */ }
+        },
+        // P0-2: read-only digest for convener/participant sessions only. The
+        // injector throttles it (default 1h) and treats failures as fail-open.
+        getMeetingDigest: ({ sessionId, alias, now, limit }) => {
+          try {
+            if (injectorDb === null || dataDir === null || typeof modules.db?.listMeetings !== 'function') return undefined
+            modules.db.useDb?.(injectorDb)
+            return buildMeetingDigest({ db: modules.db, dataDir, now, limit, sessionId, alias, mineOnly: true })
+          } catch {
+            return undefined
+          }
         },
         audit,
         logger: ctx.logger,

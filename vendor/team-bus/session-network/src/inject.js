@@ -29,6 +29,8 @@ import { createHash, randomUUID } from 'node:crypto'
 export const INJECTOR_NAME = 'session-network'
 export const BRIEF_SOURCE_KIND = 'session-network-brief'
 export const BRIEF_TEMPLATE_VERSION = 1
+export const MEETING_DIGEST_SOURCE_KIND = 'session-network-meeting-digest'
+export const MEETING_DIGEST_INTERVAL_MINUTES = 60
 export const MAX_POINTER_LINES = 2
 /** Conservative character bound for the DESIGN ≤120-token pointer budget. */
 export const MAX_POINTER_CHARS = 240
@@ -40,6 +42,14 @@ const POINTER_LINE_2 = '查询：`network_info()`；初始化：`skill team-boot
 /** True when `value` is a plain non-array object. */
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** First non-empty trimmed string among the candidates. */
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return undefined
 }
 
 /** Recursively freeze a value so the injected message cannot be mutated later. */
@@ -111,6 +121,25 @@ export function createBriefMessage({ text, version = BRIEF_TEMPLATE_VERSION, rea
 /** True when a message is this plugin's durable brief marker. */
 export function isBriefMessage(message) {
   return isPlainObject(message) && isPlainObject(message.source) && message.source.kind === BRIEF_SOURCE_KIND
+}
+
+/**
+ * Build the one-line recurring meeting reminder message. Kept separate from the
+ * first-turn brief so a host/test can distinguish the two durable markers.
+ */
+export function createMeetingDigestMessage({ text }) {
+  const line = normalizePointerText(text)
+  return deepFreeze({
+    id: randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text: line }],
+    source: { kind: MEETING_DIGEST_SOURCE_KIND, version: 1 },
+  })
+}
+
+/** True when a message is the recurring meeting-digest reminder. */
+export function isMeetingDigestMessage(message) {
+  return isPlainObject(message) && isPlainObject(message.source) && message.source.kind === MEETING_DIGEST_SOURCE_KIND
 }
 
 /** True when the first handler argument looks like an `agent/pre-step` payload. */
@@ -519,7 +548,7 @@ export function createInjector(deps = {}) {
    * already-resolved decision, or `{ decision, agent }`. Never throws because of
    * injection; failures after `next()` return the downstream decision untouched.
    */
-  async function handler(first, next, context) {
+  async function runBriefPreStep(first, next, context) {
     let decision
     let agent
     let claimedMessages = []
@@ -705,6 +734,116 @@ export function createInjector(deps = {}) {
         emitAudit({ action: 'error', reason: 'inject-failed', error: errorText(error) })
       } catch { /* audit is best-effort */ }
       warn('session-network injector: fail-open after injection error', error)
+      return decision
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // P0-2 · meeting deadline/actions recall (opt-in via getMeetingDigest)
+  //
+  // This rides the same agent/pre-step hook as the first-turn brief but is
+  // deliberately separate: the brief is once per session, while a pending
+  // meeting/action reminder must be able to appear later. Throttle is per
+  // session (default one hour), the runtime autoInject switch and
+  // config.meeting.digestInject.enabled both disable it, and every failure is
+  // fail-open (the downstream decision is returned untouched).
+  // -------------------------------------------------------------------------
+  const digestInjectedAt = new Map()
+
+  function resolveDigestIntervalMs(config) {
+    const value = Number(config?.meeting?.digestInject?.intervalMinutes)
+    const minutes = Number.isFinite(value) && value > 0
+      ? Math.min(24 * 60, Math.max(1, value))
+      : MEETING_DIGEST_INTERVAL_MINUTES
+    return minutes * 60_000
+  }
+
+  /** One line: counts only (never titles/bodies/owners). */
+  function digestReminderText(digest) {
+    const pending = Number(digest?.counts?.pendingActions) || 0
+    const overdue = Number(digest?.counts?.deadlineExpired) || 0
+    const soon = Number(digest?.counts?.deadlineSoon) || 0
+    const total = overdue + soon
+    const suffix = total > 0 ? `; ${total} meeting(s) overdue/due soon` : ''
+    return normalizePointerText(`meeting digest pending ${pending} action(s)${suffix}. Call meeting_digest().`)
+  }
+
+  async function maybeInjectMeetingDigest(first, decision, context) {
+    if (decision === undefined || decision === null) return decision
+    // Only known pre-step shapes may be extended; an unknown argument must stay
+    // untouched (fail-open) instead of being spread into a new object.
+    if (!isPreStepPayload(first) && !isPreStepDecision(first) && !isDecisionWrapper(first)) return decision
+    if (!isPlainObject(decision)) return decision
+    if (decision.kind === 'reject') return decision
+    if (typeof safeDeps.getMeetingDigest !== 'function') return decision
+
+    let agent
+    if (isPreStepPayload(first)) agent = first.agent
+    else if (isDecisionWrapper(first) && isPlainObject(first.agent)) agent = first.agent
+    else if (isPlainObject(context) && isPlainObject(context.agent)) agent = context.agent
+    else if (typeof safeDeps.getAgent === 'function') agent = safeDeps.getAgent()
+    if (!isPlainObject(agent)) return decision
+
+    let config
+    try {
+      config = typeof safeDeps.getConfig === 'function' ? safeDeps.getConfig() : undefined
+    } catch { config = undefined }
+    if (config?.autoInject?.enabled === false) return decision
+    if (config?.meeting?.digestInject?.enabled === false) return decision
+
+    const switchState = await resolveSwitch()
+    if (!switchState.enabled) return decision
+
+    const session = resolveSession(safeDeps, agent)
+    const sessionId = resolveSessionId(agent, session)
+    if (sessionId === undefined) return decision
+    const sessionKind = await resolveSessionKind(agent, session, sessionId)
+    if (sessionKind === 'subagent') return decision
+
+    const nowMs = Date.parse(isoNow(safeDeps.now))
+    const intervalMs = resolveDigestIntervalMs(config)
+    const last = digestInjectedAt.get(sessionId) ?? 0
+    if (Number.isFinite(nowMs) && nowMs - last < intervalMs) return decision
+
+    const header = isPlainObject(session?.header) ? session.header : {}
+    const alias = firstString(
+      agent?.alias, agent?.info?.alias, header?.alias,
+      agent?.displayName, agent?.info?.displayName, header?.displayName,
+    )
+    const digest = await safeDeps.getMeetingDigest({ sessionId, alias: alias ?? null, now: nowMs, limit: 5 })
+    if (!isPlainObject(digest) || digest.ok !== true || Number(digest?.counts?.matched) <= 0) return decision
+
+    const text = digestReminderText(digest)
+    if (text === '') return decision
+    const message = createMeetingDigestMessage({ text })
+    const downstreamMessages = Array.isArray(decision.messages) ? decision.messages : []
+    // Keep the once-per-session brief (when present) first, then the reminder.
+    const insertAt = downstreamMessages.length > 0 && isBriefMessage(downstreamMessages[0]) ? 1 : 0
+    const messages = [
+      ...downstreamMessages.slice(0, insertAt),
+      message,
+      ...downstreamMessages.slice(insertAt),
+    ]
+    if (Number.isFinite(nowMs)) digestInjectedAt.set(sessionId, nowMs)
+    emitAudit({
+      action: 'injected',
+      reason: 'meeting-digest',
+      sessionId,
+      intervalMinutes: Math.round(intervalMs / 60_000),
+      digestMatched: Number(digest.counts.matched) || 0,
+      digestExpired: Number(digest.counts.deadlineExpired) || 0,
+      digestDueSoon: Number(digest.counts.deadlineSoon) || 0,
+      pendingActions: Number(digest.counts.pendingActions) || 0,
+    })
+    return { ...decision, messages }
+  }
+
+  async function handler(first, next, context) {
+    const decision = await runBriefPreStep(first, next, context)
+    try {
+      return await maybeInjectMeetingDigest(first, decision, context)
+    } catch (error) {
+      warn('session-network injector: meeting digest failed (fail-open)', error)
       return decision
     }
   }

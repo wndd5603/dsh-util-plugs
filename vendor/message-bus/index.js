@@ -118,6 +118,15 @@ export const Config = objectSchema({
     description: 'Delete messages older than N days on load and once per day. 0 = keep forever (manual purge only).',
     int: true, min: 0,
   }),
+  pendingReminder: nested(objectSchema({
+    enabled: boolean(true, {
+      description: 'P0-1: inject a read-only pending-message summary at agent/pre-step. false = never inject.',
+    }),
+    intervalMinutes: number(15, {
+      description: 'Per-session minimum minutes between pending-message summaries. 0 = disabled.',
+      int: true, min: 0,
+    }),
+  }), { description: 'Throttled read-only pending-message recall injected at agent/pre-step (never sends messages).' }),
   queueMaxOffset: number(100000, {
     description: 'Maximum message_queue offset (default 100000; CR1/F2). A request above it returns offsetClamped=true and an empty page instead of repeating a page. Raise it for larger audit windows.',
     int: true, min: 1,
@@ -148,6 +157,141 @@ const sha256 = (text) => createHash('sha256').update(String(text), 'utf8').diges
 const truncate = (value, max) => {
   const text = String(value ?? '')
   return text.length <= max ? text : text.slice(0, Math.max(0, max - 1)) + '…'
+}
+
+/* ------------------------------------------------- P0-1 pending recall */
+// A dedicated source marker keeps this reminder distinguishable and prevents
+// double injection when the same batch already carries one. team-hooks2 uses
+// agent/turn-stopping + agent.inject(), so the two never share a listener.
+const PENDING_REMINDER_KIND = 'message-bus-pending-reminder'
+const PENDING_REMINDER_VERSION = 1
+
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/** One sourced user message for the throttled pending summary. */
+function createPendingReminderMessage(text) {
+  return Object.freeze({
+    id: crypto.randomUUID(),
+    role: 'user',
+    content: Object.freeze([{ type: 'text', text }]),
+    source: Object.freeze({ kind: PENDING_REMINDER_KIND, version: PENDING_REMINDER_VERSION }),
+  })
+}
+
+/** True when one message is this plugin's dedicated pending-reminder marker. */
+export function isPendingReminderMessage(message) {
+  return isPlainObject(message) && isPlainObject(message.source) && message.source.kind === PENDING_REMINDER_KIND
+}
+
+/** Short human age for the oldest pending delivery; never throws. */
+function formatPendingAge(oldestAt, nowMs) {
+  const at = Date.parse(String(oldestAt ?? ''))
+  if (!Number.isFinite(at)) return 'unknown age'
+  const minutes = Math.max(0, Math.floor((nowMs - at) / 60000))
+  if (minutes < 60) return minutes + 'm'
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return hours + 'h'
+  return Math.floor(hours / 24) + 'd'
+}
+
+/** <=2-line summary: count + oldest age + the two read-only tools to use. */
+function pendingReminderText(pending, nowMs) {
+  const parts = []
+  if (Number(pending?.queued) > 0) parts.push(Number(pending.queued) + ' queued')
+  if (Number(pending?.undeliverable) > 0) parts.push(Number(pending.undeliverable) + ' undeliverable')
+  const detail = parts.length > 0 ? ' (' + parts.join(', ') + ')' : ''
+  const age = pending?.oldestAt ? '; oldest ' + formatPendingAge(pending.oldestAt, nowMs) + ' ago' : ''
+  const line1 = '[message-bus] ' + Number(pending.total) + ' message(s) pending for this session'
+    + detail + age + '. Inspect with message_queue({undeliveredOnly:true}); read with message_read({messageId}).'
+  const reasons = Object.entries(pending?.byReason ?? {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 3)
+  if (reasons.length === 0) return line1
+  const line2 = '[message-bus] pending reasons: '
+    + reasons.map(([reason, count]) => reason + '×' + Number(count)).join(', ') + '.'
+  return line1 + '\n' + line2
+}
+
+/**
+ * Build the `agent/pre-step` listener and its per-session throttle state.
+ *
+ * The listener always delegates first (downstream failures stay theirs), then
+ * appends at most one <=2-line sourced message when the session has pending
+ * deliveries and its interval has elapsed. All reads are counts/oldestAt only:
+ * no message is sent, no delivery TTL or DB row is changed. Failures are
+ * logged and swallowed (fail-open). State is a process-local Map cleared by
+ * `dispose()`; a restart may therefore re-send one reminder, which is allowed.
+ *
+ * @param {{
+ *   getConfig: () => {enabled?: boolean, intervalMinutes?: number},
+ *   pendingSummary: (sessionId: string) => object,
+ *   now?: () => number,
+ *   logger?: {info?: Function, warn?: Function},
+ * }} options
+ */
+export function createPendingReminderHandler(options) {
+  const getConfig = typeof options?.getConfig === 'function' ? options.getConfig : () => ({})
+  const pendingSummary = typeof options?.pendingSummary === 'function'
+    ? options.pendingSummary : () => ({ total: 0, oldestAt: null, byReason: {} })
+  const now = typeof options?.now === 'function' ? options.now : Date.now
+  const logger = options?.logger
+  /** sessionId -> last injection time (ms). Process-local by design. */
+  const lastInjectionAt = new Map()
+
+  async function handler(first, next) {
+    // Run the downstream waterfall first; a downstream throw is not ours.
+    const decision = typeof next === 'function' ? await next() : first
+    try {
+      const config = getConfig() ?? {}
+      if (config.enabled === false) return decision
+      const rawMinutes = Number(config.intervalMinutes)
+      const intervalMinutes = Number.isFinite(rawMinutes) ? Math.max(0, rawMinutes) : 15
+      const intervalMs = intervalMinutes * 60 * 1000
+      if (!(intervalMs > 0)) return decision
+      if (!isPlainObject(first) || !isPlainObject(first.agent) || !Array.isArray(first.messages)) return decision
+      if (isPlainObject(decision) && decision.kind === 'reject') return decision
+      const sessionId = first.agent.session?.id
+      if (typeof sessionId !== 'string' || sessionId === '') return decision
+      const downstreamMessages = Array.isArray(decision?.messages) ? decision.messages : []
+      const at = Number(now())
+      if (!Number.isFinite(at)) return decision
+      // Dedicated marker: a batch that already carries the reminder is never
+      // injected twice, and it counts as the session's latest reminder.
+      if (first.messages.some(isPendingReminderMessage) || downstreamMessages.some(isPendingReminderMessage)) {
+        lastInjectionAt.set(sessionId, at)
+        return decision
+      }
+      const last = lastInjectionAt.get(sessionId)
+      if (typeof last === 'number' && at - last < intervalMs) return decision
+      const pending = pendingSummary(sessionId)
+      if (!isPlainObject(pending) || !(Number(pending.total) > 0)) return decision
+      const text = pendingReminderText(pending, at)
+      if (text === '') return decision
+      const reminder = createPendingReminderMessage(text)
+      lastInjectionAt.set(sessionId, at)
+      try {
+        logger?.info?.('[message-bus] pending reminder injected session=' + sessionId
+          + ' pending=' + Number(pending.total) + ' oldestAt=' + String(pending.oldestAt ?? 'null'))
+      } catch { /* logging is best-effort */ }
+      return {
+        ...(isPlainObject(decision) ? decision : {}),
+        messages: [...downstreamMessages, reminder],
+      }
+    } catch (error) {
+      try {
+        logger?.warn?.('[message-bus] pending reminder failed (fail-open): ' + String(error))
+      } catch { /* logging is best-effort */ }
+      return decision
+    }
+  }
+
+  return {
+    handler,
+    dispose() { lastInjectionAt.clear() },
+    /** Test/inspection hook only: sessionId -> last injection time. */
+    lastInjectionAt,
+  }
 }
 
 /** True for replies/ACK/FINAL/approval/urgent — these must never be coalesced. */
@@ -911,6 +1055,9 @@ function normalizeConfig(config) {
     : rawDbPath.startsWith('~/') ? join(homedir(), rawDbPath.slice(2)) : resolve(rawDbPath)
   const num = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback)
   const deliveryDefaults = defaultsOf(Config).delivery
+  const pendingReminderDefaults = defaultsOf(Config).pendingReminder
+  const pendingReminder = merged.pendingReminder !== null && typeof merged.pendingReminder === 'object'
+    ? merged.pendingReminder : {}
   const webUi = merged.webUi !== null && typeof merged.webUi === 'object' ? merged.webUi : {}
   return {
     enabled: merged.enabled !== false,
@@ -942,6 +1089,10 @@ function normalizeConfig(config) {
     allowRouteRegister: merged.allowRouteRegister === true,
     allowPurge: merged.allowPurge !== false,
     retentionDays: Math.max(0, Math.trunc(num(merged.retentionDays, 0))),
+    pendingReminder: {
+      enabled: pendingReminder.enabled !== false,
+      intervalMinutes: Math.max(0, Math.trunc(num(pendingReminder.intervalMinutes, pendingReminderDefaults.intervalMinutes))),
+    },
     queueMaxOffset: Math.max(1, Math.trunc(num(merged.queueMaxOffset, 100000))),
     webUi: {
       enabled: webUi.enabled !== false,
@@ -1391,6 +1542,31 @@ export function apply(ctx, config) {
     if (typeof ctx.effect === 'function') ctx.effect(() => () => clearTimeout(initialFlush))
   } catch { /* best effort */ }
 
+  // ---- P0-1: throttled pending-message recall at agent/pre-step -----------
+  // Read-only: only counts/oldestAt, never a send and never a delivery/TTL
+  // write. The listener delegates first and uses a dedicated source marker.
+  let pendingReminderHandler = null
+  if (cfg.pendingReminder.enabled && cfg.pendingReminder.intervalMinutes > 0) {
+    pendingReminderHandler = createPendingReminderHandler({
+      getConfig: () => cfg.pendingReminder,
+      pendingSummary: (sessionId) => store.pendingSummary(sessionId),
+      logger,
+    })
+    if (typeof ctx.on === 'function') {
+      try {
+        ctx.on('agent/pre-step', pendingReminderHandler.handler)
+        logger.info('[message-bus] pending reminder enabled intervalMinutes=' + cfg.pendingReminder.intervalMinutes)
+      } catch (error) {
+        pendingReminderHandler.dispose()
+        pendingReminderHandler = null
+        logger.warn('[message-bus] pending reminder listener unavailable: ' + String(error))
+      }
+    } else {
+      pendingReminderHandler.dispose()
+      pendingReminderHandler = null
+    }
+  }
+
   const jsonOutput = {
     schema: { type: 'object', additionalProperties: true },
     render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
@@ -1732,7 +1908,7 @@ export function apply(ctx, config) {
       + 'global SQLite database; the recipient gets only a lightweight envelope and reads the body '
       + 'with message_read. Supports dedupeKey/force/nonce and priority bypass. strictMode (default true) '
       + 'requires a one-time approval for direct session-id targets; alias/join is preferred. Project-agnostic. '
-      + 'Capability/operator-only index: skill("team-bootstrap") §2.',
+      + 'Capability/operator-only index: skill("team-bootstrap") §2 / capability audit.',
     parameters: {
       type: 'object',
       properties: {
@@ -2351,6 +2527,7 @@ export function apply(ctx, config) {
 
   ctx.effect?.(() => () => {
     if (retentionTimer !== null) { try { clearInterval(retentionTimer) } catch { /* ignore */ } }
+    pendingReminderHandler?.dispose()
     for (const sessionId of [...pending.keys()]) flush(sessionId)
     store.close()
   })

@@ -13,7 +13,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   alias: { autoDerive: true, maxRename: 2, historyHours: 72 },
   delegation: { shadow: true, minLines: 150, minBytes: 8192, minInputFiles: 3 },
   audit: { hotDays: 90, aggregateMonths: 12 },
-  meeting: { defaultDeadlineHours: 24 },
+  meeting: { defaultDeadlineHours: 24, digestInject: { enabled: true, intervalMinutes: 60 } },
 })
 
 export function configDir(profileDir) {

@@ -837,6 +837,21 @@ const DELEGATION_RULE_VERSION = 'delegation-rule/2026-10-25'
 const DELEGATION_THRESHOLDS_VERSION = 'v1'
 /** Public audit home from the task contract (tests/config override it). */
 const DSH_HOME = process.env.DSH_HOME && process.env.DSH_HOME.length > 0 ? process.env.DSH_HOME : join(homedir(), '.dsh')
+/** P0-F2: the one default archive state path (empty config must resolve here). */
+const DEFAULT_ARCHIVE_STATE_FILE = join(DSH_HOME, 'team-hooks-state.json')
+/**
+ * P0-F2: resolve the archive-reminder state file exactly once. The Config
+ * schema defaults `stateFile` to '', so an empty/whitespace-only value means
+ * "unconfigured" and must fall back to DSH_HOME instead of being used as a
+ * path (which made save() write to '' and never persist).
+ */
+function resolveArchiveStateFile(config) {
+  if (config !== null && typeof config === 'object' && typeof config.stateFile === 'string') {
+    const configured = config.stateFile.trim()
+    if (configured !== '') return configured
+  }
+  return DEFAULT_ARCHIVE_STATE_FILE
+}
 const DELEGATION_DEFAULT_AUDIT_DIR = join(DSH_HOME, 'audit', 'delegation')
 const DELEGATION_LOAD_FILE = 'delegation-hook-load.jsonl'
 /** File-name prefix of the per-session audit JSONL files. */
@@ -2100,9 +2115,9 @@ export const inject = ['tools', 'tokenMeter']
 
 export function apply(ctx, config) {
   if (config !== null && typeof config === 'object' && config.enabled === false) return
-  const stateFile = config !== null && typeof config === 'object' && typeof config.stateFile === 'string'
-    ? config.stateFile
-    : join(DSH_HOME, 'team-hooks-state.json')
+  // P0-F2: load, save and team_hooks_status all share this single resolved
+  // value, so an empty/whitespace config can never diverge from the real path.
+  const stateFile = resolveArchiveStateFile(config)
 
   const roleWritePolicy = normalizeRoleWritePolicy(config)
   /** Write gate (task-33): default off; observation/audit only unless explicitly enabled. */
@@ -2538,7 +2553,7 @@ export function apply(ctx, config) {
       + '(phase/cycle/archiveTurn/lastReminderTurn/pendingRead/pendingReadKind/lastAction/archivePath/'
       + 'lastManualCompactAt), and whether the turn-stopping listener is attached. Attaches the listener on '
       + 'call (self-heal), so calling this tool proves the hook can be attached. Read-only otherwise. Capability '
-      + 'index: skill("team-bootstrap") §2.',
+      + 'index: skill("team-bootstrap") §2 / capability audit.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: {
       schema: { type: 'object', additionalProperties: true },

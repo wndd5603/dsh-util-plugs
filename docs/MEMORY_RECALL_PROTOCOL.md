@@ -3,7 +3,7 @@
 本文件是「什么时候搜记忆、搜什么、什么时候写记忆」的固定流程，供所有 DSH 会话引用。
 首轮指针只给一句入口（`memory_search`/`memory_list` → `memory_remember`），具体口径以本文为准。
 
-- 工具：`memory_search` / `memory_list` / `memory_remember` / `memory_forget` / `memory_status`（由 `agent-memory` row 提供）。
+- 工具：`memory_search` / `memory_list` / `memory_remember` / `memory_forget` / `memory_status` / `memory_quality`（由 `agent-memory` row 提供）。
 - 存储：本机 SQLite（默认 `~/.dsh/memory/memory.sqlite`，可用 `DSH_MEMORY_DB` 覆盖），不写入 workspace/vendor。
 - 分区（scope）：`project`（默认）/ `agent`（仅本 agent 的偏好）/ `global`（跨项目稳定规则）。
 
@@ -61,16 +61,39 @@ memory_list({ scope: "project", limit: 20 })   # 最近条目兜底
 - 密钥/token/密码、个人隐私、真实用户名与家庭路径、内网地址。
 - 会话 UUID、一次性 URL 等易失效信息。
 
-写法：`memory_remember({ scope, key, content, tags })`；内容建议 1–6 行，结构为「结论 + 证据/文件 + 日期」。
-写完在回复中报告 `id` 与 `updated`（更新已有 key 时为 `true`）。
+写法：`memory_remember({ scope, key, content, tags })`；**新写入必须使用下面模板**，旧格式不拒绝但会返回质量告警。
+
+```text
+[project=<project-id> | workspace=<path/name> | domain=<domain> | updated=YYYY-MM-DD]
+What: 结论/事实（一句话）
+Why: 为什么要记住（决策依据/影响）
+Where/Evidence: 证据（file:line、命令、URL；二选一或并列）
+Status/Decision: 当前状态或已定决策（二选一或并列）
+Next: 下一步/负责人/复核方式
+```
+
+- `What`/`Why`/`Next` 必填；`Where` 或 `Evidence` 至少一个；`Status` 或 `Decision` 至少一个。
+- 内容长度 80–8000 字符；路径用 `<workspace>`/`<checkout>`/`<home>` 占位符。
+- `tags` 建议至少 `project`、`domain`、`kind`；缺失只告警。
+- `key` 使用 `<project>/<domain>/<topic>`（2–5 段，优先 3 段）；`scope=project` 必须有 key，且第一段必须存在并按项目标识命名。
+- 写完在回复中报告 `id`、`updated`（更新已有 key 时为 `true`）与 `quality.ok`。
+
+### quality 契约（M1）
+
+- `memory_remember` 返回值增加 `quality: { ok, issues, warnings, score }`；**只告警、不拒绝写入**，旧格式仍会成功落库。
+- `score` 0–100（每条 issue 扣 20、warning 扣 5，保底 0）；`ok = issues.length === 0`。
+- issues（必须修）：key 缺失/段数不在 2–5/字符不合规、缺 `project=/workspace=/domain=/updated=` 头、缺必填字段、长度越界、疑似 `sk-`/`ghp_`/`BEGIN PRIVATE KEY`。
+- warnings（建议修）：key 非 3 段、tags 缺 `project/domain/kind`、个人路径（如 `C:\Users\...`、`/home/...`）、`updated` 非 `YYYY-MM-DD`、自由格式旧内容（`LEGACY_FORMAT`）。
+- `memory_quality({ scope?, limit? })` **只读**巡检：返回 `summary { total, compliant, warnings, errors }` 与 `rows [{ id, key, score, issues, warnings }]`；`summary` 按行互斥计数（compliant=无 issue 且无 warning，warnings=仅 warning，errors=至少 1 条 issue），`total` 覆盖筛选后全部行，`rows` 受 `limit`（默认 50，最大 200）限制。
 
 ## 4. key 约定
 
-- 格式：`<domain>/<topic>`，全小写短标识，例如：
-  - `release/policy`、`release/versioning`
-  - `workbench/pointer`、`workbench/status`
-  - `memory/protocol`
-  - `team/roles`
+- 格式：`<project>/<domain>/<topic>`，2–5 段（优先 3 段），全小写短标识，例如：
+  - `dsh-util-plugs/release/policy`、`dsh-util-plugs/release/versioning`
+  - `dsh-util-plugs/workbench/pointer`、`dsh-util-plugs/workbench/status`
+  - `dsh-util-plugs/memory/protocol`
+  - `dsh-util-plugs/team/roles`
+- 2 段 key（如 `release/policy`）可用但会收到 `KEY_PREFER_THREE_SEGMENTS` 告警；新写入按 3 段。
 - 同一 `scope + key` 是 **upsert**：更新内容而不是新增重复行。
 - key 一旦使用就保持稳定，不把版本号、日期塞进 key。
 - 同一事实只存一份；需要跨项目共享时用 `global`，不要 project/global 各写一遍。
@@ -82,6 +105,7 @@ memory_list({ scope: "project", limit: 20 })   # 最近条目兜底
 3. 同类事实只保留一个 scope。
 4. 过时/错误条目用 `memory_forget({ id })` 清理；删除前确认 id，误删后需重写。
 5. 用 `memory_status` 查看库位置、条目数与 scope 分布，排查“为什么搜不到”。
+6. 收尾或周期巡检用 `memory_quality`；存量不合规只标注/逐条更新，不批量重写。
 
 ## 6. 隐私与安全
 
@@ -105,6 +129,8 @@ memory_list({ scope: "project", limit: 20 })   # 最近条目兜底
 - [ ] 新会话/压缩后/新任务，动手前搜过项目记忆？
 - [ ] 引用了 `id`/`updated_at`，冲突已说明？
 - [ ] 稳定结论已 `memory_remember`，写前查过重？
+- [ ] 新写入 `quality.ok=true`，或已知 issues/warnings 且准备后续修复？
+- [ ] 收尾用 `memory_quality` 看过本项目条目？
 - [ ] 没有密钥、隐私、真实路径、会话 UUID？
 - [ ] 过时条目已清理或标注？
 
@@ -123,8 +149,21 @@ memory_search({ query: "<相关组件或主题>", scope: "project" })
 ```text
 memory_remember({
   scope: "project",
-  key: "workbench/pointer",
-  content: "首轮指针已含 memory_search/memory_list 召回与 memory_remember 固化（MEM2）；约束 ≤3 行/≤400 字。",
-  tags: ["memory", "workbench", "pointer"],
+  key: "dsh-util-plugs/memory/protocol",
+  content: `[project=dsh-util-plugs | workspace=<workspace> | domain=memory | updated=2026-11-17]
+What: 首轮指针含 memory_search/memory_list 召回与 memory_remember 固化（MEM2）。
+Why: 让新会话先召回、收尾固化，减少重复劳动。
+Where/Evidence: docs/toolbox/MEMORY_RECALL_PROTOCOL.md
+Status/Decision: 已生效；M1 同时提供 quality 告警与只读巡检。
+Next: 新写入使用本模板，收尾跑 memory_quality。`,
+  tags: ["project", "domain", "kind"],
 })
+```
+
+`memory_quality` 巡检：
+
+```text
+memory_quality({ scope: "project", limit: 50 })
+# summary：total=…，compliant=…，warnings=…，errors=…
+# rows：逐条 id/key/score/issues/warnings；只读，不改库
 ```
