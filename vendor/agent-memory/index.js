@@ -300,6 +300,15 @@ export function apply(ctx, config) {
   ctx.effect(() => () => db.close())
   const register = (descriptor, execute) => ctx.tools.register({ ...descriptor, execute })
   const sessionOf = exec => exec?.agent?.session?.id ?? null
+  const isOperator = exec => {
+    try {
+      const policy = ctx.get?.('sandboxPolicy')
+      const resolved = policy?.resolve?.({ session: exec?.agent?.session })
+      return resolved?.mode === 'danger-full-access'
+    } catch {
+      return false
+    }
+  }
 
   register(desc('memory_remember', 'Persist one durable memory (upsert by scope+key). Quality is advisory and never blocks a write.', {
     scope: str('project | agent | global (default project).'),
@@ -389,8 +398,8 @@ export function apply(ctx, config) {
   register(desc('memory_forget', 'Delete one memory by id. Disabled unless the operator sets allowForget:true; requires confirm:"FORGET" and appends an audit row.', {
     id: str('Memory id.'), confirm: str('Must be exactly "FORGET".'),
   }, ['id', 'confirm']), async (args, exec) => {
-    if (cfg.allowForget !== true) {
-      return { ok: false, code: 'FORBIDDEN', message: 'memory_forget is disabled; operator must set allowForget:true' }
+    if (cfg.allowForget !== true || !isOperator(exec)) {
+      return { ok: false, code: 'FORBIDDEN', message: 'memory_forget requires operator policy and allowForget:true' }
     }
     if (args.confirm !== 'FORGET') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'memory_forget requires confirm:"FORGET"' }

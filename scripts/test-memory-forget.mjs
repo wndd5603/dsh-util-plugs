@@ -8,7 +8,7 @@ import { apply } from '../vendor/agent-memory/index.js'
 
 const SESSION = 'session-00000000-0000-0000-0000-000000000021'
 
-function fixture(t, config) {
+function fixture(t, config, mode = 'danger-full-access') {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-memory-forget-'))
   process.env.DSH_MEMORY_DB = join(dir, 'memory.sqlite')
   const tools = new Map()
@@ -18,6 +18,10 @@ function fixture(t, config) {
     tools: { register(tool) { tools.set(tool.name, tool) } },
     effect(fn) { const d = fn(); if (typeof d === 'function') cleanups.push(d); return d },
     on() { return () => {} },
+    get(name) {
+      if (name === 'sandboxPolicy') return { resolve: () => ({ mode }) }
+      return undefined
+    },
   }
   apply(ctx, config)
   t.after(() => {
@@ -31,6 +35,14 @@ function fixture(t, config) {
 test('memory_forget is disabled unless allowForget=true', async (t) => {
   const { tools } = fixture(t, {})
   const remembered = await tools.get('memory_remember').execute({ content: 'forget me', key: 'f1' }, { agent: { session: { id: SESSION } } })
+  const result = await tools.get('memory_forget').execute({ id: remembered.id, confirm: 'FORGET' }, { agent: { session: { id: SESSION } } })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'FORBIDDEN')
+})
+
+test('memory_forget requires operator policy even when allowForget=true', async (t) => {
+  const { tools } = fixture(t, { allowForget: true }, 'workspace-write')
+  const remembered = await tools.get('memory_remember').execute({ content: 'forget me', key: 'f3' }, { agent: { session: { id: SESSION } } })
   const result = await tools.get('memory_forget').execute({ id: remembered.id, confirm: 'FORGET' }, { agent: { session: { id: SESSION } } })
   assert.equal(result.ok, false)
   assert.equal(result.code, 'FORBIDDEN')

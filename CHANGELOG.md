@@ -1,3 +1,8 @@
+## 2026.11.17-14 (dev)
+
+- **Memory-forget operator identity**: `memory_forget` now requires `sandboxPolicy.resolve(session).mode === 'danger-full-access'` in addition to `allowForget:true`; a normal workspace-write session is FORBIDDEN even when the config flag is on.
+- **Purge tombstone**: `message_purge` appends a body-free `purge-audit.jsonl` tombstone (actor/all/before/deletedMessages) before returning; the default path is still disabled (`allowPurge:false`).
+
 ## 2026.11.17-13 (dev)
 
 - **Queue default scoping**: `message_queue()` without `to` now defaults to the caller session instead of listing the whole global queue; explicit cross-recipient `to` remains FORBIDDEN.

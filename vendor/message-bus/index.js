@@ -2419,15 +2419,21 @@ export function apply(ctx, config) {
         additionalProperties: false,
       },
       output: jsonOutput,
-      execute(args) {
+      execute(args, exec) {
         if (args.confirm !== 'PURGE') throw new Error('message_purge requires confirm:"PURGE"')
         const all = args.all === true
         if (!all && (typeof args.before !== 'string' || Number.isNaN(Date.parse(args.before)))) {
           throw new Error('message_purge requires either before:<ISO timestamp> or all:true')
         }
         const result = store.purge({ all, before: typeof args.before === 'string' ? args.before : null })
+        try {
+          appendFileSync(join(dirname(cfg.dbPath), 'purge-audit.jsonl'), JSON.stringify({
+            at: nowIso(), actor: exec?.agent?.session?.id ?? null, all, before: result.before,
+            deletedMessages: result.messages, confirm: 'PURGE',
+          }) + '\n', 'utf8')
+        } catch { /* tombstone is best-effort; never hide a successful purge */ }
         logger.info('[message-bus] purge messages=' + result.messages + ' all=' + all + ' before=' + String(result.before))
-        return { ok: true, deletedMessages: result.messages, all: result.all, before: result.before, counts: store.counts() }
+        return { ok: true, deletedMessages: result.messages, all: result.all, before: result.before, tombstone: 'purge-audit.jsonl', counts: store.counts() }
       },
       presentCall: () => ({ card: 'generic', title: 'Purge message bus', kind: 'write' }),
     })
