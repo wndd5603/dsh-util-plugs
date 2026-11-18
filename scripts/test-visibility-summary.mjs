@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { visibilitySummaryOf } from '../vendor/message-bus/index.js'
+import { safeTaskView, visibilitySummaryOf } from '../vendor/message-bus/index.js'
 
 test('visibility summary requires profile and workspace scope', () => {
   const result = visibilitySummaryOf({})
@@ -26,6 +26,14 @@ test('visibility summary maps ready/empty/unavailable without bodies', () => {
   assert.equal(ready.cards.memory.state, 'ready')
   assert.equal(ready.cards.subenv.state, 'unavailable')
   assert.equal(JSON.stringify(ready).includes('body'), false)
+})
+
+test('safeTaskView removes description and metadata', () => {
+  const view = safeTaskView({ id: 't1', title: 'x', description: 'secret', metadata: { a: 1 }, status: 'pending' })
+  assert.equal(view.id, 't1')
+  assert.equal('description' in view, false)
+  assert.equal('metadata' in view, false)
+  assert.equal(view.redacted, true)
 })
 
 test('visibility summary isolates an unavailable domain', () => {

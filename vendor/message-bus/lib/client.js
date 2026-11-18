@@ -2229,6 +2229,24 @@ function CollaborationPage(props) {
   const load = React.useCallback(async () => {
     setLoading(true)
     setError(undefined)
+    if (typeof api.visibilitySummary === 'function') {
+      try {
+        const raw = await api.visibilitySummary({ profileId: 'current', workspaceId: 'current' })
+        const value = collabValue(raw)
+        if (value?.ok === true && value.cards !== undefined) {
+          const cards = Object.entries(value.cards).map(([id, card]) => ({
+            id,
+            label: id === 'messages' ? '未读/消息' : id === 'tasks' ? '任务' : id === 'meetings' ? '会议 action' : id === 'memory' ? '记忆' : id === 'runtime' ? '运行与存储' : '子环境',
+            state: card.state,
+            count: card.count,
+            note: [card.unread !== undefined ? `未读 ${card.unread}` : null, card.stale !== undefined ? `stale ${card.stale}` : null, card.blocked !== undefined ? `blocked ${card.blocked}` : null, value.generatedAt].filter(Boolean).join(' · '),
+          }))
+          setCards(cards)
+          setLoading(false)
+          return
+        }
+      } catch { /* fall through to per-domain readers */ }
+    }
     const [messages, tasks, memory, meetings] = await Promise.allSettled([
       typeof api.list === 'function' ? api.list('', 1, 0) : Promise.reject(new Error('messages unavailable')),
       typeof api.tasksPage === 'function' ? api.tasksPage({ limit: 1 }) : Promise.reject(new Error('tasks unavailable')),

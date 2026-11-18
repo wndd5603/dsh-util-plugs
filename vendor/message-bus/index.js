@@ -626,6 +626,13 @@ function readMemoryPage(rawArgs) {
   }
 }
 
+/** Body-free task projection for the visibility API. */
+export function safeTaskView(row) {
+  if (row === null || row === undefined || typeof row !== 'object') return null
+  const { description: _description, metadata: _metadata, ...safe } = row
+  return { ...safe, redacted: true }
+}
+
 /** Body-free message projection for the visibility API. */
 function safeMessageView(row) {
   if (row === null || row === undefined) return null
@@ -2703,7 +2710,7 @@ export function apply(ctx, config) {
           total = store.counts().messages
         } else if (domain === 'tasks') {
           const page = readTasksPage({ limit, offset })
-          items = page.tasks
+          items = page.tasks.map(safeTaskView).filter(Boolean)
           total = page.total
         } else if (domain === 'meetings') {
           const page = readMeetingsPage({ limit, offset })
@@ -2734,12 +2741,10 @@ export function apply(ctx, config) {
         if (domain === 'tasks') {
           const detail = readTaskDetail({ id })
           if (detail?.ok === false) return detail
-          const item = detail?.task ?? detail
-          if (item !== null && typeof item === 'object') {
-            delete item.description
-            delete item.metadata
-          }
-          return { ok: true, state: 'ready', item, evidence: detail?.metadata?.completion?.evidence ?? null, redacted: ['description', 'metadata'] }
+          const task = detail?.task ?? detail
+          const evidence = task?.metadata?.completion?.evidence ?? null
+          const item = safeTaskView(task)
+          return { ok: true, state: 'ready', item, evidence, redacted: ['description', 'metadata'] }
         }
         return { ok: false, code: 'DOMAIN_UNAVAILABLE', error: 'detail is not available for ' + domain }
       }
