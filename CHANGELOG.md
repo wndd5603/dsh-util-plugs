@@ -1,3 +1,7 @@
+## 2026.11.17-55 (dev)
+
+- **Team removal (S1-S3)**: removed apartment team/member/task-role tools and `legacyTeams`; `collaboration_recall` now omits teams/roles/taskRoles/teamTasks; Apartment UI keeps only Agent/Leases/Experience/Backups. Global bulletin-board, meetings, aliases and leases remain.
+
 ## 2026.11.17-54 (dev)
 
 - **Fix lease availability**: the `legacyTeams=false` gate now hides only apartment team/task-role tools; lease tools remain registered.

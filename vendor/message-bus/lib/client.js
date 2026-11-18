@@ -1433,15 +1433,13 @@ function ApartmentSection(props) {
   }
   if (apartment === undefined || apartment === null) return null
   const feedback = message !== null && typeof message === 'object' ? message : (message === undefined ? undefined : { text: String(message), tone: 'ok' })
-  const sections = [['agents', 'Agent'], ['teams', 'Teams'], ['leases', 'Leases'], ['roles', 'Roles'], ['experiences', 'Experience'], ['backups', 'Backups']]
+  const sections = [['agents', 'Agent'], ['leases', 'Leases'], ['experiences', 'Experience'], ['backups', 'Backups']]
   const items = Array.isArray(detail?.items) ? detail.items : []
   const pages = Math.max(1, Math.ceil((detail?.total ?? 0) / 10))
   const rowText = item => section === 'agents' ? `${item.name ?? item.id} · ${item.status ?? ''} · ${item.home ?? ''}`
-    : section === 'teams' ? `${item.name ?? item.id} · ${item.purpose ?? ''}`
-      : section === 'leases' ? `${item.agent_id ?? ''} · ${item.workspace ?? ''} · ${item.state ?? ''}`
-        : section === 'roles' ? `${item.task_id ?? ''} · ${item.agent_id ?? item.team_id ?? ''} · ${item.role ?? ''}`
-          : section === 'experiences' ? `${item.agent_id ?? ''} · ${item.summary ?? ''}`
-            : `${item.name ?? item.path ?? ''} · files ${item.files ?? 0}`
+    : section === 'leases' ? `${item.agent_id ?? ''} · ${item.workspace ?? ''} · ${item.state ?? ''}`
+      : section === 'experiences' ? `${item.agent_id ?? ''} · ${item.summary ?? ''}`
+        : `${item.name ?? item.path ?? ''} · files ${item.files ?? 0}`
   return panel('section', { 'data-apartment': '', className: 'mb-card' },
     panel('div', { className: 'mb-cardHead' },
       panel('div', null,
@@ -1450,9 +1448,7 @@ function ApartmentSection(props) {
       panel('span', { className: 'mb-kicker' }, t('apartmentStats'))),
     panel('div', { className: 'mb-statRow' },
       panel('span', { className: 'mb-stat' }, 'agents ', panel('strong', null, apartment.agents ?? 0)),
-      panel('span', { className: 'mb-stat' }, 'teams ', panel('strong', null, apartment.teams ?? 0)),
       panel('span', { className: 'mb-stat' }, 'leases ', panel('strong', null, apartment.leases ?? 0)),
-      panel('span', { className: 'mb-stat' }, 'roles ', panel('strong', null, apartment.taskRoles ?? 0)),
       panel('span', { className: 'mb-stat' }, 'experience ', panel('strong', null, apartment.experiences ?? 0))),
     panel('div', { className: 'mb-actionRow' },
       panel('span', { className: 'mb-muted', 'data-apartment-root': '' }, apartment.root ?? rootInput ?? ''),

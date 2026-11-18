@@ -508,10 +508,9 @@ const experienceRow = row => {
 }
 
 const briefText = (agentId, counts) => '[collab] agent=' + agentId
-  + ' teams=' + counts.teams
-  + ' roles=' + counts.roles
   + ' aliases=' + counts.aliases
   + ' tasks=' + counts.tasks
+  + ' leases=' + counts.leases
   + ' memory=' + (counts.memory ?? 0)
   + ' warnings=' + counts.warnings
   + '; collaboration_recall()'

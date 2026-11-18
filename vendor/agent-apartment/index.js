@@ -35,7 +35,6 @@ export const Config = objectSchema({
   backupKeep: number(5, { description: 'Number of backup snapshots to retain.', int: true, min: 1, max: 100 }),
   backupMaxAgeDays: number(8, { description: 'Maximum age in days of the latest normal backup before apartment_backup_verify reports it stale.', int: true, min: 1, max: 365 }),
   briefInjection: boolean(true, { description: 'Inject one collaboration-brief line once per bound session on agent/pre-step.' }),
-  legacyTeams: boolean(false, { description: 'Expose the retired apartment team/task-role tools. Default false: DSH-native teams/session identity are authoritative; existing team data stays read-only.' }),
 }, { description: 'Centralized Agent Apartment configuration.', schemaVersion: 1 })
 
 const output = {
@@ -326,96 +325,52 @@ export function apply(ctx, config) {
         warnings: [], asOf: new Date().toISOString(), text: '',
       }
     }
-    return buildCollaborationBrief({
+    const result = buildCollaborationBrief({
       apartment,
       sessionId: requested,
       taskId: optionalText(args?.taskId),
       boardId: optionalText(args?.boardId),
       profileDir,
     })
+    if (result?.ok !== true) return result
+    const { teams, roles, taskRoles, teamTasks, ...recall } = result
+    const counts = { ...(result.counts ?? {}) }
+    delete counts.teams
+    delete counts.roles
+    delete counts.taskRoles
+    delete counts.teamTasks
+    const truncated = { ...(result.truncated ?? {}) }
+    delete truncated.teams
+    delete truncated.roles
+    delete truncated.taskRoles
+    delete truncated.teamTasks
+    recall.counts = counts
+    recall.truncated = truncated
+    recall.text = '[collab] agent=' + recall.agentId
+      + ' aliases=' + counts.aliases
+      + ' tasks=' + counts.tasks
+      + ' leases=' + counts.leases
+      + ' memory=' + (counts.memory ?? 0)
+      + ' warnings=' + counts.warnings
+      + '; collaboration_recall()'
+    return recall
   }
-  register(desc('apartment_collaboration_brief', 'Read-only aggregated collaboration/recall brief for a session (defaults to the caller): identity, teams/roles, aliases, tasks, leases, memory keys (never bodies), and artifact pointer.', {
+  register(desc('apartment_collaboration_brief', 'Read-only aggregated collaboration/recall brief for a session (defaults to the caller): identity, aliases, global-board tasks, leases, memory keys (never bodies), and artifact pointer.', {
     sessionId: str('Session id; defaults to the caller session.'),
     taskId: str('Optional task id filter for task roles and assigned tasks.'),
     boardId: str('Optional bulletin board id filter for assigned tasks.'),
   }), collaborationBrief)
-  register(desc('collaboration_recall', 'Read-only first-turn recall: identity/roles, aliases, tasks, leases, memory keys (no bodies), artifact pointer. Use memory_search for bodies.', {
+  register(desc('collaboration_recall', 'Read-only first-turn recall: identity, aliases, global-board tasks, leases, memory keys (no bodies), artifact pointer. Use memory_search for bodies.', {
     sessionId: str('Session id; defaults to the caller session.'),
-    taskId: str('Optional task id filter for task roles and assigned tasks.'),
+    taskId: str('Optional task id filter for assigned tasks.'),
     boardId: str('Optional bulletin board id filter for assigned tasks.'),
   }), collaborationBrief)
-  if (cfg.legacyTeams === true) {
-  register(desc('apartment_team_create', 'Create a team decoupled from workspace.', {
-    id: str('Optional id.'), name: str('Team name.'), purpose: str('Purpose.'), workspace: str('Optional associated workspace.'),
-  }, ['name']), async args => { assertWritable('apartment_team_create'); return apartment.createTeam(args) })
-  register(desc('apartment_team_member_add', 'Add an agent to a team with a role (many-to-many).', {
-    teamId: str('Team id.'), agentId: str('Agent id.'), role: str('Role.'),
-  }, ['teamId', 'agentId', 'role']), async args => { assertWritable('apartment_team_member_add'); return apartment.addMember(args) })
-  register(desc('apartment_team_member_remove', 'Remove a team membership.', {
-    teamId: str('Team id.'), agentId: str('Agent id.'), role: str('Role.'),
-  }, ['teamId', 'agentId', 'role']), async args => { assertWritable('apartment_team_member_remove'); return apartment.removeMember(args) })
-  register(desc('apartment_team_list', 'List teams and memberships.', { teamId: str('Optional team id.') }), async args => ({
-    teams: apartment.listTeams(), memberships: apartment.listMemberships(args.teamId),
-  }))
-  }
   register(desc('apartment_lease', 'Allocate a per-task work directory to an agent.', {
     agentId: str('Agent id.'), workspace: str('Workspace path.'), taskId: str('Optional task id.'), ttlMs: num('Lease TTL ms.'),
   }, ['agentId', 'workspace']), async args => { assertWritable('apartment_lease'); return apartment.claimLease(args) })
   register(desc('apartment_lease_release', 'Release a lease.', { leaseId: str('Lease id.') }, ['leaseId']), async args => { assertWritable('apartment_lease_release'); return apartment.releaseLease(args.leaseId) })
   register(desc('apartment_lease_list', 'List leases.', { agentId: str('Optional agent id.') }), async args => ({ leases: apartment.listLeases(args.agentId) }))
   register(desc('apartment_lease_reap', 'Expire leases whose TTL has passed.'), async () => { assertWritable('apartment_lease_reap'); return apartment.reapExpired() })
-  if (cfg.legacyTeams === true) {
-  register(desc('apartment_task_role_assign', 'Bind an agent/team to a role on one task (operator-only: requires danger-full-access); validates agent/team and verifies the task and board in bulletin unless allowUnverified.', {
-    taskId: str('Task id.'),
-    agentId: str('Agent id.'),
-    teamId: str('Optional team id.'),
-    boardId: str('Optional bulletin board id; must match the verified task board and is derived from the task when omitted.'),
-    role: str('Role.'),
-    allowUnverified: { type: 'boolean', description: 'Allow writing when the bulletin task store is unavailable (never when it is readable and the task is missing).' },
-  }, ['taskId', 'agentId', 'role']), async (args, exec) => {
-    assertOperator(exec)
-    assertWritable('apartment_task_role_assign')
-    const taskId = optionalText(args?.taskId)
-    if (taskId === undefined) throw codedError('INVALID_ARGUMENT', 'apartment: taskId is required')
-    const agentId = optionalText(args?.agentId)
-    assertAgentExists(agentId)
-    const teamId = optionalText(args?.teamId)
-    assertTeamExists(teamId)
-    const target = resolveTaskTarget({
-      taskId,
-      boardId: args?.boardId,
-      allowUnverified: args?.allowUnverified === true,
-    })
-    return apartment.assignTaskRole({
-      taskId,
-      agentId,
-      teamId: teamId ?? null,
-      boardId: target.boardId,
-      verified: target.verified,
-      role: args?.role,
-    })
-  })
-  register(desc('apartment_task_role_list', 'List task-role bindings; filters: taskId/agentId/teamId/boardId.', {
-    taskId: str('Optional task id filter.'),
-    agentId: str('Optional agent id filter.'),
-    teamId: str('Optional team id filter.'),
-    boardId: str('Optional board id filter.'),
-  }), async args => ({
-    roles: apartment.listTaskRoles({
-      taskId: optionalText(args?.taskId),
-      agentId: optionalText(args?.agentId),
-      teamId: optionalText(args?.teamId),
-      boardId: optionalText(args?.boardId),
-    }),
-  }))
-  register(desc('apartment_team_task_list', 'Read-only: derive a team task list from task_roles (deduped), with roles and agents.', {
-    teamId: str('Team id.'),
-    boardId: str('Optional board id filter.'),
-  }, ['teamId']), async args => apartment.listTeamTasks({
-    teamId: optionalText(args?.teamId),
-    boardId: optionalText(args?.boardId),
-  }))
-  }
   register(desc('apartment_experience_record', 'Record reusable experience for an agent; taskId and outcome are required and the task is verified in bulletin unless allowUnverified.', {
     agentId: str('Agent id.'),
     taskId: str('Task id (required).'),
