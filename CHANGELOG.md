@@ -1,3 +1,7 @@
+## 2026.11.17-52 (dev)
+
+- **Retire captain team tools**: `agent-workflows` now mounts prompt-forge only; `team_init` / `team_members_check` and captain templates are removed. DSH-native teams are authoritative; plugin team design is retired incrementally.
+
 ## 2026.11.17-51 (dev)
 
 - **P1 cleanup**: removed legacy captain pipe2/member templates and the unused plugin-console package/export; team_init no longer writes pipe2 files. Native row-config namespace limitation is deferred.
