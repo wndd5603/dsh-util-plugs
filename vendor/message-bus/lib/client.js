@@ -1832,6 +1832,90 @@ function SettingRow(props) {
   )
 }
 
+function ConfigCard(props) {
+  const { id, fields, ns, configForms } = props
+  const form = React.useMemo(() => {
+    if (ns === undefined || configForms === undefined) return undefined
+    try { return configForms.get(ns.ns) } catch { return undefined }
+  }, [ns, configForms])
+  const [snapshot, setSnapshot] = React.useState(() => {
+    try { return form?.getSnapshot?.() } catch { return undefined }
+  })
+  const [draft, setDraft] = React.useState({})
+  const [busy, setBusy] = React.useState(false)
+  const [message, setMessage] = React.useState(undefined)
+  React.useEffect(() => {
+    if (form === undefined) return undefined
+    try {
+      setSnapshot(form.getSnapshot())
+      return form.subscribe(() => setSnapshot(form.getSnapshot()))
+    } catch { return undefined }
+  }, [form])
+  React.useEffect(() => {
+    const value = snapshot?.value
+    if (value === undefined) return
+    const next = {}
+    for (const field of fields) next[field.path] = settingsValueAt(value, field.path)
+    setDraft(next)
+  }, [snapshot?.value, fields])
+  if (ns === undefined) return null
+  if (snapshot?.status === 'loading') return panel('p', { style: { opacity: 0.7 } }, id + '：加载配置中…')
+  if (snapshot?.status === 'unavailable') return panel('p', { style: { opacity: 0.7 } }, id + '：namespace 不可用')
+  const writable = snapshot?.writable === true
+  const save = async () => {
+    if (!writable || busy) return
+    const ops = []
+    for (const field of fields) {
+      const current = settingsValueAt(snapshot?.value, field.path)
+      if (current === undefined) continue
+      const next = draft[field.path]
+      if (field.kind === 'boolean') {
+        if (next !== current) ops.push({ op: 'set', path: field.path.split('.'), value: next === true })
+      } else if (field.kind === 'number') {
+        if (String(next ?? '') !== String(current ?? '')) {
+          const number = Number(next)
+          if (Number.isFinite(number)) ops.push({ op: 'set', path: field.path.split('.'), value: number })
+        }
+      } else if (String(next ?? '') !== String(current ?? '')) {
+        ops.push({ op: 'set', path: field.path.split('.'), value: String(next ?? '') })
+      }
+    }
+    if (ops.length === 0) return
+    setBusy(true); setMessage(undefined)
+    try {
+      const accepted = await form.mutate(ops, snapshot.revision)
+      setMessage({ tone: accepted ? 'ok' : 'danger', text: accepted ? '已保存' : '写入被拒绝' })
+    } catch (error) {
+      setMessage({ tone: 'danger', text: String(error?.message ?? error) })
+    } finally { setBusy(false) }
+  }
+  return panel('div', { key: id, style: { border: '1px solid rgba(127,127,127,0.18)', borderRadius: '10px', padding: '12px' } },
+    panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 6 } },
+      panel('strong', { style: { fontSize: 12.5 } }, id),
+      panel('span', { style: { fontSize: 11, opacity: 0.6 } }, writable ? '可写' : '只读')),
+    fields.map(field => {
+      const current = settingsValueAt(snapshot?.value, field.path)
+      if (current === undefined) {
+        return panel('div', { key: field.path, style: { fontSize: 11.5, opacity: 0.55, padding: '3px 0' } }, field.label + '：需原生配置/重启')
+      }
+      const value = draft[field.path]
+      let control
+      if (field.kind === 'boolean') {
+        control = panel('input', { type: 'checkbox', checked: value === true, disabled: !writable || busy, onChange: event => setDraft(prev => ({ ...prev, [field.path]: event.target.checked })) })
+      } else if (field.kind === 'enum') {
+        control = panel('select', { value: value ?? '', disabled: !writable || busy, onChange: event => setDraft(prev => ({ ...prev, [field.path]: event.target.value })) },
+          panel('option', { value: '' }, '—'), (field.options ?? []).map(option => panel('option', { key: option, value: option }, option)))
+      } else {
+        control = panel('input', { type: field.kind === 'number' ? 'number' : 'text', value: value ?? '', disabled: !writable || busy, style: style.input, onChange: event => setDraft(prev => ({ ...prev, [field.path]: event.target.value })) })
+      }
+      return panel('label', { key: field.path, style: { display: 'grid', gridTemplateColumns: 'minmax(150px, 1fr) minmax(110px, 1fr)', gap: 8, alignItems: 'center', padding: '3px 0' } },
+        panel('span', { style: { fontSize: 12 } }, field.label), control)
+    }),
+    panel('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
+      panel('button', { type: 'button', style: style.button, disabled: !writable || busy, onClick: save }, busy ? '保存中…' : '保存'),
+      message === undefined ? null : panel('span', { style: { fontSize: 11, color: message.tone === 'ok' ? '#3c9a5f' : '#d9534f' } }, message.text)))
+}
+
 function CollaborationSettingsPage(props) {
   const { configForms, layout } = props
   const [view, setView] = React.useState(() => {
@@ -1861,6 +1945,9 @@ function CollaborationSettingsPage(props) {
         panel('h2', { style: { margin: 0 } }, '协作设置'),
         panel('p', { style: { margin: '4px 0 0', fontSize: 12.5, opacity: 0.7 } }, '可热更新字段可直接切换；其余字段显示当前值/原生配置。写入统一走 DSH settings。')),
       panel('button', { type: 'button', style: style.button, onClick: openNative }, '打开原生插件设置')),
+    Object.entries(ROW_CONFIG_FIELDS).map(([id, fields]) => panel(ConfigCard, {
+      key: id, id, fields, ns: findNamespace(id), configForms,
+    })),
     view === undefined
       ? panel('p', { style: { opacity: 0.7 } }, '当前 profile 未提供 configForms；请使用原生 Plugins 页面。')
       : SETTINGS_GROUPS.map(group => panel('div', { key: group.title, style: { border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px', padding: '12px' } },

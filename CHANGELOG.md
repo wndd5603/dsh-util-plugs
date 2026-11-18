@@ -1,3 +1,7 @@
+## 2026.11.17-56 (dev)
+
+- **Custom config cards**: 协作设置 now renders editable cards through `configForms.get(ns)` for message-bus/context-sentinel/auto-backup/host-relaunch/workbench; non-volatile fields stay read-only. This bypasses the native row-config rowId namespace mismatch.
+
 ## 2026.11.17-55 (dev)
 
 - **Team removal (S1-S3)**: removed apartment team/member/task-role tools and `legacyTeams`; `collaboration_recall` now omits teams/roles/taskRoles/teamTasks; Apartment UI keeps only Agent/Leases/Experience/Backups. Global bulletin-board, meetings, aliases and leases remain.
