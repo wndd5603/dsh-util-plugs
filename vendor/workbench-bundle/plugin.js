@@ -18,9 +18,9 @@
  * Zero npm imports; no network, no shell.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { boolean, number, string, defaultsOf, objectSchema, fieldDocs } from './lib/standard-schema.js'
 
 export const inject = ['tools']
@@ -41,6 +41,7 @@ export const Config = objectSchema({
   schemaVersion: number(1, { description: 'Config schema version; newer values are rejected.', int: true, min: 1 }),
   pointer: boolean(true, { description: 'Inject a one-time (≤3 line) capability pointer into each new session.' }),
   statusTool: boolean(true, { description: 'Register the read-only workbench_status tool.' }),
+  artifactTool: boolean(true, { description: 'Register artifact_manifest for content-addressed build artifact manifests and the current pointer.' }),
   pointerText: string('', { description: 'Optional override for the pointer body (empty = built-in text, max 400 chars).' }),
 }, { description: 'Meta-bundle UX entry configuration (pointer + status tool).', schemaVersion: 1 })
 
@@ -70,6 +71,81 @@ function sha256File(file) {
   } catch {
     return null
   }
+}
+
+function artifactsRoot() {
+  return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'artifacts')
+}
+
+function writeJsonAtomic(file, value) {
+  mkdirSync(dirname(file), { recursive: true })
+  const temp = file + '.tmp-' + randomUUID()
+  writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', 'utf8')
+  renameSync(temp, file)
+}
+
+function readJsonFile(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * P0-5: content-addressed artifact manifest + one mutable current pointer.
+ * The manifest is immutable for a given sha256; promotion records the prior
+ * current pointer under history/ before atomically replacing current.json.
+ * Callers must pass a real file; no manifest is invented for a missing artifact.
+ */
+export function recordArtifact(input, options = {}) {
+  const file = resolve(String(input?.file ?? ''))
+  if (!existsSync(file)) throw new Error('artifact_manifest: file not found: ' + file)
+  const info = statSync(file)
+  if (!info.isFile()) throw new Error('artifact_manifest: not a regular file: ' + file)
+  const sha256 = sha256File(file)
+  if (sha256 === null) throw new Error('artifact_manifest: cannot hash file: ' + file)
+  const buildId = String(input?.buildId ?? '').trim()
+  if (buildId === '' || buildId.length > 200) throw new Error('artifact_manifest: buildId must be 1..200 chars')
+  const clean = (value, max) => {
+    const text = typeof value === 'string' ? value.trim() : ''
+    return text === '' ? null : text.slice(0, max)
+  }
+  const createdAt = new Date().toISOString()
+  const manifest = {
+    schemaVersion: 1,
+    artifactId: 'artifact-' + sha256.slice(0, 16),
+    sha256,
+    size: info.size,
+    file: basename(file),
+    sourcePath: file,
+    buildId,
+    testRunId: clean(input?.testRunId, 200),
+    boardTaskId: clean(input?.boardTaskId, 200),
+    note: clean(input?.note, 500),
+    createdAt,
+  }
+  const root = artifactsRoot()
+  const manifestFile = join(root, 'manifests', sha256 + '.json')
+  mkdirSync(join(root, 'manifests'), { recursive: true })
+  if (!existsSync(manifestFile)) writeJsonAtomic(manifestFile, manifest)
+  let current = null
+  if (options.promote === true || input?.promote === true) {
+    const currentFile = join(root, 'current.json')
+    const previous = readJsonFile(currentFile)
+    if (previous !== null) {
+      mkdirSync(join(root, 'history'), { recursive: true })
+      const historyFile = join(root, 'history', createdAt.replace(/[:.]/g, '-') + '-' + (previous?.manifest?.sha256 ?? 'unknown').slice(0, 12) + '.json')
+      writeJsonAtomic(historyFile, previous)
+    }
+    current = { schemaVersion: 1, updatedAt: createdAt, manifest }
+    writeJsonAtomic(currentFile, current)
+  }
+  return { ok: true, manifest, manifestFile, current }
+}
+
+export function readArtifactCurrent() {
+  return readJsonFile(join(artifactsRoot(), 'current.json'))
 }
 
 function packageDirOf(nodeModulesDir, name) {
@@ -319,6 +395,40 @@ export function apply(ctx, config) {
         return buildStatus(ctx, currentConfig, snapshot)
       },
       presentCall: () => ({ card: 'generic', title: 'Workbench status', kind: 'read' }),
+    })
+  }
+  if (config.artifactTool !== false) {
+    ctx.tools.register({
+      name: 'artifact_manifest',
+      description:
+        'Create a content-addressed manifest for a real build artifact (sha256/size/buildId) and optionally promote it '
+        + 'to the single artifacts/current.json pointer. Manifests are immutable per sha256; promotion archives the prior '
+        + 'current pointer under artifacts/history/. Use this to bind build, test and task evidence to one artifact.',
+      parameters: {
+        type: 'object',
+        properties: {
+          file: { type: 'string', description: 'Existing artifact file path.' },
+          buildId: { type: 'string', description: 'Build identifier (e.g. m0-20261118-0314).' },
+          testRunId: { type: 'string', description: 'Optional test/QA run id.' },
+          boardTaskId: { type: 'string', description: 'Optional bulletin board task id.' },
+          note: { type: 'string', description: 'Optional short note.' },
+          promote: { type: 'boolean', description: 'Atomically replace artifacts/current.json with this manifest (default false).' },
+        },
+        required: ['file', 'buildId'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
+      async execute(args) {
+        try {
+          return recordArtifact(args, { promote: args.promote === true })
+        } catch (error) {
+          return { ok: false, code: 'INVALID_ARGUMENT', message: String(error?.message ?? error) }
+        }
+      },
+      presentCall: () => ({ card: 'generic', title: 'Artifact manifest', kind: 'write' }),
     })
   }
   if (config.pointer !== false) {

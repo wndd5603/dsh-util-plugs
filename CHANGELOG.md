@@ -1,3 +1,7 @@
+## 2026.11.17-4 (dev)
+
+- **Artifact manifest + current pointer**: new `artifact_manifest` tool hashes a real build artifact, writes an immutable content-addressed manifest under `$DSH_HOME/artifacts/manifests/`, and optionally promotes it to the single `artifacts/current.json` pointer; prior pointers are archived under `history/`. Promotion is explicit, so a rebuild cannot silently overwrite the final pointer without a manifest.
+
 ## 2026.11.17-3 (dev)
 
 - **Task completion evidence**: `bulletin_task_complete` now requires `{artifactId, sha256, checkResult}`; invalid/missing evidence is rejected, the completion is stored in task metadata, and state+event are written in one transaction. The generic `bulletin_task_update` path can no longer set `status=completed`.
