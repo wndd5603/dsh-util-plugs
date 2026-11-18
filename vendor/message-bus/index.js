@@ -643,6 +643,23 @@ function safeMessageView(row) {
   }
 }
 
+/** Pure detail projection; the Web Remote supplies the actual readers. */
+export function visibilityDetailOf({ domain, id, getMessage, readTaskDetail } = {}) {
+  if (domain === 'messages') {
+    const row = typeof getMessage === 'function' ? getMessage(id) : undefined
+    if (row === undefined || row === null) return { ok: false, code: 'NOT_FOUND' }
+    return { ok: true, state: 'ready', item: safeMessageView(row), evidence: { hash: row.sha256, at: row.at }, redacted: ['body'] }
+  }
+  if (domain === 'tasks') {
+    const detail = typeof readTaskDetail === 'function' ? readTaskDetail({ id }) : undefined
+    if (detail?.ok === false) return detail
+    const task = detail?.task ?? detail
+    const evidence = task?.metadata?.completion?.evidence ?? null
+    return { ok: true, state: 'ready', item: safeTaskView(task), evidence, redacted: ['description', 'metadata'] }
+  }
+  return { ok: false, code: 'DOMAIN_UNAVAILABLE', error: 'detail is not available for ' + String(domain) }
+}
+
 /** Pagination metadata shared by visibilityPage and its tests. */
 export function visibilityPageMeta(total, offset, limit) {
   const safeTotal = Math.max(0, Number(total) || 0)
@@ -2755,20 +2772,7 @@ export function apply(ctx, config) {
         }
         const domain = String(args.domain ?? '')
         const id = typeof args.id === 'string' ? args.id : ''
-        if (domain === 'messages') {
-          const row = store.getMessage(id)
-          if (row === undefined || row === null) return { ok: false, code: 'NOT_FOUND' }
-          return { ok: true, state: 'ready', item: safeMessageView(row), evidence: { hash: row.sha256, at: row.at }, redacted: ['body'] }
-        }
-        if (domain === 'tasks') {
-          const detail = readTaskDetail({ id })
-          if (detail?.ok === false) return detail
-          const task = detail?.task ?? detail
-          const evidence = task?.metadata?.completion?.evidence ?? null
-          const item = safeTaskView(task)
-          return { ok: true, state: 'ready', item, evidence, redacted: ['description', 'metadata'] }
-        }
-        return { ok: false, code: 'DOMAIN_UNAVAILABLE', error: 'detail is not available for ' + domain }
+        return visibilityDetailOf({ domain, id, getMessage: store.getMessage, readTaskDetail })
       }
       memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }

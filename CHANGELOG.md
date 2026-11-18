@@ -1,3 +1,7 @@
+## 2026.11.17-27 (dev)
+
+- **Detail projection tests**: `visibilityDetailOf` is a pure projection; tests cover body-free messages, nested task evidence, redaction, and NOT_FOUND. Host `visibilityDetail` delegates to it.
+
 ## 2026.11.17-26 (dev)
 
 - **Visibility contract hardening**: `visibilitySummary` now exposes an aggregate `state` (`partial` when any card is unavailable); `visibilityPage` returns stable `version`, `nextCursor`, and `error:null` via `visibilityPageMeta`; tests cover pagination fields.

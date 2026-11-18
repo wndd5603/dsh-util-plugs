@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { safeTaskView, visibilityPageMeta, visibilitySummaryOf } from '../vendor/message-bus/index.js'
+import { safeTaskView, visibilityDetailOf, visibilityPageMeta, visibilitySummaryOf } from '../vendor/message-bus/index.js'
 
 test('visibility summary requires profile and workspace scope', () => {
   const result = visibilitySummaryOf({})
@@ -45,6 +45,24 @@ test('visibilityPageMeta exposes stable cursor/version/error fields', () => {
   assert.equal(first.version, 'v1')
   assert.equal(first.error, null)
   assert.equal(visibilityPageMeta(10, 5, 5).nextCursor, null)
+})
+
+test('visibilityDetailOf strips body and reads nested evidence', () => {
+  const message = visibilityDetailOf({
+    domain: 'messages', id: 'm1',
+    getMessage: () => ({ id: 'm1', at: 't', subject: 's', body: 'secret', sha256: 'abc' }),
+  })
+  assert.equal(message.ok, true)
+  assert.equal(JSON.stringify(message).includes('secret'), false)
+  assert.equal(message.evidence.hash, 'abc')
+  const task = visibilityDetailOf({
+    domain: 'tasks', id: 't1',
+    readTaskDetail: () => ({ task: { id: 't1', title: 'x', description: 'd', metadata: { completion: { evidence: { sha256: 'a'.repeat(64) } } } } }),
+  })
+  assert.equal(task.ok, true)
+  assert.equal(JSON.stringify(task.item).includes('description'), false)
+  assert.equal(task.evidence.sha256, 'a'.repeat(64))
+  assert.equal(visibilityDetailOf({ domain: 'messages', id: 'x', getMessage: () => undefined }).code, 'NOT_FOUND')
 })
 
 test('visibility summary isolates an unavailable domain', () => {
