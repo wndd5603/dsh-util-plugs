@@ -1,3 +1,7 @@
+## 2026.11.17-41 (dev)
+
+- **Subenv host LLM text**: also assemble `block-end` text blocks when a provider emits no `text-delta`, so completed tasks return their assistant text instead of an empty result.
+
 ## 2026.11.17-40 (dev)
 
 - **Subenv submit tool**: snapshot the submit result to plain JSON before returning it, so the tool output boundary accepts queued/running task views.

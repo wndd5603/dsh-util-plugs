@@ -61,6 +61,7 @@ export function createHostProvider({
       const route = await resolveRoute()
       if (route.ok !== true) return route
       let text = ''
+      let blockText = ''
       try {
         for await (const chunk of llm().stream({
           provider: route.provider,
@@ -69,6 +70,9 @@ export function createHostProvider({
           maxTokens,
         })) {
           if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
+          if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && typeof chunk.block.text === 'string') {
+            blockText += chunk.block.text
+          }
           if (chunk?.type === 'finish' && chunk.reason === 'error') {
             return { ok: false, code: 'LLM_FINISH_ERROR', message: 'host LLM stream finished with error' }
           }
@@ -76,7 +80,7 @@ export function createHostProvider({
       } catch (error) {
         return { ok: false, code: 'LLM_STREAM_ERROR', message: String(error?.message ?? error) }
       }
-      return { ok: true, text, model: route.model, usage: null }
+      return { ok: true, text: text !== '' ? text : blockText, model: route.model, usage: null }
     },
   }
 }
