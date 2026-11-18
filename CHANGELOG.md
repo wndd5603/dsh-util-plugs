@@ -1,3 +1,7 @@
+## 2026.11.17-6 (dev)
+
+- **Default stale digest**: `bulletin_digest` now applies `staleAfterHours=24` when the caller supplies neither an SLA nor `updatedBefore`; stale active tasks are visible without requiring a remembered SLA. Explicit filters still win.
+
 ## 2026.11.17-5 (dev)
 
 - **Archive ownership**: the manual-compaction reminder resolves the caller's own `team/members/<role>/ARCHIVE_*.md`; a remembered foreign archive path is ignored, and the fallback is the latest archive in the caller's role directory. This prevents cross-role recovery from injecting another agent's conclusions.

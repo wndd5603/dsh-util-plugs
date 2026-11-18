@@ -44,3 +44,11 @@ test('generic updateTask cannot mark a task completed', (t) => {
   assert.throws(() => store.updateTask(task.id, { status: 'completed' }, exec), /bulletin_task_complete/i)
   assert.equal(store.getTask(task.id).status, 'pending')
 })
+
+test('digest returns stale tasks when an SLA is applied', (t) => {
+  const { store, task } = fixture(t)
+  store.updateTask(task.id, { assigneeSession: SESSION }, exec, { operator: true })
+  store.db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run('2026-01-01T00:00:00.000Z', task.id)
+  const stale = store.digest({ session: SESSION, staleAfterHours: 24 })
+  assert.ok(stale.some(item => item.id === task.id))
+})

@@ -177,9 +177,9 @@ export function apply(ctx) {
 
   register(describe('bulletin_digest', 'Read-only recall digest of tasks related to the caller (assignee, workspace, '
     + 'or explicit session/alias) that are blocked or stale. Stale is an SLA measured from updated_at; the board has '
-    + 'no dueAt and none is fabricated. completed/terminated tasks never match. Without an SLA only blocked tasks '
-    + 'match; with updatedBefore/staleAfterHours the result is blocked OR stale, and status narrows it. '
-    + 'New filters AND with the legacy session/alias/workspace OR scope.', {
+    + 'no dueAt and none is fabricated. completed/terminated tasks never match. Without an explicit SLA the default '
+    + 'staleAfterHours=24 is applied, so a caller does not need to remember an SLA; with updatedBefore/staleAfterHours '
+    + 'the result is blocked OR stale, and status narrows it. New filters AND with the legacy session/alias/workspace OR scope.', {
     session: str('Optional session id; defaults to caller.'), alias: str('Optional alias.'), workspace: str('Optional workspace.'),
     status: statusProp, boardId: str('Optional board id filter.'),
     assignee: str('Optional assignee filter; matches assignee session or alias.'),
@@ -187,6 +187,7 @@ export function apply(ctx) {
     staleAfterHours: num('Optional SLA in hours based on updated_at: tasks not updated for more than this many hours count as stale. Mutually exclusive with updatedBefore.'),
   }), async (args, exec) => {
     const a = actor(exec)
+    const hasExplicitSla = args.updatedBefore !== undefined || args.staleAfterHours !== undefined
     return { tasks: store.digest({
       session: args.session ?? a.session,
       alias: args.alias ?? a.alias,
@@ -195,7 +196,7 @@ export function apply(ctx) {
       boardId: args.boardId,
       assignee: args.assignee,
       updatedBefore: args.updatedBefore,
-      staleAfterHours: args.staleAfterHours,
+      staleAfterHours: hasExplicitSla ? args.staleAfterHours : 24,
     }) }
   })
 
