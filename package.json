@@ -78,7 +78,7 @@
     "build:client": "node scripts/build-client.mjs",
     "verify:client": "node scripts/verify-client.mjs",
     "verify": "node scripts/verify-scaffold.mjs",
-    "test": "node --test scripts/test-message-bus-p0.mjs scripts/test-bulletin-evidence.mjs scripts/test-artifact-manifest.mjs scripts/test-archive-ownership.mjs scripts/test-memory-forget.mjs scripts/test-apartment-lease.mjs",
+    "test": "node --test scripts/test-message-bus-p0.mjs scripts/test-bulletin-evidence.mjs scripts/test-artifact-manifest.mjs scripts/test-archive-ownership.mjs scripts/test-memory-forget.mjs scripts/test-apartment-lease.mjs scripts/test-bulletin-digest-tool.mjs",
     "release": "node scripts/release.mjs"
   },
   "engines": {
