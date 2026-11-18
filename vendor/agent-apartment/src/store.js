@@ -54,7 +54,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_primary
   ON agent_sessions(agent_id) WHERE is_primary = 1;
 CREATE TABLE IF NOT EXISTS leases (
   id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, workspace TEXT NOT NULL, work_dir TEXT NOT NULL,
-  task_id TEXT, state TEXT NOT NULL DEFAULT 'active', expires_at TEXT, created_at TEXT NOT NULL
+  task_id TEXT, state TEXT NOT NULL DEFAULT 'active', expires_at TEXT, created_at TEXT NOT NULL,
+  fencing_token INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS teams (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, purpose TEXT, workspace TEXT, created_at TEXT NOT NULL
@@ -180,6 +181,12 @@ export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {
     }
     if (!columns.some(column => column.name === 'verified')) {
       db.exec('ALTER TABLE task_roles ADD COLUMN verified INTEGER NOT NULL DEFAULT 1')
+    }
+  }
+  {
+    const leaseColumns = db.prepare('PRAGMA table_info(leases)').all()
+    if (!leaseColumns.some(column => column.name === 'fencing_token')) {
+      db.exec('ALTER TABLE leases ADD COLUMN fencing_token INTEGER NOT NULL DEFAULT 1')
     }
   }
   const reapExpired = () => {
@@ -356,15 +363,41 @@ export function createApartment({ root, dbPath, backupKeep, backupMaxAgeMs } = {
     listTeams() { return db.prepare('SELECT * FROM teams ORDER BY name').all() },
     listMemberships(teamId) { return teamId === undefined ? db.prepare('SELECT * FROM memberships').all() : db.prepare('SELECT * FROM memberships WHERE team_id=?').all(teamId) },
     claimLease({ agentId, workspace, taskId = null, ttlMs = 3600000 }) {
+      if (typeof agentId !== 'string' || agentId.trim() === '') throw codedError('INVALID_ARGUMENT', 'claimLease: agentId is required')
+      if (typeof workspace !== 'string' || workspace.trim() === '') throw codedError('INVALID_ARGUMENT', 'claimLease: workspace is required')
+      const task = typeof taskId === 'string' && taskId.trim() !== '' ? taskId.trim() : null
       reapExpired()
-      const id = 'lease-' + randomUUID().slice(0, 8)
-      const workDir = safeJoin(resolvedRoot, 'work', taskId || id)
-      mkdirSync(workDir, { recursive: true })
-      const expiresAt = new Date(Date.now() + ttlMs).toISOString()
-      db.prepare('INSERT INTO leases (id,agent_id,workspace,work_dir,task_id,state,expires_at,created_at) VALUES (?,?,?,?,?,\'active\',?,?)').run(id, agentId, workspace, workDir, taskId, expiresAt, now())
-      return db.prepare('SELECT * FROM leases WHERE id=?').get(id)
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        if (task !== null) {
+          const existing = db.prepare("SELECT * FROM leases WHERE task_id=? AND state='active' ORDER BY created_at DESC LIMIT 1").get(task)
+          if (existing !== undefined) {
+            throw codedError('LEASE_CONFLICT', 'claimLease: active lease already exists for task ' + task, { existingLease: existing })
+          }
+        }
+        const fencingToken = task === null ? 1 : Number(db.prepare('SELECT COALESCE(MAX(fencing_token), 0) + 1 AS n FROM leases WHERE task_id=?').get(task)?.n ?? 1)
+        const id = 'lease-' + randomUUID().slice(0, 8)
+        const workDir = safeJoin(resolvedRoot, 'work', task || id)
+        mkdirSync(workDir, { recursive: true })
+        const expiresAt = new Date(Date.now() + ttlMs).toISOString()
+        db.prepare('INSERT INTO leases (id,agent_id,workspace,work_dir,task_id,state,expires_at,created_at,fencing_token) VALUES (?,?,?,?,?,\'active\',?,?,?)')
+          .run(id, agentId.trim(), workspace, workDir, task, expiresAt, now(), fencingToken)
+        db.exec('COMMIT')
+        return db.prepare('SELECT * FROM leases WHERE id=?').get(id)
+      } catch (error) {
+        try { db.exec('ROLLBACK') } catch { /* best effort */ }
+        throw error
+      }
     },
-    releaseLease(id) { db.prepare("UPDATE leases SET state='released' WHERE id=?").run(id); return { released: true } },
+    releaseLease(id, options = {}) {
+      const row = db.prepare('SELECT * FROM leases WHERE id=?').get(id)
+      if (row === undefined) throw codedError('NOT_FOUND', 'releaseLease: lease not found: ' + id)
+      if (typeof options.agentId === 'string' && options.agentId !== '' && row.agent_id !== options.agentId) {
+        throw codedError('FORBIDDEN', 'releaseLease: only the lease owner may release it')
+      }
+      const result = db.prepare("UPDATE leases SET state='released' WHERE id=? AND state='active'").run(id)
+      return { released: result.changes > 0, id, state: result.changes > 0 ? 'released' : row.state, fencingToken: row.fencing_token }
+    },
     listLeases(agentId) { reapExpired(); return agentId === undefined ? db.prepare('SELECT * FROM leases').all() : db.prepare('SELECT * FROM leases WHERE agent_id=?').all(agentId) },
     // Read-only lease view: never calls reapExpired and never UPDATEs. Used by
     // apartment_collaboration_brief, whose read-only contract is load-bearing.

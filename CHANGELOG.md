@@ -1,3 +1,7 @@
+## 2026.11.17-11 (dev)
+
+- **Lease fencing and ownership**: apartment leases add a monotonic `fencing_token` per task, reject a second active lease for the same task with `LEASE_CONFLICT`, require the lease owner on release, and return `released:false` for an already released lease. Existing databases get the additive column migration.
+
 ## 2026.11.17-10 (dev)
 
 - **Send audit**: every accepted `message_send` appends one body-free row to `send-audit.jsonl` (actor, target, messageId, subject, bytes, sha256, priority/test/projectScope, targetState). This closes the 0-send-audit gap without changing delivery semantics.
