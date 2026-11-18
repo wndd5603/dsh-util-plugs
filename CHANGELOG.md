@@ -1,3 +1,7 @@
+## 2026.11.17-62 (dev)
+
+- **CR regressions**: added tests for Web delete default-disable and no-arg `collaboration_recall` caller scoping.
+
 ## 2026.11.17-61 (dev)
 
 - **CR cleanup**: removed dead apartment team Remote branches/assertion, stale team read-only tool names, hardcoded bulletin snapshot path fixed; CAPABILITY_AUDIT/agent-apartment README rewritten for 11 rows and retired team tools.
