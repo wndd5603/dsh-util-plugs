@@ -145,11 +145,6 @@ export function apply(ctx, config) {
       throw codedError(COLLAB_ERROR_CODES.AGENT_NOT_FOUND, 'apartment: agent not found: ' + (agentId ?? '<empty>'))
     }
   }
-  const assertTeamExists = teamId => {
-    if (teamId !== undefined && !apartment.listTeams().some(row => row.id === teamId)) {
-      throw codedError(COLLAB_ERROR_CODES.TEAM_NOT_FOUND, 'apartment: team not found: ' + teamId)
-    }
-  }
   /**
    * P1 cross-store task check. A readable bulletin DB is authoritative: an
    * unknown task is TASK_NOT_FOUND. An unavailable store fails closed with
@@ -485,9 +480,7 @@ export function apply(ctx, config) {
         return { ...row, resolvedHome: home, agentsMd, skills: readList('skills'), tools: readList('tools') }
       }
       if (section === 'agents') rows = apartment.listAgents().filter(row => match(row.id) || match(row.name) || match(row.home) || match(row.status)).map(agentDetail)
-      else if (section === 'teams') rows = apartment.listTeams().filter(row => match(row.id) || match(row.name) || match(row.purpose))
       else if (section === 'leases') rows = apartment.listLeases().filter(row => match(row.agent_id) || match(row.workspace) || match(row.state))
-      else if (section === 'roles') rows = apartment.listTaskRoles().filter(row => match(row.task_id) || match(row.agent_id) || match(row.role))
       else if (section === 'experiences') rows = apartment.listExperiences().filter(row => match(row.agent_id) || match(row.summary) || match(row.outcome))
       else if (section === 'backups') rows = apartment.listBackups?.() ?? []
       else rows = []

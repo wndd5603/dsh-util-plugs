@@ -108,7 +108,7 @@ export const Config = objectSchema({
     auditDir: string('', { description: 'Public audit home; empty = $DSH_HOME/audit/delegation. Do not hard-code a project path.' }),
     stateFile: string('', { description: 'Advisor state file; empty = $DSH_HOME/delegation-advisor-state.json.' }),
     verificationRoles: stringArray(['verify-captain', 'verify*'], { description: 'Roles that never receive the advisory.' }),
-    readOnlyTools: stringArray(['read', 'grep', 'glob', 'context_usage', 'team_audit', 'team_sessions', 'team_hooks_status', 'list_agents', 'team_task_list', 'team_task_get', 'job_list', 'job_output', 'job_get', 'web_search', 'web_fetch'], { description: 'Tools considered read-only for the false-positive gate.' }),
+    readOnlyTools: stringArray(['read', 'grep', 'glob', 'context_usage', 'team_hooks_status', 'list_agents', 'job_list', 'job_output', 'job_get', 'web_search', 'web_fetch'], { description: 'Tools considered read-only for the false-positive gate.' }),
     verificationTools: stringArray(['verify*', 'verify-relaunch', 'test*', 'check*', 'run-tests', 'run_tests'], { description: 'Tool name patterns that mark a turn as verification work.' }),
     minWrites: number(8, { description: 'Minimum writes in one turn before the advisory is eligible.', int: true, min: 1 }),
     maxDelegateCalls: number(0, { description: 'Maximum delegate calls before the advisory is suppressed.', int: true, min: 0 }),
@@ -929,8 +929,8 @@ const DELEGATION_EDIT_TOOLS = new Set(['edit', 'str_replace', 'apply_patch'])
 const DELEGATION_DEFAULT_ARM_FILE = join(DSH_HOME, 'delegation-arm.txt')
 /** Read-only tools: a turn made only of these is a read-only turn (FP gate). */
 const DELEGATION_DEFAULT_READ_ONLY_TOOLS = Object.freeze([
-  'read', 'grep', 'glob', 'context_usage', 'team_audit', 'team_sessions',
-  'team_hooks_status', 'list_agents', 'team_task_list', 'team_task_get',
+  'read', 'grep', 'glob', 'context_usage',
+  'team_hooks_status', 'list_agents',
   'job_list', 'job_output', 'job_get', 'web_search', 'web_fetch',
 ])
 /** Verification tools: a mixed turn containing these is taskKind=verification. */

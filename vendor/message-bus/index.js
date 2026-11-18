@@ -402,7 +402,7 @@ const safeJsonObject = value => {
 
 /** Read-only Agent Network snapshots so the panel works even if auxiliary Remotes mount late. */
 function readAgentNetworkSnapshot(ctx) {
-  const dbPath = join(dshHomeDir(), 'bulletin-board', 'board.sqlite')
+  const dbPath = bulletinDbPath()
   if (!existsSync(dbPath)) return undefined
   let db
   try {

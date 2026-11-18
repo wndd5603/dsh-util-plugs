@@ -1,3 +1,7 @@
+## 2026.11.17-61 (dev)
+
+- **CR cleanup**: removed dead apartment team Remote branches/assertion, stale team read-only tool names, hardcoded bulletin snapshot path fixed; CAPABILITY_AUDIT/agent-apartment README rewritten for 11 rows and retired team tools.
+
 ## 2026.11.17-60 (dev)
 
 - **CR fixes**: Web Remote delete now defaults to disabled (`webUi.allowDelete=false`, operator opt-in); `collaboration_recall()` no-arg permission fixed; README corruption/version/table and workbench package entry corrected.
