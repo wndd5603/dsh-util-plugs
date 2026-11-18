@@ -2249,7 +2249,7 @@ function CollaborationDomainView({ api, domain, label }) {
     panel('div', { style: COLLAB_STYLE.list }, items.map((item, index) => {
       const id = item.id ?? item.meetingId ?? `row-${index}`
       const title = item.subject ?? item.title ?? item.key ?? item.meetingId ?? item.id ?? '(untitled)'
-      const meta = [item.status, item.assignee, item.from, item.to, item.at, item.scope].filter(Boolean).join(' · ')
+      const meta = [item.status, item.assignee, item.from, item.to, item.at, item.scope, item.meta].filter(Boolean).join(' · ')
       return panel('button', { key: id, type: 'button', style: selected?.id === item.id ? COLLAB_STYLE.rowActive : COLLAB_STYLE.row, onClick: () => { void select(item) } },
         panel('span', { style: COLLAB_STYLE.rowTitle }, String(title)),
         meta !== '' ? panel('span', { style: COLLAB_STYLE.rowMeta }, String(meta)) : null)
@@ -2285,7 +2285,7 @@ function CollaborationPage(props) {
             label: id === 'messages' ? '未读/消息' : id === 'tasks' ? '任务' : id === 'meetings' ? '会议 action' : id === 'memory' ? '记忆' : id === 'runtime' ? '运行与存储' : '子环境',
             state: card.state,
             count: card.count,
-            note: [card.unread !== undefined ? `未读 ${card.unread}` : null, card.stale !== undefined ? `stale ${card.stale}` : null, card.blocked !== undefined ? `blocked ${card.blocked}` : null, value.generatedAt].filter(Boolean).join(' · '),
+            note: [card.unread !== undefined ? `未读 ${card.unread}` : null, card.stale !== undefined ? `stale ${card.stale}` : null, card.blocked !== undefined ? `blocked ${card.blocked}` : null, card.note ?? null, value.generatedAt].filter(Boolean).join(' · '),
           }))
           setCards(cards)
           setLoading(false)

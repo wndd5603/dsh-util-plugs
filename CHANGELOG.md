@@ -1,3 +1,7 @@
+## 2026.11.17-35 (dev)
+
+- **Subenv visibility**: visibilitySummary now surfaces embedded subenv state/mode/provider (degraded = partial) and the collaboration overview shows the mode/provider note; the Subenv row renders its meta instead of only "degraded".
+
 ## 2026.11.17-34 (dev)
 
 - **Embedded subenv**: same-process provider adapter + task runner; no port/token; Subenv tab reads embedded status; `subenv_task_submit/get/list/cancel` tools. `subenv.mode` defaults `embedded`; external RPC remains opt-in.

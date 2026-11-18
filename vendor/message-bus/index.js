@@ -774,13 +774,23 @@ export function visibilitySummaryOf({
     ...extra,
   })
   const taskCounts = tasks?.counts ?? {}
+  const subenvCard = subenv === null
+    ? card(null, 0, { note: 'not configured' })
+    : {
+      state: subenv.state === 'online' ? 'ready' : (subenv.state === 'degraded' ? 'partial' : 'unavailable'),
+      count: Array.isArray(subenv.tasks) ? subenv.tasks.length : 0,
+      asOf: now,
+      mode: subenv.mode ?? null,
+      provider: subenv.provider ?? null,
+      note: `${subenv.mode ?? 'embedded'} · provider ${subenv.provider?.llmEnabled === true ? 'on' : 'off'}`,
+    }
   const cards = {
     messages: card(messageCounts, messageCounts?.messages ?? 0, { unread: messageCounts?.unread ?? 0 }),
     tasks: card(tasks, tasks?.total ?? 0, { stale: taskCounts.stale ?? 0, blocked: taskCounts.blocked ?? 0 }),
     meetings: card(meetings, meetings?.total ?? 0),
     memory: card(memory, memory?.total ?? 0),
     runtime: card(null, 0, { note: 'Wave C' }),
-    subenv: card(subenv, subenv?.total ?? 0, { note: subenv === null ? 'not configured' : undefined }),
+    subenv: subenvCard,
   }
   const unavailable = Object.values(cards).some(item => item.state === 'unavailable')
   const empty = Object.values(cards).every(item => item.state === 'empty')
@@ -2864,7 +2874,7 @@ export function apply(ctx, config) {
         return visibilitySummaryOf({
           messageCounts: store.counts(), tasks: readTasksPage({ limit: 1 }),
           memory: readMemoryPage({ limit: 1 }), meetings: readMeetingsPage({ limit: 1 }),
-          subenv: null,
+          subenv: cfg.subenv.mode === 'embedded' ? embeddedSubenv.status() : null,
         })
       }
       visibilityPage(query) {

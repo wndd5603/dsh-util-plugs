@@ -75,6 +75,16 @@ test('visibilityDetailOf strips body and reads nested evidence', () => {
   assert.equal(visibilityDetailOf({ domain: 'messages', id: 'x', getMessage: () => undefined }).code, 'NOT_FOUND')
 })
 
+test('visibility summary surfaces embedded subenv state', () => {
+  const result = visibilitySummaryOf({
+    messageCounts: { messages: 0, unread: 0 }, tasks: { total: 0 }, memory: { total: 0 }, meetings: { total: 0 },
+    subenv: { state: 'degraded', mode: 'embedded', provider: { llmEnabled: false }, tasks: [] },
+  })
+  assert.equal(result.cards.subenv.state, 'partial')
+  assert.equal(result.cards.subenv.mode, 'embedded')
+  assert.match(result.cards.subenv.note, /provider off/)
+})
+
 test('visibility summary isolates an unavailable domain', () => {
   const result = visibilitySummaryOf({
     messageCounts: { messages: 1, unread: 0 },
