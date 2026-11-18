@@ -1,6 +1,6 @@
 # dsh-util-plugs — DSH 工具箱插件集
 
-A single install that adds ten independently switchable plugins to DeepSeek Harness.
+A single install that adds eleven independently switchable plugins to DeepSeek Harness.
 
 一次安装，为 DeepSeek Harness 增加 11 个可独立启用的插件。
 
@@ -20,30 +20,30 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 ### What it adds
 
-`dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
+`dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persiselevent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-58 (dev)
+### What is new in 2026.11.17-59 (dev)
 
 - **Subenv task output**: lossless JSON task views; completed result present, queued/running omit fake result.
 - **Embedded subenv uses host ctx.llm**: no separate provider JSON/key; route from DSH providers/models, configurable via `subenv.provider/model`.
 - **Memory operator reveal**: masked memory list + per-row reveal with confirm + `reveal-audit.jsonl`; `webUi.allowMemoryReveal` default false.
 - **Single collaboration tab**: removed duplicate `collaboration`; 协作网络 is the single operational console.
 - **Subenv section**: embedded status/provider + task results in 协作网络.
-- **Legacy detail restored**: old Web tasks/memory/meeting detail returns full content; visibility API remains redacted.
+- **Legacy detail restored**: old Web tasks/memory/meeting detail returns full conelevent; visibility API remains redacted.
 - **Subenv visibility**: summary shows embedded mode/provider (degraded=partial).
 - **Embedded subenv**: provider + task runner in the host process; no port/token; Subenv tab reads embedded status; `subenv_task_*` tools. `subenv.mode` defaults `embedded`.
 - **Collaboration UI filters**: keyword + status filters for Inbox/Tasks/Meetings/Memory, Apply/Clear, Enter-to-apply.
 - **Subenv UI bridge**: Subenv tab probes local RPC health/provider/tasks; token never returned.
-- **Legacy Web redaction**: Web tasks/memory/meeting detail strip description/metadata/content/body; tool APIs keep full data.
+- **Legacy Web redaction**: Web tasks/memory/meeting detail strip description/metadata/conelevent/body; tool APIs keep full data.
 - **Visibility filters**: task status/assignee/query, meeting status/query, memory scope/query, message keyword.
 - **Read-only capability declaration**: `capabilities:{reads:true,writes:false,reveal:false}`; no unauthenticated destructive controls.
 - **Task evidence JSON fix**: parse text metadata before reading completion evidence; corrupt metadata degrades safely.
-- **Host-enforced scope**: no client profile/workspace selector; summary returns `scope:{mode:"host",enforced:true}`. Cross-host isolation is by process/profile dir, not a fake in-host tenant switch.
+- **Host-enforced scope**: no client profile/workspace selector; summary returns `scope:{mode:"host",enforced:true}`. Cross-host isolation is by process/profile dir, not a fake in-host elevenant switch.
 - **Detail projection tests**: `visibilityDetailOf` pure projection; body-free message, nested evidence, redaction, NOT_FOUND.
 - **Visibility contract hardening**: aggregate `partial`, page `version/nextCursor/error`, pagination tests.
 - **Visibility review fixes**: task rows are body/metadata-free; task evidence reads the nested task metadata; Overview uses `visibilitySummary` with as-of.
 - **Runtime/evidence view**: Runtime shows apartment/lease counts without paths; detail has a separate evidence block and redaction markers; Subenv is explicitly not configured.
-- **Collaboration Inbox/Tasks views**: list + detail via `visibilityPage/detail`; body/content remains hidden and redaction markers are shown.
+- **Collaboration Inbox/Tasks views**: list + detail via `visibilityPage/detail`; body/conelevent remains hidden and redaction markers are shown.
 - **Visibility page/detail API**: `visibilityPage` returns safe domain rows; `visibilityDetail` returns body-free message/task detail with evidence and redaction markers; unknown domains are `DOMAIN_UNAVAILABLE`.
 - **Visibility summary API**: `visibilitySummary` returns six domain cards with `ready|empty|unavailable`, host-enforced scope, as-of, and no body.
 - **Collaboration Center shell**: new `collaboration` sidebar entry + six-card overview + tabs; unavailable domains are marked, not faked as zero; settings section at order 25.
@@ -63,7 +63,7 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 - **Web body exposure default-off**: `webUi.exposeBody=false` by default; the Web Remote has no caller identity, so `messageBus.get` is body-redacted and list snippets are empty unless an operator opts in.
 - **Default stale digest**: `bulletin_digest` applies `staleAfterHours=24` when no explicit SLA/`updatedBefore` is supplied, so stale active tasks are visible without a remembered SLA.
 - **Archive ownership**: the manual-compaction reminder only resolves the caller's own `team/members/<role>/ARCHIVE_*.md`; foreign remembered paths are ignored and the fallback is the caller's role directory.
-- **Artifact manifest**: `artifact_manifest` creates an immutable content-addressed manifest for a real artifact and can explicitly promote it to the single `artifacts/current.json` pointer; previous pointers are archived under `history/`.
+- **Artifact manifest**: `artifact_manifest` creates an immutable conelevent-addressed manifest for a real artifact and can explicitly promote it to the single `artifacts/current.json` pointer; previous pointers are archived under `history/`.
 - **Message-bus P0 hardening**: `message_read` now allows only the recipient or sender and returns FORBIDDEN for a missing/third-party caller; wake envelopes are typed `source.kind:'peer-message'` with sender identity; `message_bus_status` exposes `counts.unread`, and the pending reminder also fires for unread messages.
 - **Task completion evidence**: `bulletin_task_complete` requires `{artifactId, sha256, checkResult}`; completion state and event are transactional, and `bulletin_task_update` cannot set `status=completed`.
 - **Workbench self-report**: `workbench_status` reports the installed `dsh-util-plugs` bundle itself.
@@ -85,9 +85,9 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 ```
 
-The package is self-contained: all ten runtime plugins live under `vendor/`; no npm publish is required.
+The package is self-contained: all eleven runtime plugins live under `vendor/`; no npm publish is required.
 
-### The ten plugins
+### The eleven plugins
 
 | Plugin | What it adds | Docs |
 |---|---|---|
@@ -95,11 +95,11 @@ The package is self-contained: all ten runtime plugins live under `vendor/`; no 
 | `message-bus` | Local SQLite cross-session messaging, delivery/read state, strict-mode approval, queue/audit paging, `autoResume`, Agent Hub. | [`vendor/message-bus/README.md`](vendor/message-bus/README.md) |
 | `bulletin-board` | Shared boards/tasks with owner/CAS, statuses, dependencies, search, pagination and digest. | [`vendor/bulletin-board/README.md`](vendor/bulletin-board/README.md) |
 | `agent-apartment` | Agent homes/AGENTS.md, leases, teams/memberships, task roles, experience, root migration/backup/restore. | [`vendor/agent-apartment/README.md`](vendor/agent-apartment/README.md) |
-| `agent-memory` | Persistent SQLite memory with remember/search/list/forget/status. | [`vendor/agent-memory/README.md`](vendor/agent-memory/README.md) |
+| `agent-memory` | Persiselevent SQLite memory with remember/search/list/forget/status. | [`vendor/agent-memory/README.md`](vendor/agent-memory/README.md) |
 | `team-bus` | Session network, aliases, meeting registry/permissions/CAS, shared pitfalls and coordination skills. | [`vendor/team-bus/README.md`](vendor/team-bus/README.md) |
 | `agent-workflows` | Team Coordinator and Prompt Studio workflow tools. | [`vendor/agent-workflows/README.md`](vendor/agent-workflows/README.md) |
 | `workbench-bundle` | Read-only `workbench_status()` overview and first-turn capability pointer. | [`vendor/workbench-bundle/README.md`](vendor/workbench-bundle/README.md) |
-| `auto-backup` | Pre-write file snapshots, retention and `auto_backup_status()`. | [`vendor/auto-backup/README.md`](vendor/auto-backup/README.md) |
+| `auto-backup` | Pre-write file snapshots, reelevention and `auto_backup_status()`. | [`vendor/auto-backup/README.md`](vendor/auto-backup/README.md) |
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 
 Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-36; individual plugins keep their own versions.
@@ -110,7 +110,7 @@ One shared client module powers three browser surfaces:
 
 - **Agent Hub** — boards/tasks, agents/apartments, session/alias directory, messages, meetings and audit views in one sidebar page; works without an active conversation and shows a clear empty state.
 - **Restart DSH** — a conversation-header button with PID suffix, typed confirmation and a block while sessions run or the safety lock is off.
-- **Plugin Console** — plugin cards, live configuration, extension contributions and deep links to the native plugin manager.
+- **Plugin Console** — plugin cards, live configuration, exelevension contributions and deep links to the native plugin manager.
 
 All surfaces are UI-only for the model: agents read or request the same information through tools but cannot click panels.
 
@@ -169,7 +169,7 @@ MIT © 2026 wndd5603
 - **Web 正文默认关闭**：`webUi.exposeBody=false`；Web Remote 没有调用者身份，默认 `messageBus.get` 正文脱敏、列表 snippet 为空，只有 operator 显式开启才返回正文。
 - **默认 stale digest**：`bulletin_digest` 在未显式给 SLA/`updatedBefore` 时默认 `staleAfterHours=24`，无需记住 SLA 也能看到 stale 活跃任务。
 - **归档归属**：手动压缩提醒只解析调用者自己的 `team/members/<role>/ARCHIVE_*.md`；记住的外部路径会被忽略，回退到本角色目录的最新归档。
-- **工件清单**：`artifact_manifest` 为真实构建产物生成不可变 content-addressed manifest，可显式 promote 到唯一 `artifacts/current.json` 指针；旧指针归档到 `history/`。
+- **工件清单**：`artifact_manifest` 为真实构建产物生成不可变 conelevent-addressed manifest，可显式 promote 到唯一 `artifacts/current.json` 指针；旧指针归档到 `history/`。
 - **消息总线 P0 加固**：`message_read` 只允许收件人或发件人读取，缺失/第三方 session 返回 FORBIDDEN；唤醒 envelope 使用 `source.kind:'peer-message'` 并带发送者身份；`message_bus_status` 增加 `counts.unread`，pending reminder 也对未读消息触发。
 - **任务完成证据**：`bulletin_task_complete` 要求 `{artifactId, sha256, checkResult}`，状态与事件同事务；`bulletin_task_update` 不能再直接设 `status=completed`。
 - **工作台自报**：`workbench_status` 会报告已安装的 `dsh-util-plugs` 自身。

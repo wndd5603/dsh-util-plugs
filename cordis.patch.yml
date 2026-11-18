@@ -1,6 +1,6 @@
-# dsh-util-plugs — one bundle, ten switchable rows
+# dsh-util-plugs — one bundle, eleven switchable rows
 #
-# Self-contained: all ten runtime modules live inside this package under
+# Self-contained: all eleven runtime modules live inside this package under
 # plugins/ and vendor/. No unpublished npm package, workspace resolution or
 # network registry is required at install time.
 - insert:
@@ -38,3 +38,5 @@
       config:
         enabled: true
         allowRealRestart: false
+    - id: plugin-console
+      name: dsh-util-plugs/plugins/plugin-console

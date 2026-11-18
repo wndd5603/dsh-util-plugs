@@ -1,3 +1,7 @@
+## 2026.11.17-59 (dev)
+
+- **Restore plugin-console**: reintroduced the proven plugin-console row/client as the single self-made settings UI; removed the experimental collaboration settings section and native row-config entries. DSH native row config remains deferred.
+
 ## 2026.11.17-58 (dev)
 
 - **Settings inject fix**: pass configForms/layout from the client context into the settings section; the custom cards no longer fall back to the unavailable early scope.

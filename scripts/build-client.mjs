@@ -53,6 +53,7 @@ function half(name, relativePath) {
 const halves = [
   half('messageCenter', 'vendor/message-bus/lib/client.js'),
   half('hostRelaunch', 'vendor/host-relaunch/lib/client.js'),
+  half('pluginConsole', 'vendor/plugin-console/lib/client.js'),
 ]
 
 const bundle = `window.__ModuleLoader__.load({
@@ -69,8 +70,9 @@ ${halves.join('\n\n')}
 \t\tfunction apply(ctx) {
 \t\t\tmessageCenter.apply(ctx);
 \t\t\thostRelaunch.apply(ctx);
+\t\t\tpluginConsole.apply(ctx);
 \t\t}
-\t\tconst inject = [...new Set([...messageCenter.inject, ...hostRelaunch.inject])];
+\t\tconst inject = [...new Set([...messageCenter.inject, ...hostRelaunch.inject, ...pluginConsole.inject])];
 \t\texports.apply = apply;
 \t\texports.inject = inject;
 
