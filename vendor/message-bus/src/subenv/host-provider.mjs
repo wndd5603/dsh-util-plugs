@@ -1,3 +1,6 @@
+import { appendFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 /**
  * In-process provider bridge backed by the host's `ctx.llm` service.
  * No API key, base URL, or provider config is read from the subenv itself.
@@ -6,7 +9,7 @@ export function createHostProvider({
   getLlm,
   providerId = '',
   modelId = '',
-  maxTokens = 2048,
+  maxTokens = 8192,
 } = {}) {
   if (typeof getLlm !== 'function') throw new Error('getLlm is required')
 
@@ -62,6 +65,7 @@ export function createHostProvider({
       if (route.ok !== true) return route
       let text = ''
       let blockText = ''
+      const debug = []
       try {
         for await (const chunk of llm().stream({
           provider: route.provider,
@@ -73,12 +77,20 @@ export function createHostProvider({
           if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && typeof chunk.block.text === 'string') {
             blockText += chunk.block.text
           }
+          debug.push({ type: chunk?.type ?? null, reason: chunk?.reason ?? null, blockType: chunk?.block?.type ?? null })
           if (chunk?.type === 'finish' && chunk.reason === 'error') {
             return { ok: false, code: 'LLM_FINISH_ERROR', message: 'host LLM stream finished with error' }
           }
         }
       } catch (error) {
         return { ok: false, code: 'LLM_STREAM_ERROR', message: String(error?.message ?? error) }
+      } finally {
+        try {
+          const path = process.env.SUBENV_CHUNK_LOG || join(process.env.DSH_HOME || '', 'subenv-chunks.jsonl')
+          if (process.env.DSH_HOME || process.env.SUBENV_CHUNK_LOG) {
+            appendFileSync(path, JSON.stringify({ at: new Date().toISOString(), provider: route.provider, model: route.model, chunks: debug }) + '\n', 'utf8')
+          }
+        } catch { /* debug is best effort */ }
       }
       return { ok: true, text: text !== '' ? text : blockText, model: route.model, usage: null }
     },
