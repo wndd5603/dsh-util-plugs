@@ -310,7 +310,15 @@ export function apply(ctx, config) {
     profileDir,
   }))
   const collaborationBrief = async (args, exec) => {
-    const requested = optionalText(args?.sessionId) ?? callerSessionId(exec)
+    let requested
+    try {
+      requested = assertSessionPermission(optionalText(args?.sessionId), exec) ?? callerSessionId(exec)
+    } catch {
+      return {
+        ok: false, code: COLLAB_ERROR_CODES.OPERATOR_REQUIRED, sessionId: null, agentId: null,
+        warnings: [], asOf: new Date().toISOString(), text: '',
+      }
+    }
     if (requested === null) {
       return {
         ok: false, code: COLLAB_ERROR_CODES.UNBOUND_SESSION, sessionId: null, agentId: null,

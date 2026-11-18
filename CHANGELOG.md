@@ -1,3 +1,7 @@
+## 2026.11.17-45 (dev)
+
+- **Recall authorization**: `collaboration_recall`/`apartment_collaboration_brief` now rejects a non-operator `sessionId` for another session with `APARTMENT_OPERATOR_REQUIRED` instead of returning its brief.
+
 ## 2026.11.17-44 (dev)
 
 - **Recall safety**: `collaboration_recall` now excludes completed/terminated tasks from assigned counts/rows and returns only basenames for task workspace and lease workDir; the brief text points at `collaboration_recall()`.
