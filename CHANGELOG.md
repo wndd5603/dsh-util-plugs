@@ -1,3 +1,7 @@
+## 2026.11.17-40 (dev)
+
+- **Subenv submit tool**: snapshot the submit result to plain JSON before returning it, so the tool output boundary accepts queued/running task views.
+
 ## 2026.11.17-39 (dev)
 
 - **Subenv task output**: task views omit `undefined` fields so `subenv_task_submit/get/list` are lossless JSON and callable as tools; completed results stay present, queued/running tasks do not carry a fake `result`.

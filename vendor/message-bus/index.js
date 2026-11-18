@@ -2247,7 +2247,7 @@ export function apply(ctx, config) {
         additionalProperties: false,
       },
       output: jsonOutput,
-      async execute(args = {}) { return embeddedSubenv.submit(args) },
+      async execute(args = {}) { return JSON.parse(JSON.stringify(embeddedSubenv.submit(args))) },
       presentCall: () => ({ card: 'generic', title: 'Subenv task', kind: 'write' }),
     })
     ctx.tools.register({
