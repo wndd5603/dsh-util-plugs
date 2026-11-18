@@ -44,6 +44,8 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'tasksPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'taskDetail', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'visibilitySummary', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'visibilityPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'visibilityDetail', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
@@ -621,6 +623,16 @@ function readMemoryPage(rawArgs) {
     return emptyMemoriesPage(offset, limit)
   } finally {
     closeSnapshotDb(db)
+  }
+}
+
+/** Body-free message projection for the visibility API. */
+function safeMessageView(row) {
+  if (row === null || row === undefined) return null
+  return {
+    id: row.id, at: row.at, from: row.from_display ?? row.from_session,
+    fromSession: row.from_session, to: row.to_session, subject: row.subject,
+    bytes: row.bytes, sha256: row.sha256, readAt: row.read_at ?? null,
   }
 }
 
@@ -2674,6 +2686,62 @@ export function apply(ctx, config) {
           memory: readMemoryPage({ limit: 1 }), meetings: readMeetingsPage({ limit: 1 }),
           subenv: null,
         })
+      }
+      visibilityPage(query) {
+        const args = query !== null && typeof query === 'object' ? query : {}
+        if (typeof args.profileId !== 'string' || args.profileId.trim() === ''
+          || typeof args.workspaceId !== 'string' || args.workspaceId.trim() === '') {
+          return { ok: false, code: 'SCOPE_REQUIRED', error: 'profileId and workspaceId are required' }
+        }
+        const domain = String(args.domain ?? '')
+        const limit = Number.isFinite(Number(args.limit)) ? Math.min(100, Math.max(1, Math.trunc(Number(args.limit)))) : 25
+        const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.trunc(Number(args.offset))) : 0
+        let items = []
+        let total = 0
+        if (domain === 'messages') {
+          items = store.listMessages({ limit, offset }).map(safeMessageView).filter(Boolean)
+          total = store.counts().messages
+        } else if (domain === 'tasks') {
+          const page = readTasksPage({ limit, offset })
+          items = page.tasks
+          total = page.total
+        } else if (domain === 'meetings') {
+          const page = readMeetingsPage({ limit, offset })
+          items = page.meetings
+          total = page.total
+        } else if (domain === 'memory') {
+          const page = readMemoryPage({ limit, offset })
+          items = page.memories.map(row => ({ ...row, content: undefined, redacted: true }))
+          total = page.total
+        } else {
+          return { ok: true, state: 'unavailable', items: [], total: 0, offset, limit, error: 'DOMAIN_UNAVAILABLE' }
+        }
+        return { ok: true, state: total === 0 ? 'empty' : 'ready', items, total, offset, limit, asOf: new Date().toISOString() }
+      }
+      visibilityDetail(query) {
+        const args = query !== null && typeof query === 'object' ? query : {}
+        if (typeof args.profileId !== 'string' || args.profileId.trim() === ''
+          || typeof args.workspaceId !== 'string' || args.workspaceId.trim() === '') {
+          return { ok: false, code: 'SCOPE_REQUIRED', error: 'profileId and workspaceId are required' }
+        }
+        const domain = String(args.domain ?? '')
+        const id = typeof args.id === 'string' ? args.id : ''
+        if (domain === 'messages') {
+          const row = store.getMessage(id)
+          if (row === undefined || row === null) return { ok: false, code: 'NOT_FOUND' }
+          return { ok: true, state: 'ready', item: safeMessageView(row), evidence: { hash: row.sha256, at: row.at }, redacted: ['body'] }
+        }
+        if (domain === 'tasks') {
+          const detail = readTaskDetail({ id })
+          if (detail?.ok === false) return detail
+          const item = detail?.task ?? detail
+          if (item !== null && typeof item === 'object') {
+            delete item.description
+            delete item.metadata
+          }
+          return { ok: true, state: 'ready', item, evidence: detail?.metadata?.completion?.evidence ?? null, redacted: ['description', 'metadata'] }
+        }
+        return { ok: false, code: 'DOMAIN_UNAVAILABLE', error: 'detail is not available for ' + domain }
       }
       memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }
