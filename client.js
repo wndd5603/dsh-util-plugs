@@ -132,6 +132,15 @@ function createRemoteContribution() {
         result: identityCodec('dsh-message-bus#messageBus/visibilityDetail:result'),
       },
       {
+        id: 'dsh-message-bus/messageBus/subenvStatus',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'subenvStatus',
+        invocation: { kind: 'direct' },
+        parameters: [],
+        result: identityCodec('dsh-message-bus#messageBus/subenvStatus:result'),
+      },
+      {
         id: 'dsh-message-bus/messageBus/memoryPage',
         service: REMOTE_SERVICE,
         namespace: REMOTE_NAMESPACE,
@@ -2162,7 +2171,13 @@ function CollaborationDomainView({ api, domain, label }) {
         return
       }
       if (domain === 'subenv') {
-        setPage({ state: 'unavailable', items: [], total: 0, error: 'SUBENV_NOT_CONFIGURED' })
+        if (typeof api.subenvStatus !== 'function') throw new Error('subenvStatus unavailable')
+        const value = collabValue(await api.subenvStatus())
+        if (value?.state === 'online') {
+          setPage({ state: 'ready', total: 1, items: [{ id: 'subenv', title: 'Subenv', status: value.state, meta: `tasks ${value.tasks?.length ?? 0} · llm ${value.provider?.llmEnabled === true ? 'on' : 'off'}` }] })
+        } else {
+          setPage({ state: 'unavailable', total: 0, items: [], error: value?.code ?? 'SUBENV_UNAVAILABLE' })
+        }
         return
       }
       if (typeof api.visibilityPage !== 'function') throw new Error('visibilityPage unavailable')
@@ -2354,6 +2369,7 @@ function apply(ctx) {
       visibilitySummary: query => scope.remote.messageBus.visibilitySummary(query),
       visibilityPage: query => scope.remote.messageBus.visibilityPage(query),
       visibilityDetail: query => scope.remote.messageBus.visibilityDetail(query),
+      subenvStatus: () => scope.remote.messageBus.subenvStatus(),
       memoryPage: query => scope.remote.messageBus.memoryPage(query),
       memoryForget: query => scope.remote.messageBus.memoryForget(query),
       meetingsPage: query => scope.remote.messageBus.meetingsPage(query),

@@ -46,6 +46,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'visibilitySummary', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'visibilityPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'visibilityDetail', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'subenvStatus', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
@@ -654,6 +655,67 @@ function metadataObjectOf(value) {
   } catch {
     return null
   }
+}
+
+/** Probe the standalone subenv over its local RPC. Never returns the token. */
+export async function probeSubenv({
+  url = process.env.SUBENV_URL || 'http://127.0.0.1:47831/rpc',
+  token = process.env.SUBENV_TOKEN,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 1500,
+} = {}) {
+  if (typeof token !== 'string' || token === '') {
+    return { ok: true, state: 'unavailable', code: 'SUBENV_TOKEN_MISSING' }
+  }
+  if (typeof fetchImpl !== 'function') {
+    return { ok: true, state: 'unavailable', code: 'FETCH_UNAVAILABLE' }
+  }
+  const call = async (method, params = {}) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), Math.max(200, Number(timeoutMs) || 1500))
+    try {
+      const response = await fetchImpl(url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: controller.signal,
+      })
+      if (!response.ok) return { ok: false, code: 'SUBENV_HTTP_' + response.status }
+      const body = await response.json()
+      return body?.result ?? { ok: false, code: 'SUBENV_BAD_RESPONSE' }
+    } catch (error) {
+      return { ok: false, code: 'SUBENV_OFFLINE', message: String(error?.message ?? error) }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  const health = await call('health')
+  if (health?.ok !== true) return { ok: true, state: 'unavailable', code: health?.code ?? 'SUBENV_OFFLINE' }
+  const [capabilities, provider, tasks] = await Promise.all([
+    call('capabilities'), call('provider.describe'), call('task.list'),
+  ])
+  return {
+    ok: true,
+    state: 'online',
+    url,
+    health: { service: health.service, at: health.at },
+    capabilities: capabilities?.ok === true ? capabilities : null,
+    provider: provider?.ok === true ? provider.provider : null,
+    tasks: tasks?.ok === true && Array.isArray(tasks.tasks) ? tasks.tasks : [],
+    asOf: new Date().toISOString(),
+  }
+}
+
+/** Recursively remove body/content fields from a Web-facing detail payload. */
+function redactBodyFields(value, depth = 0) {
+  if (depth > 8 || value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map(item => redactBodyFields(item, depth + 1))
+  const out = {}
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'body' || key === 'content') continue
+    out[key] = redactBodyFields(child, depth + 1)
+  }
+  return out
 }
 
 /** Pure detail projection; the Web Remote supplies the actual readers. */
@@ -2731,8 +2793,16 @@ export function apply(ctx, config) {
       get(messageId, readBy, markRead) { return remoteGet(messageId, readBy, markRead) }
       delete(messageId, confirm) { return remoteDeleteTask(messageId, confirm) }
       send(to, subject, body, from) { return remoteSendTask(to, subject, body, from) }
-      tasksPage(query) { return readTasksPage(query) }
-      taskDetail(query) { return readTaskDetail(query) }
+      tasksPage(query) {
+        const page = readTasksPage(query)
+        return { ...page, tasks: page.tasks.map(safeTaskView).filter(Boolean) }
+      }
+      taskDetail(query) {
+        const detail = readTaskDetail(query)
+        if (detail?.ok === false) return detail
+        const task = safeTaskView(detail?.task ?? detail)
+        return { ...detail, task, redacted: ['description', 'metadata'] }
+      }
       visibilitySummary(query) {
         return visibilitySummaryOf({
           messageCounts: store.counts(), tasks: readTasksPage({ limit: 1 }),
@@ -2787,10 +2857,14 @@ export function apply(ctx, config) {
         const id = typeof args.id === 'string' ? args.id : ''
         return visibilityDetailOf({ domain, id, getMessage: store.getMessage, readTaskDetail })
       }
-      memoryPage(query) { return readMemoryPage(query) }
+      subenvStatus() { return probeSubenv() }
+      memoryPage(query) {
+        const page = readMemoryPage(query)
+        return { ...page, memories: page.memories.map(row => ({ ...row, content: undefined, redacted: true })) }
+      }
       memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }
       meetingsPage(query) { return readMeetingsPage(query) }
-      meetingDetail(query) { return readMeetingDetail(query) }
+      meetingDetail(query) { return redactBodyFields(readMeetingDetail(query)) }
       networkPage(query) { return readNetworkPage(query) }
       messageAudit(query) { return readMessageAudit(store, query) }
       auditPage(query) { return readAuditPage(query) }

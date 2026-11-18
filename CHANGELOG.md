@@ -1,3 +1,8 @@
+## 2026.11.17-32 (dev)
+
+- **Subenv UI bridge**: host `subenvStatus` probes the local sidecar (health/capabilities/provider/tasks) with a bearer token from `SUBENV_TOKEN`; the Collaboration Center Subenv tab shows online/offline/provider/task status, never the token. 3 regression tests.
+- **Legacy Web redaction**: Web Remote `tasksPage`/`taskDetail` strip description/metadata; `memoryPage` strips content; `meetingDetail` recursively removes body/content. Tool APIs keep full data.
+
 ## 2026.11.17-31 (dev)
 
 - **Visibility filters**: `visibilityPage` now forwards task status/assignee/query, meeting status/query, memory scope/query, and message keyword filters; the response echoes `filters`.
