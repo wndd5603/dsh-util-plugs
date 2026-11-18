@@ -1,3 +1,7 @@
+## 2026.11.17-20 (dev)
+
+- **Visibility summary API**: `visibilitySummary({profileId,workspaceId})` returns six read-only cards (`ready|empty|unavailable`), per-domain state, counts, as-of, and no body/content; missing scope returns `SCOPE_REQUIRED`. Runtime/subenv remain explicitly unavailable until later waves.
+
 ## 2026.11.17-19 (dev)
 
 - **Collaboration Center shell**: a second sidebar entry (`collaboration`, order 3) with a six-card overview and tabs for inbox/tasks/meetings/memory/runtime/subenv; the page reads existing message/task/memory/meeting remotes, defaults to no body, and marks unavailable domains instead of showing fake zeros. A settings section is registered at order 25.

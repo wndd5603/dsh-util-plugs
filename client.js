@@ -105,6 +105,15 @@ function createRemoteContribution() {
         result: identityCodec('dsh-message-bus#messageBus/taskDetail:result'),
       },
       {
+        id: 'dsh-message-bus/messageBus/visibilitySummary',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'visibilitySummary',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/visibilitySummary:result'),
+      },
+      {
         id: 'dsh-message-bus/messageBus/memoryPage',
         service: REMOTE_SERVICE,
         namespace: REMOTE_NAMESPACE,
@@ -2218,6 +2227,7 @@ function apply(ctx) {
       apartmentVerify: () => apartmentRemote()?.verify?.(),
       tasksPage: query => scope.remote.messageBus.tasksPage(query),
       taskDetail: query => scope.remote.messageBus.taskDetail(query),
+      visibilitySummary: query => scope.remote.messageBus.visibilitySummary(query),
       memoryPage: query => scope.remote.messageBus.memoryPage(query),
       memoryForget: query => scope.remote.messageBus.memoryForget(query),
       meetingsPage: query => scope.remote.messageBus.meetingsPage(query),

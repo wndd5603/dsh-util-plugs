@@ -43,6 +43,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'send', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'tasksPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'taskDetail', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'visibilitySummary', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
@@ -620,6 +621,38 @@ function readMemoryPage(rawArgs) {
     return emptyMemoriesPage(offset, limit)
   } finally {
     closeSnapshotDb(db)
+  }
+}
+
+/** Wave A: pure, read-only summary projection. */
+export function visibilitySummaryOf({
+  profileId, workspaceId, now = new Date().toISOString(),
+  messageCounts = null, tasks = null, memory = null, meetings = null, subenv = null,
+} = {}) {
+  if (typeof profileId !== 'string' || profileId.trim() === '' || typeof workspaceId !== 'string' || workspaceId.trim() === '') {
+    return { ok: false, code: 'SCOPE_REQUIRED', error: 'profileId and workspaceId are required' }
+  }
+  const card = (value, count, extra = {}) => ({
+    state: value === null ? 'unavailable' : (Number(count) === 0 ? 'empty' : 'ready'),
+    count: value === null ? null : Number(count) || 0,
+    asOf: now,
+    ...extra,
+  })
+  const taskCounts = tasks?.counts ?? {}
+  return {
+    ok: true,
+    profileId: profileId.trim(),
+    workspaceId: workspaceId.trim(),
+    generatedAt: now,
+    version: 'v1',
+    cards: {
+      messages: card(messageCounts, messageCounts?.messages ?? 0, { unread: messageCounts?.unread ?? 0 }),
+      tasks: card(tasks, tasks?.total ?? 0, { stale: taskCounts.stale ?? 0, blocked: taskCounts.blocked ?? 0 }),
+      meetings: card(meetings, meetings?.total ?? 0),
+      memory: card(memory, memory?.total ?? 0),
+      runtime: card(null, 0, { note: 'Wave C' }),
+      subenv: card(subenv, subenv?.total ?? 0, { note: subenv === null ? 'not configured' : undefined }),
+    },
   }
 }
 
@@ -2633,6 +2666,15 @@ export function apply(ctx, config) {
       send(to, subject, body, from) { return remoteSendTask(to, subject, body, from) }
       tasksPage(query) { return readTasksPage(query) }
       taskDetail(query) { return readTaskDetail(query) }
+      visibilitySummary(query) {
+        const args = query !== null && typeof query === 'object' ? query : {}
+        return visibilitySummaryOf({
+          profileId: args.profileId, workspaceId: args.workspaceId,
+          messageCounts: store.counts(), tasks: readTasksPage({ limit: 1 }),
+          memory: readMemoryPage({ limit: 1 }), meetings: readMeetingsPage({ limit: 1 }),
+          subenv: null,
+        })
+      }
       memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }
       meetingsPage(query) { return readMeetingsPage(query) }
