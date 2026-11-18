@@ -34,7 +34,15 @@ export function createEmbeddedSubenv({ provider }) {
     submit(args) { return tasks.submit(args) },
     get(args) { return tasks.get(args) },
     list() {
-      return { ok: true, tasks: tasks.list().tasks.map(task => ({ ...taskSummary(task), result: task.result, error: task.error })) }
+      return {
+        ok: true,
+        tasks: tasks.list().tasks.map(task => {
+          const view = { ...taskSummary(task) }
+          if (task.result !== undefined) view.result = task.result
+          if (task.error !== undefined) view.error = task.error
+          return view
+        }),
+      }
     },
     cancel(args) { return tasks.cancel(args) },
   }

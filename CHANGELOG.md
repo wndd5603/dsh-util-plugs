@@ -1,3 +1,7 @@
+## 2026.11.17-39 (dev)
+
+- **Subenv task output**: task views omit `undefined` fields so `subenv_task_submit/get/list` are lossless JSON and callable as tools; completed results stay present, queued/running tasks do not carry a fake `result`.
+
 ## 2026.11.17-38 (dev)
 
 - **Embedded subenv uses host `ctx.llm`**: removed the separate `SUBENV_PROVIDER_JSON`/API-key requirement for embedded mode; provider/model are selected from DSH (`subenv.provider/model`, empty = first available). The task runner consumes the host LLM stream. External RPC mode remains opt-in.

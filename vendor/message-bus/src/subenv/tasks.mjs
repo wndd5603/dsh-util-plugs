@@ -6,14 +6,15 @@
 import { randomUUID } from 'node:crypto'
 
 function taskView(task) {
-  return {
+  const view = {
     id: task.id,
     status: task.status,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
-    result: task.status === 'completed' ? task.result : undefined,
-    error: task.error ?? undefined,
   }
+  if (task.status === 'completed') view.result = task.result
+  if (task.error !== undefined && task.error !== null) view.error = task.error
+  return view
 }
 
 export function createTaskRunner({ provider, now = () => new Date().toISOString() } = {}) {
