@@ -2194,6 +2194,12 @@ export function apply(ctx, config) {
       const nextOffset = offset + chunk.length
       const readAt = store.markRead(sessionId, messageId)
       store.markEnvelopeConsumed?.(sessionId, messageId)
+      try {
+        appendFileSync(join(dirname(cfg.dbPath), 'read-audit.jsonl'), JSON.stringify({
+          at: readAt, actor: sessionId, target: messageId, from: row.from_session, to: row.to_session,
+          offset, limit, result: 'ok',
+        }) + '\n', 'utf8')
+      } catch { /* audit is best-effort */ }
       return {
         ok: true, id: row.id, at: row.at, from: row.from_display, fromSession: row.from_session, to: row.to_session,
         subject: row.subject, bytes: row.bytes, sha256: row.sha256,

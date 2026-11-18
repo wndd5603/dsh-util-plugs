@@ -220,6 +220,9 @@ test('message_read denies third parties and only marks authorized reads', async 
     const asTarget = read.execute({ messageId: sent.messageId }, { agent: { session: { id: TARGET } } })
     assert.equal(asTarget.ok, true)
     assert.equal(status.execute().counts.unread, 0)
+    const readAudit = join(dir, 'read-audit.jsonl')
+    assert.ok(existsSync(readAudit))
+    assert.match(readFileSync(readAudit, 'utf8'), new RegExp(sent.messageId))
 
     const purge = tools.get('message_purge')
     assert.ok(purge, 'message_purge is registered when allowPurge=true')

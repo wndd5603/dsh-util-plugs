@@ -1,3 +1,7 @@
+## 2026.11.17-17 (dev)
+
+- **Read audit**: every successful `message_read` appends a body-free row to `read-audit.jsonl` (actor, target, from/to, offset/limit, result). This extends send/purge auditing to reads without exposing body text.
+
 ## 2026.11.17-16 (dev)
 
 - **Memory supersede**: `memory_supersede` inserts a replacement row under a derived audit key and sets the old row's `superseded_by`; `memory_search`/`memory_list` hide superseded rows by default and expose them with `includeSuperseded:true`. The old row is retained, never silently overwritten.
