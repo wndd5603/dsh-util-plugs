@@ -9,6 +9,7 @@ import {
   buildMeetingDigest,
   emptyMeetingDigest,
   parseDigestNow,
+  updateMeetingActionInStore,
   validateMeetingDeadline,
 } from './meeting-digest.js'
 
@@ -1925,6 +1926,41 @@ export function registerTools(ctx, deps) {
       const finalMeeting = meetingView(statusWrite.value.meeting, stored, participants, messages)
       safeCall(() => audit?.({ action: 'meeting_finalize', meetingId, ok: true, decisions: decisions.length, actions: actions.length, caller: resolveAuditCaller(exec) }), () => {})
       return { ok: true, alreadyFinalized: false, meeting: finalMeeting, summary, decisions, actions, participants, participantIds: participants.map(participant => participant.sessionId) }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'meeting_action_update',
+    description: 'P1-6: assign or close one action on a finalized meeting. Only a participant or the convener may write. '
+      + 'Status is pending|completed|closed|cancelled; owner and due are optional. The sidecar is updated and the action '
+      + 'disappears from meeting_digest once it is no longer pending.',
+    parameters: baseParams({
+      meetingId: { type: 'string', description: 'Meeting id.' },
+      actionId: { type: 'string', description: 'Action id from meeting_digest (e.g. A1).' },
+      status: { type: 'string', description: 'pending|completed|closed|cancelled.' },
+      owner: { type: 'string', description: 'Optional owner alias/session.' },
+      due: { type: 'string', description: 'Optional ISO date/time deadline.' },
+    }, ['meetingId', 'actionId']),
+    output: jsonOut,
+    async execute(args = {}, exec = {}) {
+      if (!meetingStoreAvailable()) return meetingError({ code: 'NO_DB', message: 'meeting store unavailable (no dataDir)' })
+      const meetingId = firstString(args.meetingId)
+      if (meetingId === undefined) return meetingInvalid('meetingId is required')
+      const state = loadMeetingState(meetingId)
+      if (!state.ok) return state.notFound ? meetingNotFound(meetingId) : meetingError(state.error)
+      const access = meetingAccess(state, exec, { write: true })
+      if (!access.allowed) return meetingAccessError(access, meetingId)
+      const updated = updateMeetingActionInStore(state.store, {
+        actionId: args.actionId, status: args.status, owner: args.owner, due: args.due,
+      })
+      if (!updated.ok) return meetingInvalid(updated.message, updated.code)
+      state.store.updatedAt = new Date().toISOString()
+      try { writeMeetingStore(state.store) } catch (error) { return meetingError(error) }
+      const pending = (Array.isArray(state.store.actions) ? state.store.actions : [])
+        .filter(action => typeof action === 'object' && action !== null && String(action.status ?? 'pending').toLowerCase() === 'pending')
+        .length
+      safeCall(() => audit?.({ action: 'meeting_action_update', meetingId, actionId: updated.action.id, ok: true, status: updated.action.status, caller: resolveAuditCaller(exec) }), () => {})
+      return { ok: true, meetingId, action: updated.action, pendingActions: pending, storeUpdatedAt: state.store.updatedAt }
     },
   })
 

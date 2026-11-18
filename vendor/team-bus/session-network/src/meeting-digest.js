@@ -157,6 +157,42 @@ export function pendingActionsOf(store) {
   return pending
 }
 
+/**
+ * P1-6: update one sidecar action in place (status/owner/due). Returns a
+ * normalized action or a coded error without mutating when the id is unknown.
+ * The caller owns persistence; digest simply stops counting non-pending rows.
+ */
+export function updateMeetingActionInStore(store, { actionId, status, owner, due } = {}) {
+  if (store === null || typeof store !== 'object' || !Array.isArray(store.actions)) {
+    return { ok: false, code: 'MEETING_ACTION_NOT_FOUND', message: 'meeting has no actions' }
+  }
+  const id = firstString(actionId)
+  if (id === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: 'actionId is required' }
+  const normalizedStatus = status === undefined ? undefined : String(status).trim().toLowerCase()
+  if (normalizedStatus !== undefined && !['pending', 'completed', 'closed', 'cancelled'].includes(normalizedStatus)) {
+    return { ok: false, code: 'INVALID_ARGUMENT', message: 'status must be pending|completed|closed|cancelled' }
+  }
+  if (due !== undefined && due !== null) {
+    if (typeof due !== 'string' || Number.isNaN(Date.parse(due))) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'due must be an ISO date/time' }
+    }
+  }
+  for (let index = 0; index < store.actions.length; index += 1) {
+    const entry = store.actions[index]
+    const currentId = typeof entry === 'string' ? `A${index + 1}` : firstString(entry?.id) ?? `A${index + 1}`
+    if (currentId !== id) continue
+    const base = typeof entry === 'string'
+      ? { id, text: entry.trim(), owner: null, status: 'pending' }
+      : { ...entry, id: currentId }
+    if (normalizedStatus !== undefined) base.status = normalizedStatus
+    if (owner !== undefined) base.owner = typeof owner === 'string' && owner.trim() !== '' ? owner.trim() : null
+    if (due !== undefined) base.due = due === null ? null : new Date(due).toISOString()
+    store.actions[index] = base
+    return { ok: true, action: base }
+  }
+  return { ok: false, code: 'MEETING_ACTION_NOT_FOUND', message: 'action not found: ' + id }
+}
+
 function normalizeStatus(status) {
   if (status === null || status === undefined) return null
   return status === 'final' ? 'finalized' : String(status)

@@ -1,3 +1,7 @@
+## 2026.11.17-18 (dev)
+
+- **Meeting action lifecycle**: `meeting_action_update` lets a participant/convener set one sidecar action's status/owner/due; completed/closed/cancelled actions stop appearing in `meeting_digest`, while the sidecar remains auditable.
+
 ## 2026.11.17-17 (dev)
 
 - **Read audit**: every successful `message_read` appends a body-free row to `read-audit.jsonl` (actor, target, from/to, offset/limit, result). This extends send/purge auditing to reads without exposing body text.
