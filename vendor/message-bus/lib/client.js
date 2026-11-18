@@ -1942,21 +1942,21 @@ function CollaborationSettingsPage(props) {
   return panel('section', { style: { display: 'grid', gap: '14px', padding: '4px 0' }, 'data-collaboration-settings': '' },
     panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' } },
       panel('div', null,
-        panel('h2', { style: { margin: 0 } }, '协作设置'),
-        panel('p', { style: { margin: '4px 0 0', fontSize: 12.5, opacity: 0.7 } }, '可热更新字段可直接切换；其余字段显示当前值/原生配置。写入统一走 DSH settings。')),
+        panel('h2', { style: { margin: 0 } }, '工具集设置'),
+        panel('p', { style: { margin: '4px 0 0', fontSize: 12.5, opacity: 0.7 } }, '显示当前值；可热更新字段可直接保存。标有“需原生配置/重启”的字段需在原生 Plugins 保存并重启。')),
       panel('button', { type: 'button', style: style.button, onClick: openNative }, '打开原生插件设置')),
     Object.entries(ROW_CONFIG_FIELDS).map(([id, fields]) => panel(ConfigCard, {
       key: id, id, fields, ns: findNamespace(id), configForms,
     })),
     view === undefined
       ? panel('p', { style: { opacity: 0.7 } }, '当前 profile 未提供 configForms；请使用原生 Plugins 页面。')
-      : SETTINGS_GROUPS.map(group => panel('div', { key: group.title, style: { border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px', padding: '12px' } },
-        panel('h3', { style: { margin: '0 0 8px', fontSize: 14 } }, group.title),
-        group.items.map(item => panel(SettingRow, {
-          key: item.ns + ':' + item.path, item, ns: findNamespace(item.ns), configForms, openNative,
-        })))),
+      : Object.keys(ROW_CONFIG_FIELDS).filter(id => findNamespace(id) === undefined).length > 0
+        ? panel('p', { style: { opacity: 0.6, fontSize: 11.5 } },
+          '当前没有可热配置 namespace 的行（可能已关闭或只支持原生配置）：'
+          + Object.keys(ROW_CONFIG_FIELDS).filter(id => findNamespace(id) === undefined).join(', '))
+        : null,
     panel('p', { style: { margin: 0, fontSize: 11.5, opacity: 0.6 } },
-      '提示：strictMode / crossPermissionGuard 可热更新；非 volatile 参数需原生保存并重启宿主。'))
+      '提示：保存后若未生效，请重启宿主；未显示的行通常已被插件行开关关闭或没有热配置。'))
 }
 
 const ROW_CONFIG_FIELDS = {
@@ -2852,7 +2852,7 @@ function apply(ctx) {
         name: 'settings.section',
         id: 'collaboration-settings',
         order: 25,
-        label: () => '协作设置',
+        label: () => '工具集设置',
         inject: () => ({ configForms: scope.configForms, layout: scope.layout }),
       }, CollaborationSettingsPage))
       const disposeRowConfigs = Object.keys(ROW_CONFIG_FIELDS).map(rowId => scope.slots.inject('plugins.row.config', () => scope.slots.register({

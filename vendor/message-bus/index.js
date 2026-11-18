@@ -78,10 +78,12 @@ export const Config = objectSchema({
     description: 'SQLite path. Empty = $DSH_HOME/message-bus/bus.sqlite; a leading ~ is expanded to the home dir.',
   }),
   maxBodyChars: number(100000, {
+    volatile: true,
     description: 'Hard maximum message body length in characters (default 100000). Longer bodies are rejected with INVALID_ARGUMENT and neither stored nor queued; there is no silent truncation.',
     int: true, min: 1,
   }),
   notFoundPolicy: enumOf('reject', ['reject', 'queue'], {
+    volatile: true,
     description: "Q2-B not-found policy (default 'reject'): a session-<uuid> target that does not exist is not stored and returns deliveryState=undeliverable/reasonCode=session-not-found. 'queue' keeps the legacy store+queue behaviour. Per-call queueUndeliverable:true overrides either value for one send.",
   }),
   strictMode: boolean(true, {
@@ -93,6 +95,7 @@ export const Config = objectSchema({
     volatile: true,
   }),
   autoResume: boolean(true, {
+    volatile: true,
     description: '自动恢复 inactive 会话后投递/Auto-resume inactive targets (default true): resume + preset mount before delivery; failures leave the message stored in the queue.',
   }),
   autoResumeRateLimitPerMinute: number(12, {
@@ -150,6 +153,7 @@ export const Config = objectSchema({
       description: 'Allow the Web Remote memoryForget method. Default false: the Web Remote has no caller identity; an operator must opt in explicitly.',
     }),
     allowMemoryReveal: boolean(false, {
+      volatile: true,
       description: 'Allow the Web Remote memoryReveal method (one memory content at a time, explicit confirm + audit). Default false.',
     }),
     audit: boolean(true, { description: 'Append one JSONL audit row per Web delete/send under <db dir>/web-audit.jsonl (no body).' }),
@@ -160,7 +164,7 @@ export const Config = objectSchema({
     }),
     url: string('http://127.0.0.1:47831/rpc', { description: 'External subenv RPC URL; used only when mode=external.' }),
     tokenEnv: string('SUBENV_TOKEN', { description: 'Environment variable holding the external subenv bearer token.' }),
-    allowTasks: boolean(false, { description: 'Deprecated custom subenv task runner (default false). Use DSH subagent/agentTeams instead; enable only for isolated experiments.' }),
+    allowTasks: boolean(false, { volatile: true, description: 'Deprecated custom subenv task runner (default false). Use DSH subagent/agentTeams instead; enable only for isolated experiments.' }),
     provider: string('', { description: 'Host LLM provider id for embedded subenv; empty = first host provider.' }),
     model: string('', { description: 'Host LLM model id for embedded subenv; empty = first model of the selected provider.' }),
   }), { description: 'Embedded or external subenv integration.' }),

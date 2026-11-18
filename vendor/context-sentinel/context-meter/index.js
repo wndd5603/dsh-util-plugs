@@ -232,10 +232,12 @@ export const Config = objectSchema({
   enabled: boolean(true, { description: 'Register the context_usage tool, the runtime skill and the occupancy watchdog.' }),
   schemaVersion: number(1, { description: 'Config schema version; newer values are rejected.', int: true, min: 1 }),
   notifyPercent: number(undefined, {
+    volatile: true,
     description: 'Explicit advisory threshold in percent (10-99). Omit to derive it from compaction.thresholdRatio (fallback 85).',
     min: 10, max: 99,
   }),
   rearmPercent: number(undefined, {
+    volatile: true,
     description: 'Re-arm threshold in percent; defaults to notifyPercent - 10.', min: 5, max: 98,
   }),
   turnInjection: boolean(true, {

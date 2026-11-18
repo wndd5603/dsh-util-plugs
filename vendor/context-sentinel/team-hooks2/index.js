@@ -84,7 +84,7 @@ const DEFAULT_DENY_TOOLS = Object.freeze(['edit', 'write', 'str_replace', 'apply
  * `writeGate: false` / `problemLoop: false` disable the whole block.
  */
 export const Config = objectSchema({
-  enabled: boolean(true, { description: 'Register the hooks and the team_hooks_status tool. false = plugin does nothing.' }),
+  enabled: boolean(true, { volatile: true, description: 'Register the hooks and the team_hooks_status tool. false = plugin does nothing.' }),
   schemaVersion: number(1, { description: 'Config schema version; newer values are rejected.', int: true, min: 1 }),
   stateFile: string('', { description: 'Archive-reminder state file; empty = $DSH_HOME/team-hooks-state.json.' }),
   roleWritePolicy: nested(objectSchema({

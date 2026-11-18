@@ -1,3 +1,7 @@
+## 2026.11.17-57 (dev)
+
+- **Settings suite**: renamed the settings tab to 工具集设置; custom cards now render only served namespaces, show current values, mark restart/native-only fields, and hide rows without a config namespace. More message-bus/context fields are volatile so they are editable.
+
 ## 2026.11.17-56 (dev)
 
 - **Custom config cards**: 协作设置 now renders editable cards through `configForms.get(ns)` for message-bus/context-sentinel/auto-backup/host-relaunch/workbench; non-volatile fields stay read-only. This bypasses the native row-config rowId namespace mismatch.
