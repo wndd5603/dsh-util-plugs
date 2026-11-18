@@ -33,11 +33,13 @@ dsh plugin --profile p0-blank add --offline <tarball>  # PASS
 
 - `--profile p0-blank --dump-config`: 11 rows, all expected ids.
 - Web-template profile `p0-webcopy` + tarball: boot at `127.0.0.1:13400`; `__DSH_BOOT__.entries=73`; sidebar shows 插件控制台/协作网络; plugin console shows `dsh-util-plugs v2026.11.17-2 ... 11 rows · 0 failed`; console errors 0.
+- **Final tarball after the legacy-queue fix**: 486,117 B; installed into a second fresh web-template profile (`final-blank`); boot at `127.0.0.1:13401`; entries 73; plugin console `11 rows · 0 failed`; console errors 0.
 - UI screenshot outside the repo: `E:\work\tests\dsh-p0-blank-20261118\blank-plugin-console.png`.
 
 ## Limits
 
 - No live two-session E2E for FORBIDDEN; the apply-level mock and store tests are the evidence.
+- `legacyTools:true` `pipe2_queue` bypass found in independent review is fixed and regression-tested; still no live two-session bridge test.
 - Web Remote message reads are not covered by this patch (no caller identity in that path); treat as remaining WARN.
 - Merged wake envelopes: the source is attributed only when every item shares one sender; mixed-sender batches carry `fromSession:null`/`fromDisplay:null` (the text still lists each sender). This avoids false attribution; it is not per-item structured provenance.
 - No commit/tag/release in this validation; author decides release.
