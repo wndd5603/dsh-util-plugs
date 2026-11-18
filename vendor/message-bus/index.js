@@ -138,6 +138,9 @@ export const Config = objectSchema({
     exposeBody: boolean(false, {
       description: 'Allow the Web message center Remote to return message bodies/snippets. Default false: the Web Remote has no caller identity, so it must not disclose bodies unless a trusted operator explicitly opts in.',
     }),
+    allowMemoryForget: boolean(false, {
+      description: 'Allow the Web Remote memoryForget method. Default false: the Web Remote has no caller identity; an operator must opt in explicitly.',
+    }),
     audit: boolean(true, { description: 'Append one JSONL audit row per Web delete/send under <db dir>/web-audit.jsonl (no body).' }),
   }), { description: 'Web message center (client half) configuration.' }),
 }, { description: 'Universal session message bus configuration.', schemaVersion: 1 })
@@ -621,9 +624,10 @@ function readMemoryPage(rawArgs) {
 }
 
 /** Delete exactly one memory row; the explicit confirm token is mandatory. */
-function forgetMemory(rawArgs) {
+function forgetMemory(rawArgs, options = {}) {
   const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : { id: rawArgs }
-  if (args.confirm !== 'DELETE') return { ok: false, error: 'memoryForget requires confirm:"DELETE"' }
+  if (options.allow !== true) return { ok: false, error: 'web memoryForget is disabled; operator must set webUi.allowMemoryForget:true' }
+  if (args.confirm !== 'FORGET') return { ok: false, error: 'memoryForget requires confirm:"FORGET"' }
   const id = typeof args.id === 'string' ? args.id.trim() : ''
   if (id === '') return { ok: false, error: 'id is required' }
   const path = memoryDbPath()
@@ -1163,6 +1167,7 @@ function normalizeConfig(config) {
       allowSend: webUi.allowSend !== false,
       pageSize: Math.max(5, Math.min(100, Math.trunc(num(webUi.pageSize, 20)))),
       exposeBody: webUi.exposeBody === true,
+      allowMemoryForget: webUi.allowMemoryForget === true,
       audit: webUi.audit !== false,
     },
   }
@@ -2052,10 +2057,11 @@ export function apply(ctx, config) {
       const since = typeof args.since === 'string' && Number.isFinite(Date.parse(args.since))
         ? args.since : null
       const undeliveredOnly = args.undeliveredOnly === true
-      const toSession = typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null
-      if (toSession !== null && toSession !== readBy) {
+      const requestedTo = typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null
+      if (requestedTo !== null && requestedTo !== readBy) {
         return { ok: false, code: 'FORBIDDEN', readBy, message: 'message_queue: to must equal the caller session' }
       }
+      const toSession = requestedTo ?? readBy
       // Suppressed rows have no read receipt and are never "undelivered stored
       // messages"; those filters keep the legacy exclusion.
       const suppressedInScope = args.unreadOnly !== true && !undeliveredOnly
@@ -2609,7 +2615,7 @@ export function apply(ctx, config) {
       tasksPage(query) { return readTasksPage(query) }
       taskDetail(query) { return readTaskDetail(query) }
       memoryPage(query) { return readMemoryPage(query) }
-      memoryForget(query) { return forgetMemory(query) }
+      memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }
       meetingsPage(query) { return readMeetingsPage(query) }
       meetingDetail(query) { return readMeetingDetail(query) }
       networkPage(query) { return readNetworkPage(query) }

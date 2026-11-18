@@ -181,6 +181,10 @@ test('message_read denies third parties and only marks authorized reads', async 
     const modernCrossQueue = queue.execute({ to: TARGET }, { agent: { session: { id: THIRD } } })
     assert.equal(modernCrossQueue.ok, false)
     assert.equal(modernCrossQueue.code, 'FORBIDDEN')
+    const ownQueue = queue.execute({}, { agent: { session: { id: THIRD } } })
+    assert.equal(ownQueue.ok, true)
+    assert.equal(ownQueue.total, 0)
+    assert.equal(JSON.stringify(ownQueue.items ?? []).includes('p0 body'), false)
 
     const forbidden = read.execute({ messageId: sent.messageId }, { agent: { session: { id: THIRD } } })
     assert.equal(forbidden.ok, false)

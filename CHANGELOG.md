@@ -1,3 +1,8 @@
+## 2026.11.17-13 (dev)
+
+- **Queue default scoping**: `message_queue()` without `to` now defaults to the caller session instead of listing the whole global queue; explicit cross-recipient `to` remains FORBIDDEN.
+- **Web memory-forget gate**: the Web Remote `memoryForget` method is disabled unless `webUi.allowMemoryForget:true` and now requires `confirm:"FORGET"`; the message-bus tool path is separately gated by `allowForget`.
+
 ## 2026.11.17-12 (dev)
 
 - **Ack/queue recipient checks**: `message_ack` now marks only messages the caller may read; a third-party or missing caller receives `denied` entries and no read receipt. `message_queue({to})` rejects a target that is not the caller. This closes the remaining P0-2 bypass found by the fourth verification while `message_purge` remains disabled unless `allowPurge:true`.
