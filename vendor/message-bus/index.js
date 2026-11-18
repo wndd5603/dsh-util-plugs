@@ -678,12 +678,9 @@ export function visibilityPageMeta(total, offset, limit) {
 
 /** Wave A: pure, read-only summary projection. */
 export function visibilitySummaryOf({
-  profileId, workspaceId, now = new Date().toISOString(),
+  now = new Date().toISOString(),
   messageCounts = null, tasks = null, memory = null, meetings = null, subenv = null,
 } = {}) {
-  if (typeof profileId !== 'string' || profileId.trim() === '' || typeof workspaceId !== 'string' || workspaceId.trim() === '') {
-    return { ok: false, code: 'SCOPE_REQUIRED', error: 'profileId and workspaceId are required' }
-  }
   const card = (value, count, extra = {}) => ({
     state: value === null ? 'unavailable' : (Number(count) === 0 ? 'empty' : 'ready'),
     count: value === null ? null : Number(count) || 0,
@@ -703,12 +700,9 @@ export function visibilitySummaryOf({
   const empty = Object.values(cards).every(item => item.state === 'empty')
   return {
     ok: true,
-    profileId: profileId.trim(),
-    workspaceId: workspaceId.trim(),
+    scope: { mode: 'host', enforced: true, note: 'one host serves one DSH profile' },
     generatedAt: now,
     version: 'v1',
-    scopeMode: 'single-profile',
-    warnings: ['db-scope-not-enforced'],
     state: unavailable ? 'partial' : (empty ? 'empty' : 'ready'),
     cards,
   }
@@ -2725,9 +2719,7 @@ export function apply(ctx, config) {
       tasksPage(query) { return readTasksPage(query) }
       taskDetail(query) { return readTaskDetail(query) }
       visibilitySummary(query) {
-        const args = query !== null && typeof query === 'object' ? query : {}
         return visibilitySummaryOf({
-          profileId: args.profileId, workspaceId: args.workspaceId,
           messageCounts: store.counts(), tasks: readTasksPage({ limit: 1 }),
           memory: readMemoryPage({ limit: 1 }), meetings: readMeetingsPage({ limit: 1 }),
           subenv: null,
@@ -2735,10 +2727,6 @@ export function apply(ctx, config) {
       }
       visibilityPage(query) {
         const args = query !== null && typeof query === 'object' ? query : {}
-        if (typeof args.profileId !== 'string' || args.profileId.trim() === ''
-          || typeof args.workspaceId !== 'string' || args.workspaceId.trim() === '') {
-          return { ok: false, code: 'SCOPE_REQUIRED', error: 'profileId and workspaceId are required' }
-        }
         const domain = String(args.domain ?? '')
         const limit = Number.isFinite(Number(args.limit)) ? Math.min(100, Math.max(1, Math.trunc(Number(args.limit)))) : 25
         const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.trunc(Number(args.offset))) : 0
@@ -2766,10 +2754,6 @@ export function apply(ctx, config) {
       }
       visibilityDetail(query) {
         const args = query !== null && typeof query === 'object' ? query : {}
-        if (typeof args.profileId !== 'string' || args.profileId.trim() === ''
-          || typeof args.workspaceId !== 'string' || args.workspaceId.trim() === '') {
-          return { ok: false, code: 'SCOPE_REQUIRED', error: 'profileId and workspaceId are required' }
-        }
         const domain = String(args.domain ?? '')
         const id = typeof args.id === 'string' ? args.id : ''
         return visibilityDetailOf({ domain, id, getMessage: store.getMessage, readTaskDetail })

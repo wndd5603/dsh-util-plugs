@@ -1,3 +1,7 @@
+## 2026.11.17-28 (dev)
+
+- **Host-enforced scope**: removed client-supplied `profileId`/`workspaceId`; summary returns `scope:{mode:"host",enforced:true}`. One host serves one DSH profile, so there is no fake multi-profile selector.
+
 ## 2026.11.17-27 (dev)
 
 - **Detail projection tests**: `visibilityDetailOf` is a pure projection; tests cover body-free messages, nested task evidence, redaction, and NOT_FOUND. Host `visibilityDetail` delegates to it.

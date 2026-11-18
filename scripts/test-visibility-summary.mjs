@@ -3,15 +3,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { safeTaskView, visibilityDetailOf, visibilityPageMeta, visibilitySummaryOf } from '../vendor/message-bus/index.js'
 
-test('visibility summary requires profile and workspace scope', () => {
+test('visibility summary exposes an enforced host scope', () => {
   const result = visibilitySummaryOf({})
-  assert.equal(result.ok, false)
-  assert.equal(result.code, 'SCOPE_REQUIRED')
+  assert.equal(result.ok, true)
+  assert.equal(result.scope.mode, 'host')
+  assert.equal(result.scope.enforced, true)
 })
 
 test('visibility summary maps ready/empty/unavailable without bodies', () => {
   const ready = visibilitySummaryOf({
-    profileId: 'p', workspaceId: 'w',
     messageCounts: { messages: 2, unread: 1 },
     tasks: { total: 3, counts: { stale: 1, blocked: 1 } },
     memory: { total: 4 },
@@ -19,8 +19,7 @@ test('visibility summary maps ready/empty/unavailable without bodies', () => {
     subenv: null,
   })
   assert.equal(ready.ok, true)
-  assert.equal(ready.scopeMode, 'single-profile')
-  assert.deepEqual(ready.warnings, ['db-scope-not-enforced'])
+  assert.equal(ready.scope.mode, 'host')
   assert.equal(ready.state, 'partial')
   assert.equal(ready.cards.messages.state, 'ready')
   assert.equal(ready.cards.messages.unread, 1)
@@ -67,7 +66,6 @@ test('visibilityDetailOf strips body and reads nested evidence', () => {
 
 test('visibility summary isolates an unavailable domain', () => {
   const result = visibilitySummaryOf({
-    profileId: 'p', workspaceId: 'w',
     messageCounts: { messages: 1, unread: 0 },
     tasks: null, memory: { total: 1 }, meetings: { total: 1 }, subenv: null,
   })

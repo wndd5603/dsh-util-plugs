@@ -2166,7 +2166,7 @@ function CollaborationDomainView({ api, domain, label }) {
         return
       }
       if (typeof api.visibilityPage !== 'function') throw new Error('visibilityPage unavailable')
-      const result = await api.visibilityPage({ profileId: 'current', workspaceId: 'current', domain, limit: 50 })
+      const result = await api.visibilityPage({ domain, limit: 50 })
       const value = collabValue(result)
       if (value?.ok === false) throw new Error(value.error ?? value.code ?? 'load failed')
       setPage(value ?? { items: [], total: 0, state: 'empty' })
@@ -2189,7 +2189,7 @@ function CollaborationDomainView({ api, domain, label }) {
     setDetail(undefined)
     if (!['messages', 'tasks'].includes(domain) || typeof api.visibilityDetail !== 'function') return
     try {
-      const result = await api.visibilityDetail({ profileId: 'current', workspaceId: 'current', domain, id: item.id })
+      const result = await api.visibilityDetail({ domain, id: item.id })
       const value = collabValue(result)
       setDetail(value?.ok === false ? { error: value.error ?? value.code } : value)
     } catch (caught) {
@@ -2235,7 +2235,7 @@ function CollaborationPage(props) {
     setError(undefined)
     if (typeof api.visibilitySummary === 'function') {
       try {
-        const raw = await api.visibilitySummary({ profileId: 'current', workspaceId: 'current' })
+        const raw = await api.visibilitySummary({})
         const value = collabValue(raw)
         if (value?.ok === true && value.cards !== undefined) {
           const cards = Object.entries(value.cards).map(([id, card]) => ({
@@ -2282,7 +2282,7 @@ function CollaborationPage(props) {
     panel('div', { style: COLLAB_STYLE.header },
       panel('div', null,
         panel('h1', { style: COLLAB_STYLE.title }, '协作中心'),
-        panel('p', { style: COLLAB_STYLE.subtitle }, '总览 · 证据 · 运行状态；默认脱敏，不显示正文。单 profile 模式：profile/workspace 仅作关联，不做数据库隔离。')),
+        panel('p', { style: COLLAB_STYLE.subtitle }, '总览 · 证据 · 运行状态；默认脱敏，不显示正文。当前 host 单实例作用域（一个 host 只服务一个 DSH profile）。')),
       panel('button', { type: 'button', style: style.button, onClick: () => { void load() }, disabled: loading }, loading ? '刷新中…' : '刷新')),
     panel('div', { style: COLLAB_STYLE.tabs }, COLLAB_TABS.map(([id, label]) => panel('button', {
       key: id, type: 'button', style: view === id ? COLLAB_STYLE.tabActive : COLLAB_STYLE.tab,
