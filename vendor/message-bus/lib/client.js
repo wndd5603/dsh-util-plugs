@@ -2127,7 +2127,6 @@ function MessageCenterPage(props) {
       onPage: next => { void loadMeetings({ page: Math.max(0, Math.min(meetingPages - 1, next)) }) },
       onOpen: id => { void openMeetingDetail(id) },
     }),
-    panel(SubenvSection, { api }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
         type: 'search',

@@ -1,3 +1,13 @@
+## 2026.11.17-43 (dev)
+
+- **Collaboration recall**: `collaboration_recall` (alias of `apartment_collaboration_brief`) now includes read-only identity/roles, aliases, tasks, leases, memory keys (no bodies), and the artifact pointer; memory bodies still require `memory_search`.
+- **Duplicate reduction**: `subenv.allowTasks` defaults false (deprecated custom task runner); the custom Subenv card is removed from 协作网络. Use DSH subagent/agentTeams for execution.
+- **Audit**: final plugin capability/duplication plan is recorded in `docs/PLUGIN_SET_AUDIT_20261118.md`.
+
+## 2026.11.17-42 (dev)
+
+- **Subenv host LLM diagnostics**: temporary chunk-type diagnostics and `block-end` text fallback; host provider integration retained for external/experimental use only.
+
 ## 2026.11.17-41 (dev)
 
 - **Subenv host LLM text**: also assemble `block-end` text blocks when a provider emits no `text-delta`, so completed tasks return their assistant text instead of an empty result.

@@ -160,7 +160,7 @@ export const Config = objectSchema({
     }),
     url: string('http://127.0.0.1:47831/rpc', { description: 'External subenv RPC URL; used only when mode=external.' }),
     tokenEnv: string('SUBENV_TOKEN', { description: 'Environment variable holding the external subenv bearer token.' }),
-    allowTasks: boolean(true, { description: 'Register subenv_task_* tools (embedded task runner). Provider may still be disabled.' }),
+    allowTasks: boolean(false, { description: 'Deprecated custom subenv task runner (default false). Use DSH subagent/agentTeams instead; enable only for isolated experiments.' }),
     provider: string('', { description: 'Host LLM provider id for embedded subenv; empty = first host provider.' }),
     model: string('', { description: 'Host LLM model id for embedded subenv; empty = first model of the selected provider.' }),
   }), { description: 'Embedded or external subenv integration.' }),

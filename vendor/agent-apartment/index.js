@@ -309,11 +309,7 @@ export function apply(ctx, config) {
     resolveSession: resolveLiveSession,
     profileDir,
   }))
-  register(desc('apartment_collaboration_brief', 'Read-only aggregated collaboration brief for a session (defaults to the caller).', {
-    sessionId: str('Session id; defaults to the caller session.'),
-    taskId: str('Optional task id filter for task roles and assigned tasks.'),
-    boardId: str('Optional bulletin board id filter for assigned tasks.'),
-  }), async (args, exec) => {
+  const collaborationBrief = async (args, exec) => {
     const requested = optionalText(args?.sessionId) ?? callerSessionId(exec)
     if (requested === null) {
       return {
@@ -328,7 +324,17 @@ export function apply(ctx, config) {
       boardId: optionalText(args?.boardId),
       profileDir,
     })
-  })
+  }
+  register(desc('apartment_collaboration_brief', 'Read-only aggregated collaboration/recall brief for a session (defaults to the caller): identity, teams/roles, aliases, tasks, leases, memory keys (never bodies), and artifact pointer.', {
+    sessionId: str('Session id; defaults to the caller session.'),
+    taskId: str('Optional task id filter for task roles and assigned tasks.'),
+    boardId: str('Optional bulletin board id filter for assigned tasks.'),
+  }), collaborationBrief)
+  register(desc('collaboration_recall', 'Read-only first-turn recall: identity/roles, aliases, tasks, leases, memory keys (no bodies), artifact pointer. Use memory_search for bodies.', {
+    sessionId: str('Session id; defaults to the caller session.'),
+    taskId: str('Optional task id filter for task roles and assigned tasks.'),
+    boardId: str('Optional bulletin board id filter for assigned tasks.'),
+  }), collaborationBrief)
   register(desc('apartment_team_create', 'Create a team decoupled from workspace.', {
     id: str('Optional id.'), name: str('Team name.'), purpose: str('Purpose.'), workspace: str('Optional associated workspace.'),
   }, ['name']), async args => { assertWritable('apartment_team_create'); return apartment.createTeam(args) })

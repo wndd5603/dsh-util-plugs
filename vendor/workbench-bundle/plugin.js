@@ -191,7 +191,7 @@ export function createPointerText(config = {}) {
     : [
       '[agent-workbench] DSH agent workbench 已启用（上下文守卫 + 工作流预设 + 团队总线）。',
       '能力：context_usage/context_guard_status 看上下文；team_hooks_status 看团队 hooks；message_* 收发跨会话消息（信封里用 message_read 取正文）；network_info 看交流网。',
-      '记忆：先 memory_search/memory_list 召回项目记忆，稳定结论用 memory_remember 固化。状态/开关：workbench_status()；关闭组件用其 row id 的 config.enabled=false；勿同时安装组件包与元包。',
+      '召回：协作/续接先 collaboration_recall()（角色/任务/租约/记忆键/artifact），正文再用 memory_search，结论用 memory_remember。状态/开关：workbench_status()；关闭组件用其 row id 的 config.enabled=false；勿同时安装组件包与元包。',
     ].join('\n')
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 3)
   let normalized = lines.join('\n')

@@ -4,7 +4,7 @@
 // apartment store write helpers (bind/unbind live in src/store.js). The brief
 // deliberately never calls listLeases()/status(), because both reap expired
 // leases (UPDATE) and would break the read-only contract.
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
@@ -90,6 +90,70 @@ export function resolveBulletinDbPath() {
     return { path: process.env.DSH_BULLETIN_DB.trim(), source: 'env' }
   }
   return { path: join(dshHome(), 'bulletin-board', 'board.sqlite'), source: 'default' }
+}
+
+/** Resolve the durable memory DB read-only location (never creates it). */
+export function resolveMemoryDbPath() {
+  if (isNonEmptyString(process.env.DSH_MEMORY_DB)) {
+    return { path: process.env.DSH_MEMORY_DB.trim(), source: 'env' }
+  }
+  return { path: join(dshHome(), 'memory', 'memory.sqlite'), source: 'default' }
+}
+
+/** Resolve the content-addressed artifact pointer (read-only). */
+export function resolveArtifactCurrentPath() {
+  return { path: join(dshHome(), 'artifacts', 'current.json'), source: 'default' }
+}
+
+/** Read-only memory digest: keys/counts only, never the memory body. */
+export function readMemoryRecall({ limit = 5 } = {}) {
+  const resolved = resolveMemoryDbPath()
+  const opened = openReadOnly(resolved.path)
+  if (opened.db === null) return { available: false, code: 'MEMORY_UNAVAILABLE', file: basename(resolved.path), total: 0, keys: [], scopes: [] }
+  try {
+    const total = Number(opened.db.prepare('SELECT COUNT(*) AS n FROM memories WHERE superseded_by IS NULL').get()?.n ?? 0)
+    const rows = opened.db.prepare('SELECT id,scope,key,updated_at FROM memories WHERE superseded_by IS NULL ORDER BY updated_at DESC LIMIT ?').all(Math.max(1, Math.min(20, limit)))
+    const scopes = opened.db.prepare('SELECT scope,COUNT(*) AS n FROM memories WHERE superseded_by IS NULL GROUP BY scope').all()
+    return {
+      available: true, total,
+      keys: rows.map(row => ({ id: row.id, key: row.key, scope: row.scope, updatedAt: row.updated_at })),
+      scopes: scopes.map(row => ({ scope: row.scope, count: Number(row.n) })),
+      contentOmitted: true,
+      truncated: total > rows.length,
+    }
+  } catch (error) {
+    return { available: false, code: 'MEMORY_READ_FAILED', reason: String(error?.message ?? error), total: 0, keys: [], scopes: [] }
+  } finally {
+    opened.db.close()
+  }
+}
+
+/** Read-only artifact current pointer; never scans artifacts or writes. */
+export function readArtifactRecall() {
+  const resolved = resolveArtifactCurrentPath()
+  try {
+    const parsed = JSON.parse(requireReadFile(resolved.path))
+    const artifact = parsed?.artifact ?? parsed
+    if (artifact === null || typeof artifact !== 'object') return { available: false, code: 'ARTIFACT_INVALID' }
+    return {
+      available: true,
+      artifactId: typeof artifact.artifactId === 'string' ? artifact.artifactId : null,
+      sha256: typeof artifact.sha256 === 'string' ? artifact.sha256 : null,
+      size: Number.isFinite(Number(artifact.size)) ? Number(artifact.size) : null,
+      file: isNonEmptyString(artifact.file) ? basename(artifact.file) : null,
+      buildId: artifact.buildId ?? null,
+      createdAt: artifact.createdAt ?? null,
+      updatedAt: parsed?.updatedAt ?? null,
+    }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { available: false, code: 'ARTIFACT_MISSING' }
+    return { available: false, code: 'ARTIFACT_READ_FAILED', reason: String(error?.message ?? error) }
+  }
+}
+
+function requireReadFile(path) {
+  // Lazy import keeps the module's top-level surface unchanged.
+  return readFileSync(path)
 }
 
 const openReadOnly = path => {
@@ -594,6 +658,8 @@ export function buildCollaborationBrief({ apartment, sessionId, taskId, boardId,
   const teamTaskBox = truncate(teamTaskItems, BRIEF_LIMITS.tasks)
   const leaseBox = truncate(leaseItems, BRIEF_LIMITS.leases)
   const experienceBox = truncate(experienceItems, BRIEF_LIMITS.experiences)
+  const memory = readMemoryRecall({ limit: 5 })
+  const artifact = readArtifactRecall()
   const counts = {
     teams: teamItems.length,
     roles: roleItems.length,
@@ -604,6 +670,7 @@ export function buildCollaborationBrief({ apartment, sessionId, taskId, boardId,
     warnings: warnings.length,
     taskRoles: taskRoleItems.length,
     teamTasks: teamTaskItems.length,
+    memory: memory.total ?? 0,
   }
   const text = briefText(binding.agent_id, counts)
   return {
@@ -633,6 +700,8 @@ export function buildCollaborationBrief({ apartment, sessionId, taskId, boardId,
     leases: leaseBox.items,
     assignedTasks: bulletin.tasks,
     experiences: experienceBox.items,
+    memory,
+    artifact,
     warnings,
     counts,
     truncated: {
