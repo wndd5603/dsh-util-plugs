@@ -312,7 +312,7 @@ export function apply(ctx, config) {
   const collaborationBrief = async (args, exec) => {
     let requested
     try {
-      requested = assertSessionPermission(optionalText(args?.sessionId), exec) ?? callerSessionId(exec)
+      requested = assertSessionPermission(optionalText(args?.sessionId) ?? null, exec) ?? callerSessionId(exec)
     } catch {
       return {
         ok: false, code: COLLAB_ERROR_CODES.OPERATOR_REQUIRED, sessionId: null, agentId: null,

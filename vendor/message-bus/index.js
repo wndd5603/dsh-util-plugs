@@ -145,6 +145,10 @@ export const Config = objectSchema({
   webUi: nested(objectSchema({
     enabled: boolean(true, { description: 'Register the task-95 Web message center Remote namespace (messages list/search/detail/delete/send).' }),
     allowSend: boolean(true, { description: 'Allow sending a new bus message from the Web message center form.' }),
+    allowDelete: boolean(false, {
+      volatile: true,
+      description: 'Allow the Web Remote delete method. Default false: the Web Remote has no caller identity; an operator must opt in explicitly.',
+    }),
     pageSize: number(20, { description: 'Default page size for the Web message center.', int: true, min: 5, max: 100 }),
     exposeBody: boolean(false, {
       description: 'Allow the Web message center Remote to return message bodies/snippets. Default false: the Web Remote has no caller identity, so it must not disclose bodies unless a trusted operator explicitly opts in.',
@@ -1400,6 +1404,7 @@ function normalizeConfig(config) {
     webUi: {
       enabled: webUi.enabled !== false,
       allowSend: webUi.allowSend !== false,
+      allowDelete: webUi.allowDelete === true,
       pageSize: Math.max(5, Math.min(100, Math.trunc(num(webUi.pageSize, 20)))),
       exposeBody: webUi.exposeBody === true,
       allowMemoryForget: webUi.allowMemoryForget === true,
@@ -2877,6 +2882,7 @@ export function apply(ctx, config) {
       }
     }
     const remoteDeleteTask = (idOrArgs, confirmArg) => {
+      if (cfg.webUi.allowDelete !== true) return { ok: false, error: 'web delete is disabled; operator must set webUi.allowDelete:true' }
       const args = idOrArgs !== null && typeof idOrArgs === 'object' ? idOrArgs : { messageId: idOrArgs, confirm: confirmArg }
       const messageId = String(args.messageId ?? '').trim()
       if (args.confirm !== 'DELETE') {

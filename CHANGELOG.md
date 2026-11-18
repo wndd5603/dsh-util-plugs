@@ -1,3 +1,7 @@
+## 2026.11.17-60 (dev)
+
+- **CR fixes**: Web Remote delete now defaults to disabled (`webUi.allowDelete=false`, operator opt-in); `collaboration_recall()` no-arg permission fixed; README corruption/version/table and workbench package entry corrected.
+
 ## 2026.11.17-59 (dev)
 
 - **Restore plugin-console**: reintroduced the proven plugin-console row/client as the single self-made settings UI; removed the experimental collaboration settings section and native row-config entries. DSH native row config remains deferred.

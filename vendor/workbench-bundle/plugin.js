@@ -53,7 +53,7 @@ const MAX_POINTER_CHARS = 400
 const KNOWN_PACKAGES = [
   { name: 'dsh-util-plugs', entries: ['index.js', 'client.js', 'cordis.patch.yml'] },
   { name: 'dsh-context-sentinel', entries: ['context-meter/index.js', 'team-hooks2/index.js'] },
-  { name: 'dsh-agent-workflows', entries: ['captain-preset/plugin.js', 'prompt-architect/index.js'] },
+  { name: 'dsh-agent-workflows', entries: ['prompt-architect/index.js', 'prompt-architect/index.js'] },
   { name: 'dsh-team-bus', entries: ['session-network/index.js', 'message-bus/index.js'] },
   { name: 'dsh-message-bus', entries: ['index.js'] },
   { name: 'dsh-workbench-bundle', entries: ['plugin.js'] },
