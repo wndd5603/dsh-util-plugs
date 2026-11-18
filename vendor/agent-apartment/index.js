@@ -35,6 +35,7 @@ export const Config = objectSchema({
   backupKeep: number(5, { description: 'Number of backup snapshots to retain.', int: true, min: 1, max: 100 }),
   backupMaxAgeDays: number(8, { description: 'Maximum age in days of the latest normal backup before apartment_backup_verify reports it stale.', int: true, min: 1, max: 365 }),
   briefInjection: boolean(true, { description: 'Inject one collaboration-brief line once per bound session on agent/pre-step.' }),
+  legacyTeams: boolean(false, { description: 'Expose the retired apartment team/task-role tools. Default false: DSH-native teams/session identity are authoritative; existing team data stays read-only.' }),
 }, { description: 'Centralized Agent Apartment configuration.', schemaVersion: 1 })
 
 const output = {
@@ -343,6 +344,7 @@ export function apply(ctx, config) {
     taskId: str('Optional task id filter for task roles and assigned tasks.'),
     boardId: str('Optional bulletin board id filter for assigned tasks.'),
   }), collaborationBrief)
+  if (cfg.legacyTeams === true) {
   register(desc('apartment_team_create', 'Create a team decoupled from workspace.', {
     id: str('Optional id.'), name: str('Team name.'), purpose: str('Purpose.'), workspace: str('Optional associated workspace.'),
   }, ['name']), async args => { assertWritable('apartment_team_create'); return apartment.createTeam(args) })
@@ -411,6 +413,7 @@ export function apply(ctx, config) {
     teamId: optionalText(args?.teamId),
     boardId: optionalText(args?.boardId),
   }))
+  }
   register(desc('apartment_experience_record', 'Record reusable experience for an agent; taskId and outcome are required and the task is verified in bulletin unless allowUnverified.', {
     agentId: str('Agent id.'),
     taskId: str('Task id (required).'),

@@ -1,3 +1,7 @@
+## 2026.11.17-53 (dev)
+
+- **Team conflict containment**: apartment team/membership/task-role tools are now opt-in (`legacyTeams=false` by default); DSH-native teams/session identity remain authoritative. Existing team data stays readable, not writable.
+
 ## 2026.11.17-52 (dev)
 
 - **Retire captain team tools**: `agent-workflows` now mounts prompt-forge only; `team_init` / `team_members_check` and captain templates are removed. DSH-native teams are authoritative; plugin team design is retired incrementally.
