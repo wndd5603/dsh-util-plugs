@@ -365,6 +365,30 @@ export function selectStaleJobs(jobs, { now = Date.now(), staleMs = 15 * 60 * 10
     && Number(now) - Number(job.startedAt) >= threshold)
 }
 
+/**
+ * P0-3 pure reaper policy. The tool wraps this with a real registry; tests can
+ * supply a mock list/kill pair without mounting the whole plugin.
+ */
+export function reapJobs(registry, caller, { staleMs = 15 * 60 * 1000, dryRun = true, confirm } = {}) {
+  if (registry === null || typeof registry !== 'object' || typeof registry.list !== 'function') {
+    return { ok: false, code: 'UNAVAILABLE', message: 'job registry is not available' }
+  }
+  const candidates = selectStaleJobs(registry.list(caller), { staleMs })
+  const projected = candidates.map(job => ({ id: job.id, kind: job.kind, label: job.label, status: job.status, startedAt: job.startedAt, progress: job.progress ?? null }))
+  if (dryRun !== false) return { ok: true, dryRun: true, staleMs, candidates: projected }
+  if (confirm !== 'REAP') return { ok: false, code: 'CONFIRM_REQUIRED', message: 'job_reap requires confirm:"REAP"', candidates: projected }
+  const killed = []
+  for (const job of candidates) {
+    try {
+      const result = typeof registry.kill === 'function' ? registry.kill(job.id, caller, 'stale job reaper') : 'unavailable'
+      killed.push({ id: job.id, result })
+    } catch (error) {
+      killed.push({ id: job.id, error: String(error?.message ?? error) })
+    }
+  }
+  return { ok: true, dryRun: false, staleMs, killed }
+}
+
 /** Canonical absolute archive path when no archive exists yet. */
 function canonicalArchivePath(workspaceDir, roleName) {
   const now = new Date()
@@ -2674,24 +2698,7 @@ export function apply(ctx, config) {
       if (typeof caller !== 'string' || caller === '') throw new Error('job_reap requires an Agent-backed session')
       let jobs
       try { jobs = ctx.get?.('jobs') } catch { jobs = undefined }
-      if (jobs === undefined || jobs === null || typeof jobs.list !== 'function') {
-        return { ok: false, code: 'UNAVAILABLE', message: 'job registry is not available' }
-      }
-      const staleMs = Number.isFinite(Number(args.staleMs)) ? Math.max(1000, Number(args.staleMs)) : 900000
-      const candidates = selectStaleJobs(jobs.list(caller), { staleMs })
-      const projected = candidates.map(job => ({ id: job.id, kind: job.kind, label: job.label, status: job.status, startedAt: job.startedAt, progress: job.progress ?? null }))
-      if (args.dryRun !== false) return { ok: true, dryRun: true, staleMs, candidates: projected }
-      if (args.confirm !== 'REAP') return { ok: false, code: 'CONFIRM_REQUIRED', message: 'job_reap requires confirm:"REAP"', candidates: projected }
-      const killed = []
-      for (const job of candidates) {
-        try {
-          const result = typeof jobs.kill === 'function' ? jobs.kill(job.id, caller, 'stale job reaper') : 'unavailable'
-          killed.push({ id: job.id, result })
-        } catch (error) {
-          killed.push({ id: job.id, error: String(error?.message ?? error) })
-        }
-      }
-      return { ok: true, dryRun: false, staleMs, killed }
+      return reapJobs(jobs, caller, args)
     },
     presentCall: () => ({ card: 'generic', title: 'Stale job reaper', kind: 'write' }),
   })

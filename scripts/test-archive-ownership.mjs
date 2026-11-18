@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveManualArchivePath, selectStaleJobs } from '../vendor/context-sentinel/team-hooks2/index.js'
+import { resolveManualArchivePath, selectStaleJobs, reapJobs } from '../vendor/context-sentinel/team-hooks2/index.js'
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'dsh-archive-ownership-'))
@@ -44,4 +44,25 @@ test('selectStaleJobs only returns live jobs older than the threshold', () => {
     { id: 'job-stopping', status: 'stopping', startedAt: now - 2_000_000 },
   ]
   assert.deepEqual(selectStaleJobs(jobs, { now, staleMs: 900_000 }).map(job => job.id), ['job-old', 'job-stopping'])
+})
+
+test('reapJobs dry-runs and only kills with confirm REAP', () => {
+  const killed = []
+  const registry = {
+    list: () => [
+      { id: 'job-old', status: 'running', startedAt: Date.now() - 2_000_000 },
+      { id: 'job-new', status: 'running', startedAt: Date.now() - 1000 },
+    ],
+    kill: (id, caller, reason) => { killed.push({ id, caller, reason }); return 'requested' },
+  }
+  const dry = reapJobs(registry, 'session-test')
+  assert.equal(dry.dryRun, true)
+  assert.deepEqual(dry.candidates.map(job => job.id), ['job-old'])
+  assert.equal(killed.length, 0)
+  assert.equal(reapJobs(registry, 'session-test', { dryRun: false }).ok, false)
+  assert.equal(killed.length, 0)
+  const confirmed = reapJobs(registry, 'session-test', { dryRun: false, confirm: 'REAP' })
+  assert.equal(confirmed.ok, true)
+  assert.deepEqual(confirmed.killed.map(item => item.id), ['job-old'])
+  assert.equal(killed[0].caller, 'session-test')
 })
