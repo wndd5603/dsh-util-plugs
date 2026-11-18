@@ -1,3 +1,7 @@
+## 2026.11.17-29 (dev)
+
+- **Task evidence JSON fix**: `visibilityDetailOf` now parses SQLite text metadata before reading `completion.evidence`; corrupt metadata degrades to no evidence instead of throwing. Tests cover object, JSON-string, and corrupt forms.
+
 ## 2026.11.17-28 (dev)
 
 - **Host-enforced scope**: removed client-supplied `profileId`/`workspaceId`; summary returns `scope:{mode:"host",enforced:true}`. One host serves one DSH profile, so there is no fake multi-profile selector.

@@ -61,6 +61,16 @@ test('visibilityDetailOf strips body and reads nested evidence', () => {
   assert.equal(task.ok, true)
   assert.equal(JSON.stringify(task.item).includes('description'), false)
   assert.equal(task.evidence.sha256, 'a'.repeat(64))
+  const sqliteShape = visibilityDetailOf({
+    domain: 'tasks', id: 't2',
+    readTaskDetail: () => ({ task: { id: 't2', title: 'x', metadata: JSON.stringify({ completion: { evidence: { sha256: 'b'.repeat(64) } } }) } }),
+  })
+  assert.equal(sqliteShape.evidence.sha256, 'b'.repeat(64))
+  const corrupt = visibilityDetailOf({
+    domain: 'tasks', id: 't3',
+    readTaskDetail: () => ({ task: { id: 't3', title: 'x', metadata: '{bad json' } }),
+  })
+  assert.equal(corrupt.evidence, null)
   assert.equal(visibilityDetailOf({ domain: 'messages', id: 'x', getMessage: () => undefined }).code, 'NOT_FOUND')
 })
 

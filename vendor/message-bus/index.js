@@ -643,6 +643,19 @@ function safeMessageView(row) {
   }
 }
 
+/** Parse JSON metadata when SQLite stores it as text; never throw on corrupt data. */
+function metadataObjectOf(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'object' && !Array.isArray(value)) return value
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 /** Pure detail projection; the Web Remote supplies the actual readers. */
 export function visibilityDetailOf({ domain, id, getMessage, readTaskDetail } = {}) {
   if (domain === 'messages') {
@@ -654,7 +667,8 @@ export function visibilityDetailOf({ domain, id, getMessage, readTaskDetail } = 
     const detail = typeof readTaskDetail === 'function' ? readTaskDetail({ id }) : undefined
     if (detail?.ok === false) return detail
     const task = detail?.task ?? detail
-    const evidence = task?.metadata?.completion?.evidence ?? null
+    const metadata = metadataObjectOf(task?.metadata)
+    const evidence = metadata?.completion?.evidence ?? null
     return { ok: true, state: 'ready', item: safeTaskView(task), evidence, redacted: ['description', 'metadata'] }
   }
   return { ok: false, code: 'DOMAIN_UNAVAILABLE', error: 'detail is not available for ' + String(domain) }
