@@ -14,7 +14,7 @@ node --test scripts/test-message-bus-p0.mjs
 tests 5 / pass 5 / fail 0
 ```
 
-Covered: target/sender/third/missing session; `createPeerMessage`; distinct unread counts with dedupe/suppressed/foreign read receipts; apply-level FORBIDDEN without read receipt; unread-only reminder.
+Covered: target/sender/third/missing session; `createPeerMessage`; distinct unread counts with dedupe/suppressed/foreign read receipts; apply-level FORBIDDEN without read receipt; unread-only reminder; `legacyTools:true` `pipe2_queue` is caller-scoped and a third party cannot read another recipient's body; sender read does not clear target unread.
 
 ## Scaffold
 
@@ -39,5 +39,5 @@ dsh plugin --profile p0-blank add --offline <tarball>  # PASS
 
 - No live two-session E2E for FORBIDDEN; the apply-level mock and store tests are the evidence.
 - Web Remote message reads are not covered by this patch (no caller identity in that path); treat as remaining WARN.
-- Merged wake envelopes use the first item's `fromSession` for the source; envelope text still lists each sender. This is an attribution approximation, not a per-item source.
+- Merged wake envelopes: the source is attributed only when every item shares one sender; mixed-sender batches carry `fromSession:null`/`fromDisplay:null` (the text still lists each sender). This avoids false attribution; it is not per-item structured provenance.
 - No commit/tag/release in this validation; author decides release.

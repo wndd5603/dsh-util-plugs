@@ -140,7 +140,7 @@ test('message_read denies third parties and only marks authorized reads', async 
     },
   }
   try {
-    apply(ctx, { dbPath: join(dir, 'bus.sqlite'), strictMode: false, autoResume: false })
+    apply(ctx, { dbPath: join(dir, 'bus.sqlite'), strictMode: false, autoResume: false, legacyTools: true })
     const sent = await tools.get('message_send').execute(
       { to: TARGET, body: 'p0 body', subject: 'p0', priority: true },
       { agent: { session: { id: SENDER } } },
@@ -169,6 +169,21 @@ test('message_read denies third parties and only marks authorized reads', async 
     assert.equal(asSender.ok, true)
     assert.equal(asSender.body, 'p0 body')
     assert.equal(status.execute().counts.readState, 1)
+    // A sender's read receipt must not clear the target's unread count.
+    assert.equal(status.execute().counts.unread, 1)
+
+    const legacyQueue = tools.get('pipe2_queue')
+    assert.ok(legacyQueue, 'legacy pipe2_queue is registered when legacyTools=true')
+    const thirdQueue = legacyQueue.execute({}, { agent: { session: { id: THIRD } } })
+    assert.equal(thirdQueue.ok, true)
+    assert.equal(thirdQueue.count, 0) // caller-scoped: no third-party body
+    const crossQueue = legacyQueue.execute({ to: TARGET }, { agent: { session: { id: THIRD } } })
+    assert.equal(crossQueue.ok, false)
+    assert.equal(crossQueue.code, 'FORBIDDEN')
+    const targetQueue = legacyQueue.execute({}, { agent: { session: { id: TARGET } } })
+    assert.equal(targetQueue.ok, true)
+    assert.equal(targetQueue.count, 1)
+    assert.match(JSON.stringify(targetQueue.items), /p0 body/)
 
     const asTarget = read.execute({ messageId: sent.messageId }, { agent: { session: { id: TARGET } } })
     assert.equal(asTarget.ok, true)

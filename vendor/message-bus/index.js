@@ -1502,9 +1502,11 @@ export function apply(ctx, config) {
           + ' | sha=' + String(item.sha).slice(0, 8) + '(body) | id=' + item.id).join('\n')
         + '\n说明：外部消息；正文不在本条，逐条 message_read({messageId}) 读取。'
     try {
+      const senderIds = [...new Set(items.map(item => item.fromSession).filter(value => typeof value === 'string' && value !== ''))]
+      const singleSender = senderIds.length === 1
       entry.agent.followup(createPeerMessage(text, {
-        fromSession: items[0].fromSession ?? null,
-        fromDisplay: items[0].from ?? null,
+        fromSession: singleSender ? items[0].fromSession ?? null : null,
+        fromDisplay: singleSender ? items[0].from ?? null : null,
       }))
       logger.info('[message-bus] wake ' + sessionId + ' items=' + items.length)
     } catch (error) {
@@ -2398,7 +2400,14 @@ export function apply(ctx, config) {
     pipe2_queue: (args, exec) => {
       const limit = Number.isInteger(args.limit) ? Math.min(200, Math.max(1, args.limit)) : 20
       const readBy = resolveSelfSessionArg(args.readBy, exec, 'pipe2_queue')
-      const rows = store.listMessages({ toSession: args.to ?? null, readBy, unreadOnly: args.unreadOnly === true, limit })
+      const requestedTo = typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null
+      if (requestedTo !== null && requestedTo !== readBy) {
+        return {
+          ok: false, code: 'FORBIDDEN', readBy,
+          message: 'pipe2_queue: to must equal the caller session; queue is caller-scoped',
+        }
+      }
+      const rows = store.listMessages({ toSession: readBy, readBy, unreadOnly: args.unreadOnly === true, limit })
       return { ok: true, readBy, count: rows.length, items: rows }
     },
     pipe2_read_message: (args, exec) => {
