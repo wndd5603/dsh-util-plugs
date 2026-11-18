@@ -643,6 +643,22 @@ function safeMessageView(row) {
   }
 }
 
+/** Pagination metadata shared by visibilityPage and its tests. */
+export function visibilityPageMeta(total, offset, limit) {
+  const safeTotal = Math.max(0, Number(total) || 0)
+  const safeOffset = Math.max(0, Number(offset) || 0)
+  const safeLimit = Math.max(1, Number(limit) || 25)
+  const next = safeOffset + safeLimit
+  return {
+    total: safeTotal,
+    offset: safeOffset,
+    limit: safeLimit,
+    nextCursor: next < safeTotal ? String(next) : null,
+    version: 'v1',
+    error: null,
+  }
+}
+
 /** Wave A: pure, read-only summary projection. */
 export function visibilitySummaryOf({
   profileId, workspaceId, now = new Date().toISOString(),
@@ -658,6 +674,16 @@ export function visibilitySummaryOf({
     ...extra,
   })
   const taskCounts = tasks?.counts ?? {}
+  const cards = {
+    messages: card(messageCounts, messageCounts?.messages ?? 0, { unread: messageCounts?.unread ?? 0 }),
+    tasks: card(tasks, tasks?.total ?? 0, { stale: taskCounts.stale ?? 0, blocked: taskCounts.blocked ?? 0 }),
+    meetings: card(meetings, meetings?.total ?? 0),
+    memory: card(memory, memory?.total ?? 0),
+    runtime: card(null, 0, { note: 'Wave C' }),
+    subenv: card(subenv, subenv?.total ?? 0, { note: subenv === null ? 'not configured' : undefined }),
+  }
+  const unavailable = Object.values(cards).some(item => item.state === 'unavailable')
+  const empty = Object.values(cards).every(item => item.state === 'empty')
   return {
     ok: true,
     profileId: profileId.trim(),
@@ -666,14 +692,8 @@ export function visibilitySummaryOf({
     version: 'v1',
     scopeMode: 'single-profile',
     warnings: ['db-scope-not-enforced'],
-    cards: {
-      messages: card(messageCounts, messageCounts?.messages ?? 0, { unread: messageCounts?.unread ?? 0 }),
-      tasks: card(tasks, tasks?.total ?? 0, { stale: taskCounts.stale ?? 0, blocked: taskCounts.blocked ?? 0 }),
-      meetings: card(meetings, meetings?.total ?? 0),
-      memory: card(memory, memory?.total ?? 0),
-      runtime: card(null, 0, { note: 'Wave C' }),
-      subenv: card(subenv, subenv?.total ?? 0, { note: subenv === null ? 'not configured' : undefined }),
-    },
+    state: unavailable ? 'partial' : (empty ? 'empty' : 'ready'),
+    cards,
   }
 }
 
@@ -2725,7 +2745,7 @@ export function apply(ctx, config) {
         } else {
           return { ok: true, state: 'unavailable', items: [], total: 0, offset, limit, error: 'DOMAIN_UNAVAILABLE' }
         }
-        return { ok: true, state: total === 0 ? 'empty' : 'ready', items, total, offset, limit, asOf: new Date().toISOString() }
+        return { ok: true, state: total === 0 ? 'empty' : 'ready', items, ...visibilityPageMeta(total, offset, limit), asOf: new Date().toISOString() }
       }
       visibilityDetail(query) {
         const args = query !== null && typeof query === 'object' ? query : {}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { safeTaskView, visibilitySummaryOf } from '../vendor/message-bus/index.js'
+import { safeTaskView, visibilityPageMeta, visibilitySummaryOf } from '../vendor/message-bus/index.js'
 
 test('visibility summary requires profile and workspace scope', () => {
   const result = visibilitySummaryOf({})
@@ -21,6 +21,7 @@ test('visibility summary maps ready/empty/unavailable without bodies', () => {
   assert.equal(ready.ok, true)
   assert.equal(ready.scopeMode, 'single-profile')
   assert.deepEqual(ready.warnings, ['db-scope-not-enforced'])
+  assert.equal(ready.state, 'partial')
   assert.equal(ready.cards.messages.state, 'ready')
   assert.equal(ready.cards.messages.unread, 1)
   assert.equal(ready.cards.tasks.stale, 1)
@@ -36,6 +37,14 @@ test('safeTaskView removes description and metadata', () => {
   assert.equal('description' in view, false)
   assert.equal('metadata' in view, false)
   assert.equal(view.redacted, true)
+})
+
+test('visibilityPageMeta exposes stable cursor/version/error fields', () => {
+  const first = visibilityPageMeta(10, 0, 5)
+  assert.equal(first.nextCursor, '5')
+  assert.equal(first.version, 'v1')
+  assert.equal(first.error, null)
+  assert.equal(visibilityPageMeta(10, 5, 5).nextCursor, null)
 })
 
 test('visibility summary isolates an unavailable domain', () => {

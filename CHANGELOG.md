@@ -1,3 +1,7 @@
+## 2026.11.17-26 (dev)
+
+- **Visibility contract hardening**: `visibilitySummary` now exposes an aggregate `state` (`partial` when any card is unavailable); `visibilityPage` returns stable `version`, `nextCursor`, and `error:null` via `visibilityPageMeta`; tests cover pagination fields.
+
 ## 2026.11.17-25 (dev)
 
 - **Explicit single-profile scope**: `visibilitySummary` now returns `scopeMode:"single-profile"` and `warnings:["db-scope-not-enforced"]`; the UI states this limitation instead of implying multi-profile isolation. MF-3 remains a WARN until a host scope API exists.
