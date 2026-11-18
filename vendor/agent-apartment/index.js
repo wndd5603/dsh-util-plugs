@@ -357,12 +357,14 @@ export function apply(ctx, config) {
   register(desc('apartment_team_list', 'List teams and memberships.', { teamId: str('Optional team id.') }), async args => ({
     teams: apartment.listTeams(), memberships: apartment.listMemberships(args.teamId),
   }))
+  }
   register(desc('apartment_lease', 'Allocate a per-task work directory to an agent.', {
     agentId: str('Agent id.'), workspace: str('Workspace path.'), taskId: str('Optional task id.'), ttlMs: num('Lease TTL ms.'),
   }, ['agentId', 'workspace']), async args => { assertWritable('apartment_lease'); return apartment.claimLease(args) })
   register(desc('apartment_lease_release', 'Release a lease.', { leaseId: str('Lease id.') }, ['leaseId']), async args => { assertWritable('apartment_lease_release'); return apartment.releaseLease(args.leaseId) })
   register(desc('apartment_lease_list', 'List leases.', { agentId: str('Optional agent id.') }), async args => ({ leases: apartment.listLeases(args.agentId) }))
   register(desc('apartment_lease_reap', 'Expire leases whose TTL has passed.'), async () => { assertWritable('apartment_lease_reap'); return apartment.reapExpired() })
+  if (cfg.legacyTeams === true) {
   register(desc('apartment_task_role_assign', 'Bind an agent/team to a role on one task (operator-only: requires danger-full-access); validates agent/team and verifies the task and board in bulletin unless allowUnverified.', {
     taskId: str('Task id.'),
     agentId: str('Agent id.'),

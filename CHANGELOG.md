@@ -1,3 +1,7 @@
+## 2026.11.17-54 (dev)
+
+- **Fix lease availability**: the `legacyTeams=false` gate now hides only apartment team/task-role tools; lease tools remain registered.
+
 ## 2026.11.17-53 (dev)
 
 - **Team conflict containment**: apartment team/membership/task-role tools are now opt-in (`legacyTeams=false` by default); DSH-native teams/session identity remain authoritative. Existing team data stays readable, not writable.
