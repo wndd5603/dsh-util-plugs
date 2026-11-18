@@ -1,3 +1,7 @@
+## 2026.11.17-12 (dev)
+
+- **Ack/queue recipient checks**: `message_ack` now marks only messages the caller may read; a third-party or missing caller receives `denied` entries and no read receipt. `message_queue({to})` rejects a target that is not the caller. This closes the remaining P0-2 bypass found by the fourth verification while `message_purge` remains disabled unless `allowPurge:true`.
+
 ## 2026.11.17-11 (dev)
 
 - **Lease fencing and ownership**: apartment leases add a monotonic `fencing_token` per task, reject a second active lease for the same task with `LEASE_CONFLICT`, require the lease owner on release, and return `released:false` for an already released lease. Existing databases get the additive column migration.

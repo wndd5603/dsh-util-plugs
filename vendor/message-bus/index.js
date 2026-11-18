@@ -2053,6 +2053,9 @@ export function apply(ctx, config) {
         ? args.since : null
       const undeliveredOnly = args.undeliveredOnly === true
       const toSession = typeof args.to === 'string' && args.to.trim() !== '' ? args.to.trim() : null
+      if (toSession !== null && toSession !== readBy) {
+        return { ok: false, code: 'FORBIDDEN', readBy, message: 'message_queue: to must equal the caller session' }
+      }
       // Suppressed rows have no read receipt and are never "undelivered stored
       // messages"; those filters keep the legacy exclusion.
       const suppressedInScope = args.unreadOnly !== true && !undeliveredOnly
@@ -2207,11 +2210,17 @@ export function apply(ctx, config) {
       const sessionId = resolveSelfSessionArg(args.session, exec, 'message_ack')
       const ids = Array.isArray(args.ids) ? args.ids.filter(id => typeof id === 'string' && id !== '') : []
       const now = nowIso()
+      const denied = []
       for (const id of ids) {
+        const row = store.getMessage(id)
+        if (row === undefined || row === null || !canReadMessage(row, sessionId)) {
+          denied.push(id)
+          continue
+        }
         store.markRead(sessionId, id, now)
         store.markEnvelopeConsumed?.(sessionId, id)
       }
-      return { ok: true, session: sessionId, count: ids.length, readAt: now }
+      return { ok: denied.length === 0, session: sessionId, count: ids.length - denied.length, denied, readAt: now }
     },
     presentCall: () => ({ card: 'generic', title: 'ACK bus messages', kind: 'write' }),
   })

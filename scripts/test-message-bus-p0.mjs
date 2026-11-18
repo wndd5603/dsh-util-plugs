@@ -171,6 +171,17 @@ test('message_read denies third parties and only marks authorized reads', async 
 
     const read = tools.get('message_read')
     const status = tools.get('message_bus_status')
+    const ack = tools.get('message_ack')
+    const deniedAck = ack.execute({ ids: [sent.messageId] }, { agent: { session: { id: THIRD } } })
+    assert.equal(deniedAck.ok, false)
+    assert.deepEqual(deniedAck.denied, [sent.messageId])
+    assert.equal(status.execute().counts.readState, 0)
+
+    const queue = tools.get('message_queue')
+    const modernCrossQueue = queue.execute({ to: TARGET }, { agent: { session: { id: THIRD } } })
+    assert.equal(modernCrossQueue.ok, false)
+    assert.equal(modernCrossQueue.code, 'FORBIDDEN')
+
     const forbidden = read.execute({ messageId: sent.messageId }, { agent: { session: { id: THIRD } } })
     assert.equal(forbidden.ok, false)
     assert.equal(forbidden.code, 'FORBIDDEN')
