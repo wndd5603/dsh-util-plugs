@@ -1,3 +1,7 @@
+## 2026.11.17-58 (dev)
+
+- **Settings inject fix**: pass configForms/layout from the client context into the settings section; the custom cards no longer fall back to the unavailable early scope.
+
 ## 2026.11.17-57 (dev)
 
 - **Settings suite**: renamed the settings tab to 工具集设置; custom cards now render only served namespaces, show current values, mark restart/native-only fields, and hide rows without a config namespace. More message-bus/context fields are volatile so they are editable.

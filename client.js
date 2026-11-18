@@ -2857,7 +2857,7 @@ function apply(ctx) {
         id: 'collaboration-settings',
         order: 25,
         label: () => '工具集设置',
-        inject: () => ({ configForms: scope.configForms, layout: scope.layout }),
+        inject: () => ({ configForms: ctx.configForms ?? scope.configForms, layout: ctx.layout ?? scope.layout }),
       }, CollaborationSettingsPage))
       const disposeRowConfigs = Object.keys(ROW_CONFIG_FIELDS).map(rowId => scope.slots.inject('plugins.row.config', () => scope.slots.register({
         name: 'plugins.row.config',
