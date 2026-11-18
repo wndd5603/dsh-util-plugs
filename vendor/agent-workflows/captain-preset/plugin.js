@@ -7,7 +7,7 @@
  * Registers two profile-level global tools (global row), available in blank and
  * any-preset sessions; the captain preset only contributes persona/instructions:
  * - team_init:  initialize the project's team workspace (documents, member role
- *               files, zero-dependency audit CLIs, legacy file-based pipe2 templates).
+ *               files and zero-dependency audit CLIs).
  *               Idempotent: existing files are reported as skipped, never
  *               overwritten.
  * - team_members_check: verify the team structure (member files, six required sections,
@@ -52,7 +52,6 @@ export const DEFAULT_ROLES = ['captain', 'builder', 'verifier', 'scribe']
 const REQUIRED_SECTIONS = ['你是谁', '写范围', '六项回报义务', '上下文纪律', '禁止事项', '文件夹权限']
 
 const TOOL_TEMPLATES = ['team_member_audit.js', 'team_structure_check.js', 'team_minutes_new.js']
-const PIPE2_TEMPLATES = ['pipe2_tool.js', 'pipe2_watch.js']
 
 function template(relative) {
   return readFileSync(join(TEMPLATE_DIR, relative), 'utf8')
@@ -99,7 +98,6 @@ export function scaffoldProject(root, options = {}) {
     if (!preview) mkdirSync(join(root, 'team', 'members', dir, 'scratch'), { recursive: true })
   }
   for (const tool of TOOL_TEMPLATES) write(join('tools', tool), template(join('tools', tool)))
-  for (const tool of PIPE2_TEMPLATES) write(join('team', tool), template(join('tools', tool)))
 
   return { root, roles, created, skipped }
 }
@@ -118,9 +116,6 @@ export function auditProject(root, roles) {
   if (!existsSync(join(teamDir, 'meetings', 'MEETINGS.md'))) problems.push('缺少 team/meetings/MEETINGS.md')
   for (const tool of TOOL_TEMPLATES) {
     if (!existsSync(join(root, 'tools', tool))) problems.push('缺少 tools/' + tool)
-  }
-  for (const tool of PIPE2_TEMPLATES) {
-    if (!existsSync(join(teamDir, tool))) problems.push('缺少 team/' + tool)
   }
 
   const membersDir = join(teamDir, 'members')
@@ -213,9 +208,8 @@ export function apply(ctx, config) {
     name: 'team_init',
     description:
       'Initialize the team workspace for this project: team/TEAM.md, team/meetings/MEETINGS.md, '
-      + 'team/members/<role>/AGENTS.md per role, zero-dependency audit CLIs under tools/, and the '
-      + 'and legacy file-based pipe2 templates under team/ (legacy-only; prefer the installed '
-      + 'message-bus/team-bus tools for cross-session messaging). Idempotent: existing files are skipped, never overwritten. '
+      + 'team/members/<role>/AGENTS.md per role, and zero-dependency audit CLIs under tools/. '
+      + 'Cross-session messaging is provided by the installed message-bus/team-bus tools. Idempotent: existing files are skipped, never overwritten. '
       + 'Defaults the root to the session working directory and roles to '
       + DEFAULT_ROLES.join(', ') + '. Set preview:true to list what would be created without writing anything. '
       + 'Call it once at session start, then read team/TEAM.md. Human confirmation: preview before the first write; '

@@ -1,3 +1,7 @@
+## 2026.11.17-51 (dev)
+
+- **P1 cleanup**: removed legacy captain pipe2/member templates and the unused plugin-console package/export; team_init no longer writes pipe2 files. Native row-config namespace limitation is deferred.
+
 ## 2026.11.17-50 (dev)
 
 - **Row config availability**: mark auto-backup enabled/backupDir and workbench pointer/statusTool/artifactTool volatile so the native `plugins.row.config` page receives a writable form.
