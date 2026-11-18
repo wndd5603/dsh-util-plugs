@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-29 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-30 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,18 +22,18 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-29 (dev)
+### What is new in 2026.11.17-30 (dev)
 
+- **Read-only capability declaration**: `capabilities:{reads:true,writes:false,reveal:false}`; no unauthenticated destructive controls.
 - **Task evidence JSON fix**: parse text metadata before reading completion evidence; corrupt metadata degrades safely.
 - **Host-enforced scope**: no client profile/workspace selector; summary returns `scope:{mode:"host",enforced:true}`. Cross-host isolation is by process/profile dir, not a fake in-host tenant switch.
 - **Detail projection tests**: `visibilityDetailOf` pure projection; body-free message, nested evidence, redaction, NOT_FOUND.
 - **Visibility contract hardening**: aggregate `partial`, page `version/nextCursor/error`, pagination tests.
-- **Explicit single-profile scope**: summary returns `scopeMode:"single-profile"` + `db-scope-not-enforced`; the UI states the limitation.
 - **Visibility review fixes**: task rows are body/metadata-free; task evidence reads the nested task metadata; Overview uses `visibilitySummary` with as-of.
 - **Runtime/evidence view**: Runtime shows apartment/lease counts without paths; detail has a separate evidence block and redaction markers; Subenv is explicitly not configured.
 - **Collaboration Inbox/Tasks views**: list + detail via `visibilityPage/detail`; body/content remains hidden and redaction markers are shown.
 - **Visibility page/detail API**: `visibilityPage` returns safe domain rows; `visibilityDetail` returns body-free message/task detail with evidence and redaction markers; unknown domains are `DOMAIN_UNAVAILABLE`.
-- **Visibility summary API**: `visibilitySummary` returns six domain cards with `ready|empty|unavailable`, as-of, and no body; missing profile/workspace returns `SCOPE_REQUIRED`.
+- **Visibility summary API**: `visibilitySummary` returns six domain cards with `ready|empty|unavailable`, host-enforced scope, as-of, and no body.
 - **Collaboration Center shell**: new `collaboration` sidebar entry + six-card overview + tabs; unavailable domains are marked, not faked as zero; settings section at order 25.
 - **Meeting action lifecycle**: `meeting_action_update` assigns/closes one action; digest stops counting non-pending rows.
 - **Read audit**: every successful read appends a body-free `read-audit.jsonl` row.
@@ -91,7 +91,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | Unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-29; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-30; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -141,7 +141,7 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
-### 2026.11.17-29 新增
+### 2026.11.17-30 新增
 
 - **会议 action 生命周期**：`meeting_action_update` 可分配/关闭单个 action；digest 不再计非 pending 行。
 - **记忆 supersede**：`memory_supersede` 保留旧行作审计并写 `superseded_by`；默认 search/list 隐藏，`includeSuperseded:true` 可查。
@@ -198,7 +198,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-29，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-30，各插件保留自己的版本号。
 
 ### Web 界面
 

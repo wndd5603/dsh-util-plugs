@@ -717,6 +717,7 @@ export function visibilitySummaryOf({
     scope: { mode: 'host', enforced: true, note: 'one host serves one DSH profile' },
     generatedAt: now,
     version: 'v1',
+    capabilities: { reads: true, writes: false, reveal: false },
     state: unavailable ? 'partial' : (empty ? 'empty' : 'ready'),
     cards,
   }

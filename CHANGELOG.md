@@ -1,3 +1,7 @@
+## 2026.11.17-30 (dev)
+
+- **Read-only capability declaration**: `visibilitySummary` now returns `capabilities:{reads:true,writes:false,reveal:false}`; the collaboration center is explicitly read-only (no unauthenticated destructive controls). README scope wording updated.
+
 ## 2026.11.17-29 (dev)
 
 - **Task evidence JSON fix**: `visibilityDetailOf` now parses SQLite text metadata before reading `completion.evidence`; corrupt metadata degrades to no evidence instead of throwing. Tests cover object, JSON-string, and corrupt forms.

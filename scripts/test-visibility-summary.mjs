@@ -20,6 +20,7 @@ test('visibility summary maps ready/empty/unavailable without bodies', () => {
   })
   assert.equal(ready.ok, true)
   assert.equal(ready.scope.mode, 'host')
+  assert.deepEqual(ready.capabilities, { reads: true, writes: false, reveal: false })
   assert.equal(ready.state, 'partial')
   assert.equal(ready.cards.messages.state, 'ready')
   assert.equal(ready.cards.messages.unread, 1)
