@@ -50,6 +50,7 @@ const MAX_POINTER_CHARS = 400
 
 /** Release packages this meta bundle is expected to install/see. */
 const KNOWN_PACKAGES = [
+  { name: 'dsh-util-plugs', entries: ['index.js', 'client.js', 'cordis.patch.yml'] },
   { name: 'dsh-context-sentinel', entries: ['context-meter/index.js', 'team-hooks2/index.js'] },
   { name: 'dsh-agent-workflows', entries: ['captain-preset/plugin.js', 'prompt-architect/index.js'] },
   { name: 'dsh-team-bus', entries: ['session-network/index.js', 'message-bus/index.js'] },
