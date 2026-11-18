@@ -1,3 +1,7 @@
+## 2026.11.17-34 (dev)
+
+- **Embedded subenv**: same-process provider adapter + task runner; no port/token; Subenv tab reads embedded status; `subenv_task_submit/get/list/cancel` tools. `subenv.mode` defaults `embedded`; external RPC remains opt-in.
+
 ## 2026.11.17-33 (dev)
 
 - **Collaboration UI filters**: Inbox/Tasks/Meetings/Memory now expose a keyword input, status select (tasks/meetings), Apply/Clear, and Enter-to-apply; all filters go through `visibilityPage`.

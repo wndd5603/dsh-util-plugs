@@ -2171,8 +2171,16 @@ function CollaborationDomainView({ api, domain, label }) {
       if (domain === 'subenv') {
         if (typeof api.subenvStatus !== 'function') throw new Error('subenvStatus unavailable')
         const value = collabValue(await api.subenvStatus())
-        if (value?.state === 'online') {
-          setPage({ state: 'ready', total: 1, items: [{ id: 'subenv', title: 'Subenv', status: value.state, meta: `tasks ${value.tasks?.length ?? 0} · llm ${value.provider?.llmEnabled === true ? 'on' : 'off'}` }] })
+        if (value?.state === 'online' || value?.state === 'degraded') {
+          const provider = value.provider ?? {}
+          setPage({
+            state: 'ready', total: 1,
+            items: [{
+              id: 'subenv', title: 'Subenv', status: value.state,
+              meta: `${value.mode ?? 'embedded'} · tasks ${value.tasks?.length ?? 0} · provider ${provider.llmEnabled === true ? 'on' : 'off'}`,
+            }],
+            error: value.state === 'degraded' ? 'PROVIDER_DISABLED' : undefined,
+          })
         } else {
           setPage({ state: 'unavailable', total: 0, items: [], error: value?.code ?? 'SUBENV_UNAVAILABLE' })
         }

@@ -16,6 +16,8 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openMessageStore } from './src/store.js'
+import { createProvider } from './src/subenv/provider.mjs'
+import { createEmbeddedSubenv } from './src/subenv/embedded.mjs'
 import {
   boolean, number, string, record, nested, objectSchema, enumOf,
   defaultsOf, fieldDocs, validateConfig,
@@ -147,6 +149,14 @@ export const Config = objectSchema({
     }),
     audit: boolean(true, { description: 'Append one JSONL audit row per Web delete/send under <db dir>/web-audit.jsonl (no body).' }),
   }), { description: 'Web message center (client half) configuration.' }),
+  subenv: nested(objectSchema({
+    mode: enumOf('embedded', ['embedded', 'external'], {
+      description: "Subenv mode: 'embedded' (default, same host process, no port/token) or 'external' (legacy localhost RPC).",
+    }),
+    url: string('http://127.0.0.1:47831/rpc', { description: 'External subenv RPC URL; used only when mode=external.' }),
+    tokenEnv: string('SUBENV_TOKEN', { description: 'Environment variable holding the external subenv bearer token.' }),
+    allowTasks: boolean(true, { description: 'Register subenv_task_* tools (embedded task runner). Provider may still be disabled.' }),
+  }), { description: 'Embedded or external subenv integration.' }),
 }, { description: 'Universal session message bus configuration.', schemaVersion: 1 })
 
 const SESSION_ID_RE = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -1296,6 +1306,7 @@ function normalizeConfig(config) {
   const pendingReminder = merged.pendingReminder !== null && typeof merged.pendingReminder === 'object'
     ? merged.pendingReminder : {}
   const webUi = merged.webUi !== null && typeof merged.webUi === 'object' ? merged.webUi : {}
+  const subenv = merged.subenv !== null && typeof merged.subenv === 'object' ? merged.subenv : {}
   return {
     enabled: merged.enabled !== false,
     maxBodyChars: Math.max(1, Math.trunc(num(merged.maxBodyChars, 100000))),
@@ -1339,6 +1350,12 @@ function normalizeConfig(config) {
       allowMemoryForget: webUi.allowMemoryForget === true,
       audit: webUi.audit !== false,
     },
+    subenv: {
+      mode: subenv.mode === 'external' ? 'external' : 'embedded',
+      url: typeof subenv.url === 'string' && subenv.url !== '' ? subenv.url : 'http://127.0.0.1:47831/rpc',
+      tokenEnv: typeof subenv.tokenEnv === 'string' && subenv.tokenEnv !== '' ? subenv.tokenEnv : 'SUBENV_TOKEN',
+      allowTasks: subenv.allowTasks !== false,
+    },
   }
 }
 
@@ -1364,6 +1381,7 @@ export function apply(ctx, config) {
     return
   }
   const store = openMessageStore(cfg.dbPath)
+  const embeddedSubenv = createEmbeddedSubenv({ provider: createProvider({ env: process.env }) })
   if (store.deliverySchema?.degraded) {
     logger.warn('[message-bus] Q2-A delivery columns unavailable (missing: '
       + store.deliverySchema.missing.join(', ') + '); legacy delivery schema in use')
@@ -2156,6 +2174,45 @@ export function apply(ctx, config) {
     }
   }
 
+  if (cfg.subenv.allowTasks !== false) {
+    ctx.tools.register({
+      name: 'subenv_task_submit',
+      description: 'Submit a one-shot task to the embedded subenv. Provider must be enabled; task state is in-memory and is lost on host restart.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'User prompt for the one-shot task.' },
+          messages: { type: 'array', description: 'Optional OpenAI-style messages; overrides prompt.' },
+        },
+        additionalProperties: false,
+      },
+      output: jsonOutput,
+      async execute(args = {}) { return embeddedSubenv.submit(args) },
+      presentCall: () => ({ card: 'generic', title: 'Subenv task', kind: 'write' }),
+    })
+    ctx.tools.register({
+      name: 'subenv_task_get',
+      description: 'Read one embedded subenv task by id. Returns in-memory result/error.',
+      parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+      output: jsonOutput,
+      async execute(args = {}) { return embeddedSubenv.get(args) },
+    })
+    ctx.tools.register({
+      name: 'subenv_task_list',
+      description: 'List embedded subenv tasks. Results are in-memory only.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      output: jsonOutput,
+      async execute() { return embeddedSubenv.list() },
+    })
+    ctx.tools.register({
+      name: 'subenv_task_cancel',
+      description: 'Cancel a queued/running embedded subenv task; does not abort an already-sent provider request.',
+      parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+      output: jsonOutput,
+      async execute(args = {}) { return embeddedSubenv.cancel(args) },
+    })
+  }
+
   ctx.tools.register({
     name: 'message_send',
     description: 'Send a message to any DSH session (id or registered alias). Bodies are stored in a '
@@ -2857,7 +2914,15 @@ export function apply(ctx, config) {
         const id = typeof args.id === 'string' ? args.id : ''
         return visibilityDetailOf({ domain, id, getMessage: store.getMessage, readTaskDetail })
       }
-      subenvStatus() { return probeSubenv() }
+      subenvStatus() {
+        if (cfg.subenv.mode === 'external') {
+          return probeSubenv({
+            url: cfg.subenv.url,
+            token: process.env[cfg.subenv.tokenEnv],
+          })
+        }
+        return embeddedSubenv.status()
+      }
       memoryPage(query) {
         const page = readMemoryPage(query)
         return { ...page, memories: page.memories.map(row => ({ ...row, content: undefined, redacted: true })) }
