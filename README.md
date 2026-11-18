@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-1 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-2 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,7 +22,11 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-1 (dev)
+### What is new in 2026.11.17-2 (dev)
+
+- **Message-bus P0 hardening**: `message_read` now allows only the recipient or sender and returns FORBIDDEN for a missing/third-party caller; wake envelopes are typed `source.kind:'peer-message'` with sender identity; `message_bus_status` exposes `counts.unread`, and the pending reminder also fires for unread messages.
+
+### What was new in 2026.11.17-1 (dev)
 
 - **Agent Hub reliability**: the sidebar entry and panel are registered even before a conversation is selected; `remote.agentApartment` is resolved lazily, so a missing apartment row can no longer make the whole Agent Hub disappear.
 - **Message delivery contract**: `message_send` reports `targetState` / `deliveryState` / `reasonCode` / `route`; `notFoundPolicy` defaults to `reject` (use `queueUndeliverable:true` or `notFoundPolicy:'queue'` for the old queueing behavior); `maxBodyChars` defaults to 100000.
@@ -57,7 +61,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | Unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-1; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-2; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -107,6 +111,10 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
+### 2026.11.17-2 新增
+
+- **消息总线 P0 加固**：`message_read` 只允许收件人或发件人读取，缺失/第三方 session 返回 FORBIDDEN；唤醒 envelope 使用 `source.kind:'peer-message'` 并带发送者身份；`message_bus_status` 增加 `counts.unread`，pending reminder 也对未读消息触发。
+
 ### 2026.11.17-1 新增
 
 - **协作网络稳定性**：即使还没选择会话，侧栏入口与面板也会注册；`remote.agentApartment` 改为惰性读取，apartment 未挂载不会再让整个协作网络消失。
@@ -142,7 +150,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-1，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-2，各插件保留自己的版本号。
 
 ### Web 界面
 

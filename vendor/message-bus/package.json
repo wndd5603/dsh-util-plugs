@@ -1,6 +1,6 @@
 {
   "name": "dsh-message-bus",
-  "version": "2026.11.5-1",
+  "version": "2026.11.17-2",
   "private": true,
   "type": "module",
   "description": "Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wake envelopes, dedupe, priorities, read receipts, inspection tools and a Web message center.",

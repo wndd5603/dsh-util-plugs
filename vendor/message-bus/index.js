@@ -143,13 +143,38 @@ const SESSION_ID_RE = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 const PRIORITY_RE = /(\bPONG\b|\bACK\b|\bFINAL\b|\bAPPROVAL\b|\bURGENT\b|\bDEADLINE\b|priority\s*[:=]\s*high|紧急|审批|回执)/i
 const PRIORITY_BODY_RE = /priority\s*[:=]\s*high|\[(ACK|PONG|FINAL|APPROVAL|URGENT)\]/i
 
-function createUserMessage(text) {
+const PEER_MESSAGE_KIND = 'peer-message'
+const PEER_MESSAGE_VERSION = 1
+
+/**
+ * Wake envelope for a peer message. `role` stays `user` (the transport only
+ * accepts user messages), but the source is explicit: it is never `kind:'user'`,
+ * so consumers can tell a bus envelope from a real human turn.
+ */
+export function createPeerMessage(text, { fromSession = null, fromDisplay = null } = {}) {
   return Object.freeze({
     id: crypto.randomUUID(),
     role: 'user',
-    content: Object.freeze([{ type: 'text', text }]),
-    source: Object.freeze({ kind: 'user' }),
+    content: Object.freeze([{ type: 'text', text: String(text ?? '') }]),
+    source: Object.freeze({
+      kind: PEER_MESSAGE_KIND,
+      version: PEER_MESSAGE_VERSION,
+      fromSession: typeof fromSession === 'string' && fromSession !== '' ? fromSession : null,
+      fromDisplay: typeof fromDisplay === 'string' && fromDisplay !== '' ? fromDisplay : null,
+    }),
   })
+}
+
+/**
+ * Read authorization for one stored message row: only the recipient
+ * (`to_session`) or the sender (`from_session`) may read it. A missing caller
+ * session is never authorized.
+ */
+export function canReadMessage(row, sessionId) {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) return false
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') return false
+  const caller = sessionId.trim()
+  return row.to_session === caller || row.from_session === caller
 }
 
 const nowIso = () => new Date().toISOString()
@@ -196,12 +221,15 @@ function formatPendingAge(oldestAt, nowMs) {
 
 /** <=2-line summary: count + oldest age + the two read-only tools to use. */
 function pendingReminderText(pending, nowMs) {
+  const total = Number(pending?.total) || 0
+  const unread = Number(pending?.unread) || 0
   const parts = []
   if (Number(pending?.queued) > 0) parts.push(Number(pending.queued) + ' queued')
   if (Number(pending?.undeliverable) > 0) parts.push(Number(pending.undeliverable) + ' undeliverable')
+  if (unread > 0) parts.push(unread + ' unread')
   const detail = parts.length > 0 ? ' (' + parts.join(', ') + ')' : ''
   const age = pending?.oldestAt ? '; oldest ' + formatPendingAge(pending.oldestAt, nowMs) + ' ago' : ''
-  const line1 = '[message-bus] ' + Number(pending.total) + ' message(s) pending for this session'
+  const line1 = '[message-bus] ' + Math.max(total, unread) + ' message(s) pending for this session'
     + detail + age + '. Inspect with message_queue({undeliveredOnly:true}); read with message_read({messageId}).'
   const reasons = Object.entries(pending?.byReason ?? {})
     .filter(([, count]) => Number(count) > 0)
@@ -218,7 +246,8 @@ function pendingReminderText(pending, nowMs) {
  *
  * The listener always delegates first (downstream failures stay theirs), then
  * appends at most one <=2-line sourced message when the session has pending
- * deliveries and its interval has elapsed. All reads are counts/oldestAt only:
+ * deliveries or unread messages and its interval has elapsed. All reads are
+ * counts/oldestAt only:
  * no message is sent, no delivery TTL or DB row is changed. Failures are
  * logged and swallowed (fail-open). State is a process-local Map cleared by
  * `dispose()`; a restart may therefore re-send one reminder, which is allowed.
@@ -233,7 +262,7 @@ function pendingReminderText(pending, nowMs) {
 export function createPendingReminderHandler(options) {
   const getConfig = typeof options?.getConfig === 'function' ? options.getConfig : () => ({})
   const pendingSummary = typeof options?.pendingSummary === 'function'
-    ? options.pendingSummary : () => ({ total: 0, oldestAt: null, byReason: {} })
+    ? options.pendingSummary : () => ({ total: 0, unread: 0, oldestAt: null, byReason: {} })
   const now = typeof options?.now === 'function' ? options.now : Date.now
   const logger = options?.logger
   /** sessionId -> last injection time (ms). Process-local by design. */
@@ -265,14 +294,17 @@ export function createPendingReminderHandler(options) {
       const last = lastInjectionAt.get(sessionId)
       if (typeof last === 'number' && at - last < intervalMs) return decision
       const pending = pendingSummary(sessionId)
-      if (!isPlainObject(pending) || !(Number(pending.total) > 0)) return decision
+      if (!isPlainObject(pending)) return decision
+      const pendingTotal = Number(pending.total)
+      const unreadTotal = Number(pending.unread)
+      if (!(pendingTotal > 0) && !(unreadTotal > 0)) return decision
       const text = pendingReminderText(pending, at)
       if (text === '') return decision
       const reminder = createPendingReminderMessage(text)
       lastInjectionAt.set(sessionId, at)
       try {
         logger?.info?.('[message-bus] pending reminder injected session=' + sessionId
-          + ' pending=' + Number(pending.total) + ' oldestAt=' + String(pending.oldestAt ?? 'null'))
+          + ' pending=' + pendingTotal + ' unread=' + unreadTotal + ' oldestAt=' + String(pending.oldestAt ?? 'null'))
       } catch { /* logging is best-effort */ }
       return {
         ...(isPlainObject(decision) ? decision : {}),
@@ -1470,7 +1502,10 @@ export function apply(ctx, config) {
           + ' | sha=' + String(item.sha).slice(0, 8) + '(body) | id=' + item.id).join('\n')
         + '\n说明：外部消息；正文不在本条，逐条 message_read({messageId}) 读取。'
     try {
-      entry.agent.followup(createUserMessage(text))
+      entry.agent.followup(createPeerMessage(text, {
+        fromSession: items[0].fromSession ?? null,
+        fromDisplay: items[0].from ?? null,
+      }))
       logger.info('[message-bus] wake ' + sessionId + ' items=' + items.length)
     } catch (error) {
       logger.warn('[message-bus] wake failed for ' + sessionId + ': ' + String(error))
@@ -1480,7 +1515,10 @@ export function apply(ctx, config) {
     if (item.priority === true) {
       flush(sessionId)
       try {
-        agent.followup(createUserMessage('[message-bus] ' + envelopeLine(item)))
+        agent.followup(createPeerMessage('[message-bus] ' + envelopeLine(item), {
+          fromSession: item.fromSession ?? null,
+          fromDisplay: item.from ?? null,
+        }))
         logger.info('[message-bus] priority wake ' + sessionId + ' id=' + item.id)
       } catch (error) {
         logger.warn('[message-bus] priority wake failed for ' + sessionId + ': ' + String(error))
@@ -1511,13 +1549,17 @@ export function apply(ctx, config) {
           id: row.message_id,
           at: row.message_at ?? row.delivery_at ?? nowIso(),
           from: row.from_display ?? 'unknown',
+          fromSession: row.from_session ?? null,
           to: agent.session.id,
           subject: row.subject ?? '',
           bytes: row.bytes ?? 0,
           sha: row.sha256 ?? '',
           priority: false,
         }
-        agent.followup(createUserMessage('[message-bus] ' + envelopeLine(item)))
+        agent.followup(createPeerMessage('[message-bus] ' + envelopeLine(item), {
+          fromSession: item.fromSession,
+          fromDisplay: item.from,
+        }))
         store.markDeliveryDelivered?.(row.delivery_id)
         store.markEnvelopeDelivered?.(agent.session.id, row.message_id)
         delivered += 1
@@ -1899,7 +1941,7 @@ export function apply(ctx, config) {
       }
       if (!teamSent) {
         queueWake(target.sessionId, agent, {
-          id: messageId, at, from: fromDisplay, to: target.sessionId, subject, bytes, sha, priority,
+          id: messageId, at, from: fromDisplay, fromSession: caller.sessionId, to: target.sessionId, subject, bytes, sha, priority,
         })
         transport = 'agent-followup'
       }
@@ -2077,7 +2119,9 @@ export function apply(ctx, config) {
   ctx.tools.register({
     name: 'message_read',
     description: 'Read a message body from the global bus by messageId. Supports offset/limit; '
-      + 'records readAt for the calling session; returns {ok:false,gone:true} for unknown ids. Read-only.',
+      + 'only the recipient (to_session) or sender (from_session) may read it, and a missing or '
+      + 'third-party caller session returns FORBIDDEN without writing a read receipt; '
+      + 'records readAt for the authorized caller; returns {ok:false,gone:true} for unknown ids. Read-only.',
     parameters: {
       type: 'object',
       properties: {
@@ -2094,17 +2138,20 @@ export function apply(ctx, config) {
       if (messageId === '') return { ok: false, code: 'INVALID_ARGS', message: 'messageId is required' }
       const row = store.getMessage(messageId)
       if (row === undefined || row === null) return { ok: false, gone: true, id: messageId }
+      const sessionId = exec?.agent?.session?.id
+      if (!canReadMessage(row, sessionId)) {
+        return {
+          ok: false, code: 'FORBIDDEN', id: messageId,
+          message: 'message_read: only the recipient (to_session) or sender (from_session) may read this message',
+        }
+      }
       const body = String(row.body ?? '')
       const offset = Number.isInteger(args.offset) ? Math.min(200000, Math.max(0, args.offset)) : 0
       const limit = Number.isInteger(args.limit) ? Math.min(20000, Math.max(1, args.limit)) : 4000
       const chunk = body.slice(offset, offset + limit)
       const nextOffset = offset + chunk.length
-      const sessionId = exec?.agent?.session?.id
-      let readAt
-      if (typeof sessionId === 'string' && sessionId !== '') {
-        readAt = store.markRead(sessionId, messageId)
-        store.markEnvelopeConsumed?.(sessionId, messageId)
-      }
+      const readAt = store.markRead(sessionId, messageId)
+      store.markEnvelopeConsumed?.(sessionId, messageId)
       return {
         ok: true, id: row.id, at: row.at, from: row.from_display, fromSession: row.from_session, to: row.to_session,
         subject: row.subject, bytes: row.bytes, sha256: row.sha256,
@@ -2206,7 +2253,7 @@ export function apply(ctx, config) {
     name: 'message_bus_status',
     description:
       'Read-only health/status of the global session message bus: version, enabled flag, database path and '
-      + 'sizes, row counts (messages/deliveries/read state/routes), delivery behaviour (lightweight envelope, '
+      + 'sizes, row counts (messages/deliveries/read state/routes plus unread absence counts), delivery behaviour (lightweight envelope, '
       + 'dedupe and coalesce windows), host transport/directory/joinedCount, readAt support, and which optional '
       + 'tools are registered. Use it to verify the bus before blaming delivery, and to see the effective config '
       + 'when a settings form is not available.',
@@ -2358,9 +2405,15 @@ export function apply(ctx, config) {
       const messageId = String(args.messageId ?? '').trim()
       const row = store.getMessage(messageId)
       if (row === undefined || row === null) return { ok: false, gone: true, id: messageId }
-      const chunk = String(row.body ?? '')
       const sessionId = exec?.agent?.session?.id
-      if (typeof sessionId === 'string') store.markRead(sessionId, messageId)
+      if (!canReadMessage(row, sessionId)) {
+        return {
+          ok: false, code: 'FORBIDDEN', id: messageId,
+          message: 'message_read: only the recipient (to_session) or sender (from_session) may read this message',
+        }
+      }
+      const chunk = String(row.body ?? '')
+      store.markRead(sessionId, messageId)
       return { ok: true, id: row.id, at: row.at, from: row.from_display, fromSession: row.from_session, to: row.to_session, subject: row.subject, bytes: row.bytes, sha256: row.sha256, totalChars: chunk.length, offset: 0, nextOffset: chunk.length, done: true, body: chunk }
     },
   }
