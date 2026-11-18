@@ -135,6 +135,9 @@ export const Config = objectSchema({
     enabled: boolean(true, { description: 'Register the task-95 Web message center Remote namespace (messages list/search/detail/delete/send).' }),
     allowSend: boolean(true, { description: 'Allow sending a new bus message from the Web message center form.' }),
     pageSize: number(20, { description: 'Default page size for the Web message center.', int: true, min: 5, max: 100 }),
+    exposeBody: boolean(false, {
+      description: 'Allow the Web message center Remote to return message bodies/snippets. Default false: the Web Remote has no caller identity, so it must not disclose bodies unless a trusted operator explicitly opts in.',
+    }),
     audit: boolean(true, { description: 'Append one JSONL audit row per Web delete/send under <db dir>/web-audit.jsonl (no body).' }),
   }), { description: 'Web message center (client half) configuration.' }),
 }, { description: 'Universal session message bus configuration.', schemaVersion: 1 })
@@ -1159,6 +1162,7 @@ function normalizeConfig(config) {
       enabled: webUi.enabled !== false,
       allowSend: webUi.allowSend !== false,
       pageSize: Math.max(5, Math.min(100, Math.trunc(num(webUi.pageSize, 20)))),
+      exposeBody: webUi.exposeBody === true,
       audit: webUi.audit !== false,
     },
   }
@@ -2487,7 +2491,9 @@ export function apply(ctx, config) {
       fromSession: row.from_session ?? null,
       to: row.to_session,
       subject: row.subject ?? '',
-      snippet: truncate(String(row.body ?? '').replace(/\s+/gu, ' ').trim(), 180),
+      snippet: cfg.webUi.exposeBody
+        ? truncate(String(row.body ?? '').replace(/\s+/gu, ' ').trim(), 180)
+        : '',
       bytes: row.bytes,
       priority: row.priority === 1,
       test: row.test === 1,
@@ -2537,7 +2543,8 @@ export function apply(ctx, config) {
         ok: true,
         item: {
           ...listRow({ ...row, read_at: readAt }, readBy),
-          body: String(row.body ?? ''),
+          body: cfg.webUi.exposeBody ? String(row.body ?? '') : null,
+          bodyRedacted: !cfg.webUi.exposeBody,
           sha256: row.sha256,
           dedupeKey: row.dedupe_key ?? null,
           projectScope: row.project_scope ?? null,

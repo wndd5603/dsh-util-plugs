@@ -1,3 +1,7 @@
+## 2026.11.17-7 (dev)
+
+- **Web body exposure default-off**: `webUi.exposeBody` defaults to false. Because the Web Remote has no caller identity, `messageBus.get` returns `bodyRedacted:true` and list/snippet text is empty unless an operator explicitly opts in. This prevents the browser UI path from becoming an unauthenticated body disclosure channel.
+
 ## 2026.11.17-6 (dev)
 
 - **Default stale digest**: `bulletin_digest` now applies `staleAfterHours=24` when the caller supplies neither an SLA nor `updatedBefore`; stale active tasks are visible without requiring a remembered SLA. Explicit filters still win.
