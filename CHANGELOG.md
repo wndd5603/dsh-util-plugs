@@ -1,3 +1,7 @@
+## 2026.11.17-33 (dev)
+
+- **Collaboration UI filters**: Inbox/Tasks/Meetings/Memory now expose a keyword input, status select (tasks/meetings), Apply/Clear, and Enter-to-apply; all filters go through `visibilityPage`.
+
 ## 2026.11.17-32 (dev)
 
 - **Subenv UI bridge**: host `subenvStatus` probes the local sidecar (health/capabilities/provider/tasks) with a bearer token from `SUBENV_TOKEN`; the Collaboration Center Subenv tab shows online/offline/provider/task status, never the token. 3 regression tests.

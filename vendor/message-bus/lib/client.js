@@ -2154,8 +2154,10 @@ function CollaborationDomainView({ api, domain, label }) {
   const [error, setError] = React.useState(undefined)
   const [selected, setSelected] = React.useState(undefined)
   const [detail, setDetail] = React.useState(undefined)
+  const [filterText, setFilterText] = React.useState('')
+  const [filterStatus, setFilterStatus] = React.useState('')
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (rawFilters = {}) => {
     setLoading(true)
     setError(undefined)
     try {
@@ -2177,7 +2179,10 @@ function CollaborationDomainView({ api, domain, label }) {
         return
       }
       if (typeof api.visibilityPage !== 'function') throw new Error('visibilityPage unavailable')
-      const result = await api.visibilityPage({ domain, limit: 50 })
+      const filters = {}
+      if (typeof rawFilters.query === 'string' && rawFilters.query.trim() !== '') filters.query = rawFilters.query.trim()
+      if (typeof rawFilters.status === 'string' && rawFilters.status !== '') filters.status = rawFilters.status
+      const result = await api.visibilityPage({ domain, limit: 50, filters })
       const value = collabValue(result)
       if (value?.ok === false) throw new Error(value.error ?? value.code ?? 'load failed')
       setPage(value ?? { items: [], total: 0, state: 'empty' })
@@ -2213,6 +2218,20 @@ function CollaborationDomainView({ api, domain, label }) {
     panel('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginTop: '18px' } },
       panel('div', { style: COLLAB_STYLE.cardLabel }, `${label} · ${page?.total ?? 0}`),
       panel('button', { type: 'button', style: style.button, onClick: () => { void load() }, disabled: loading }, loading ? '加载中…' : '刷新')),
+    ['messages', 'tasks', 'meetings', 'memory'].includes(domain) ? panel('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' } },
+      panel('input', {
+        style: { ...style.input, maxWidth: '280px' }, placeholder: '关键词 / 负责人', value: filterText,
+        onChange: event => setFilterText(event.target.value),
+        onKeyDown: event => { if (event.key === 'Enter') void load({ query: filterText, status: filterStatus }) },
+      }),
+      ['tasks', 'meetings'].includes(domain) ? panel('select', {
+        style: { ...style.input, maxWidth: '150px' }, value: filterStatus,
+        onChange: event => setFilterStatus(event.target.value),
+      },
+        panel('option', { value: '' }, '全部状态'),
+        ...['pending', 'in_progress', 'blocked', 'completed', 'terminated', 'finalized', 'open', 'r1', 'r2'].map(status => panel('option', { key: status, value: status }, status))) : null,
+      panel('button', { type: 'button', style: style.button, onClick: () => { void load({ query: filterText, status: filterStatus }) } }, '应用'),
+      panel('button', { type: 'button', style: style.button, onClick: () => { setFilterText(''); setFilterStatus(''); void load() } }, '清空')) : null,
     error !== undefined ? panel('div', { style: COLLAB_STYLE.error }, error) : null,
     page?.state === 'empty' ? panel('div', { style: COLLAB_STYLE.empty }, '没有记录。') : null,
     panel('div', { style: COLLAB_STYLE.list }, items.map((item, index) => {
