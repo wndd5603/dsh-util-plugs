@@ -652,7 +652,7 @@ const en = {
   nextPage: 'Next page',
 }
 
-const inject = ['slots', 'locale', 'remote', 'remoteAccess']
+const inject = ['slots', 'locale', 'remote', 'remoteAccess', 'configForms', 'layout']
 
 const panel = React.createElement
 const PANEL_ID = 'messages'
@@ -1736,6 +1736,98 @@ function SubenvSection({ api }) {
           : (task.error !== undefined ? panel('p', { className: 'mb-muted' }, String(task.error)) : null)))))
 }
 
+const SETTINGS_GROUPS = [
+  {
+    title: '安全 Safety',
+    items: [
+      { ns: 'message-bus', path: 'strictMode', label: '严格模式 strictMode', risk: 'high', help: '直接 session-id 投递需一次审批；alias 不受影响。' },
+      { ns: 'message-bus', path: 'crossPermissionGuard', label: '跨权限保护', risk: 'high', help: '阻止 confined 会话向 DFA 提权。' },
+      { ns: 'message-bus', path: 'webUi.allowMemoryReveal', label: 'Web 单条记忆显示', risk: 'medium', help: '默认关闭；开启后仍逐条确认并写审计。' },
+      { ns: 'host-relaunch', path: 'allowRealRestart', label: '允许真实重启', risk: 'high', help: 'operator 双锁；默认关闭。' },
+    ],
+  },
+  {
+    title: '召回 Recall',
+    items: [
+      { ns: 'workbench-bundle', path: 'pointer', label: '首轮能力提示', risk: 'low', help: '指向 collaboration_recall / memory_search。' },
+      { ns: 'workbench-bundle', path: 'artifactTool', label: 'artifact 工具', risk: 'low', help: '内容寻址 manifest。' },
+    ],
+  },
+  {
+    title: '总线 Bus',
+    items: [
+      { ns: 'message-bus', path: 'autoResume', label: '自动恢复 inactive 会话', risk: 'medium', help: '投递前 resume；失败留队列。' },
+      { ns: 'message-bus', path: 'maxBodyChars', label: '消息正文上限', risk: 'low', help: '默认 100000。' },
+      { ns: 'message-bus', path: 'notFoundPolicy', label: '目标不存在策略', risk: 'medium', help: 'reject / queue。' },
+      { ns: 'message-bus', path: 'subenv.allowTasks', label: '兼容 subenv task runner', risk: 'low', help: 'deprecated；默认关闭。' },
+    ],
+  },
+  {
+    title: '运行 Runtime',
+    items: [
+      { ns: 'auto-backup', path: 'enabled', label: '写前自动备份', risk: 'low', help: 'file_backups 快照。' },
+      { ns: 'auto-backup', path: 'backupDir', label: '备份目录', risk: 'low', help: '相对工作区。' },
+      { ns: 'context-sentinel', path: 'contextMeter.notifyPercent', label: '上下文提醒阈值', risk: 'low', help: '默认 78%。' },
+      { ns: 'context-sentinel', path: 'teamHooks2.enabled', label: 'team-hooks2 提醒', risk: 'low', help: '归档/召回提醒。' },
+    ],
+  },
+]
+
+function settingsValueAt(value, path) {
+  let current = value
+  for (const key of String(path).split('.')) {
+    if (current === null || typeof current !== 'object') return undefined
+    current = current[key]
+  }
+  return current
+}
+
+function CollaborationSettingsPage(props) {
+  const { configForms, layout } = props
+  const [view, setView] = React.useState(() => {
+    try { return configForms?.describe?.().getSnapshot?.().view } catch { return undefined }
+  })
+  React.useEffect(() => {
+    if (configForms === undefined) return undefined
+    try {
+      const describe = configForms.describe()
+      setView(describe.getSnapshot().view)
+      void describe.ensure?.()
+      return describe.subscribe(() => setView(describe.getSnapshot().view))
+    } catch { return undefined }
+  }, [configForms])
+  const namespaces = Array.isArray(view?.namespaces) ? view.namespaces : []
+  const findNamespace = suffix => namespaces.find(row => row?.ns === suffix || (typeof row?.ns === 'string' && row.ns.endsWith('/' + suffix)))
+  const openNative = () => {
+    try { layout?.selectPanel?.('plugins') } catch { /* native panel unavailable */ }
+  }
+  const fmt = value => value === undefined ? '—' : (typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value))
+  return panel('section', { style: { display: 'grid', gap: '14px', padding: '4px 0' }, 'data-collaboration-settings': '' },
+    panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' } },
+      panel('div', null,
+        panel('h2', { style: { margin: 0 } }, '协作设置'),
+        panel('p', { style: { margin: '4px 0 0', fontSize: 12.5, opacity: 0.7 } }, '只读索引；写入仍走 DSH 原生 Plugins 配置，避免重复实现配置表单。')),
+      panel('button', { type: 'button', style: style.button, onClick: openNative }, '打开原生插件设置')),
+    view === undefined
+      ? panel('p', { style: { opacity: 0.7 } }, '当前 profile 未提供 configForms；请使用原生 Plugins 页面。')
+      : SETTINGS_GROUPS.map(group => panel('div', { key: group.title, style: { border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px', padding: '12px' } },
+        panel('h3', { style: { margin: '0 0 8px', fontSize: 14 } }, group.title),
+        group.items.map(item => {
+          const ns = findNamespace(item.ns)
+          const value = settingsValueAt(ns?.value, item.path)
+          return panel('div', { key: item.ns + ':' + item.path, style: { display: 'grid', gridTemplateColumns: 'minmax(160px, 1fr) minmax(90px, auto)', gap: '8px 12px', padding: '7px 0', borderTop: '1px solid rgba(127,127,127,0.12)' } },
+            panel('div', null,
+              panel('div', { style: { fontWeight: 600, fontSize: 12.5 } }, item.label),
+              panel('div', { style: { fontSize: 11.5, opacity: 0.65 } }, item.help)),
+            panel('div', { style: { textAlign: 'right' } },
+              panel('code', { style: { fontSize: 12 } }, fmt(value)),
+              item.risk === 'high' ? panel('span', { style: { marginLeft: 6, color: '#d9534f', fontSize: 11 } }, 'HIGH') : null,
+              !ns ? panel('div', { style: { fontSize: 10.5, opacity: 0.55 } }, 'namespace 未匹配') : null))
+        }))),
+    panel('p', { style: { margin: 0, fontSize: 11.5, opacity: 0.6 } },
+      '提示：修改 strictMode / 跨权限 / 真实重启后，请重新检查 message_bus_status 或重启宿主。'))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -2526,7 +2618,15 @@ function apply(ctx) {
         locale: LOCALE_NS,
         inject: () => ({ api }),
       }, MessageCenterPage))
+      const disposeSettings = scope.slots.inject('settings.section', () => scope.slots.register({
+        name: 'settings.section',
+        id: 'collaboration-settings',
+        order: 25,
+        label: () => '协作设置',
+        inject: () => ({ configForms: scope.configForms, layout: scope.layout }),
+      }, CollaborationSettingsPage))
       return () => {
+        if (typeof disposeSettings === 'function') disposeSettings()
         if (typeof disposeMain === 'function') disposeMain()
         if (typeof disposeSidebar === 'function') disposeSidebar()
       }

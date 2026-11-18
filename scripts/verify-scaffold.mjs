@@ -12,7 +12,7 @@ const check = (ok, message) => { if (!ok) failures.push(message) }
 const read = rel => readFileSync(join(root, rel), 'utf8')
 const exists = rel => existsSync(join(root, rel))
 
-const EXPECTED_VERSION = '2026.11.17-45'
+const EXPECTED_VERSION = '2026.11.17-46'
 const pkg = JSON.parse(read('package.json'))
 check(pkg.name === 'dsh-util-plugs', 'package name must be dsh-util-plugs')
 check(pkg.version === EXPECTED_VERSION, 'package version must be ' + EXPECTED_VERSION)
@@ -27,8 +27,8 @@ for (const doc of ['CAPABILITY_AUDIT.md', 'OPERATOR_ONLY_BOUNDARIES.md', 'PRIVAC
 
 const patch = read('cordis.patch.yml')
 const ids = [...patch.matchAll(/^\s*- id: ([a-z0-9-]+)/gmu)].map(match => match[1])
-const expected = ['context-sentinel', 'message-bus', 'bulletin-board', 'agent-apartment', 'agent-memory', 'team-bus', 'agent-workflows', 'workbench-bundle', 'auto-backup', 'host-relaunch', 'plugin-console']
-check(ids.length === 11, 'bundle patch must insert exactly 11 rows, got ' + String(ids.length))
+const expected = ['context-sentinel', 'message-bus', 'bulletin-board', 'agent-apartment', 'agent-memory', 'team-bus', 'agent-workflows', 'workbench-bundle', 'auto-backup', 'host-relaunch']
+check(ids.length === 10, 'bundle patch must insert exactly 10 rows, got ' + String(ids.length))
 check(JSON.stringify(ids) === JSON.stringify(expected), 'row ids/order mismatch: ' + JSON.stringify(ids))
 check(new Set(ids).size === ids.length, 'row ids must be unique')
 const rootRows = [...patch.matchAll(/^\s*- id: [a-z0-9-]+\n\s+name: dsh-util-plugs$/gmu)]
@@ -45,7 +45,6 @@ const modules = {
   'workbench-bundle': './index.js',
   'auto-backup': './plugins/auto-backup.js',
   'host-relaunch': './plugins/host-relaunch.js',
-  'plugin-console': './plugins/plugin-console.js',
 }
 for (const [id, rel] of Object.entries(modules)) {
   check(exists(rel), id + ' plugin module missing: ' + rel)

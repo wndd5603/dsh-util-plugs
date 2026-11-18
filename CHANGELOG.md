@@ -1,3 +1,8 @@
+## 2026.11.17-46 (dev)
+
+- **Settings hub**: added a curated `协作设置` settings.section (safety/recall/bus/runtime index) that reads native `configForms` and deep-links to native Plugins for writes; removed the duplicate `plugin-console` row (10 rows).
+- **Recall acceptance**: own-session recall passes; cross-session non-operator remains WARN until a second bound session is available.
+
 ## 2026.11.17-45 (dev)
 
 - **Recall authorization**: `collaboration_recall`/`apartment_collaboration_brief` now rejects a non-operator `sessionId` for another session with `APARTMENT_OPERATOR_REQUIRED` instead of returning its brief.

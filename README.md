@@ -1,6 +1,6 @@
 # dsh-util-plugs — DSH 工具箱插件集
 
-A single install that adds eleven independently switchable plugins to DeepSeek Harness.
+A single install that adds ten independently switchable plugins to DeepSeek Harness.
 
 一次安装，为 DeepSeek Harness 增加 11 个可独立启用的插件。
 
@@ -22,7 +22,7 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-45 (dev)
+### What is new in 2026.11.17-46 (dev)
 
 - **Subenv task output**: lossless JSON task views; completed result present, queued/running omit fake result.
 - **Embedded subenv uses host ctx.llm**: no separate provider JSON/key; route from DSH providers/models, configurable via `subenv.provider/model`.
@@ -85,9 +85,9 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 ```
 
-The package is self-contained: all eleven runtime plugins live under `vendor/`; no npm publish is required.
+The package is self-contained: all ten runtime plugins live under `vendor/`; no npm publish is required.
 
-### The eleven plugins
+### The ten plugins
 
 | Plugin | What it adds | Docs |
 |---|---|---|
@@ -101,7 +101,6 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `workbench-bundle` | Read-only `workbench_status()` overview and first-turn capability pointer. | [`vendor/workbench-bundle/README.md`](vendor/workbench-bundle/README.md) |
 | `auto-backup` | Pre-write file snapshots, retention and `auto_backup_status()`. | [`vendor/auto-backup/README.md`](vendor/auto-backup/README.md) |
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
-| `plugin-console` | Unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
 Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-36; individual plugins keep their own versions.
 
