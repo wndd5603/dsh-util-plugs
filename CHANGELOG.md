@@ -1,3 +1,7 @@
+## 2026.11.17-8 (dev)
+
+- **Memory forget operator gate**: `memory_forget` is disabled unless `allowForget:true`; when enabled it requires `confirm:"FORGET"` and appends an id/scope/key/source-session audit row to `memory/forget-audit.jsonl` before returning.
+
 ## 2026.11.17-7 (dev)
 
 - **Web body exposure default-off**: `webUi.exposeBody` defaults to false. Because the Web Remote has no caller identity, `messageBus.get` returns `bodyRedacted:true` and list/snippet text is empty unless an operator explicitly opts in. This prevents the browser UI path from becoming an unauthenticated body disclosure channel.

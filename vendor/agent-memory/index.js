@@ -1,7 +1,7 @@
 // dsh-agent-memory: persistent, project-scoped memory for DSH agents.
 // SQLite WAL, zero npm dependencies; tools only (no automatic context injection).
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -386,9 +386,24 @@ export function apply(ctx, config) {
     }
   })
 
-  register(desc('memory_forget', 'Delete one memory by id.', { id: str('Memory id.') }, ['id']), async args => {
-    db.prepare('DELETE FROM memories WHERE id=?').run(args.id)
-    return { ok: true, deleted: args.id }
+  register(desc('memory_forget', 'Delete one memory by id. Disabled unless the operator sets allowForget:true; requires confirm:"FORGET" and appends an audit row.', {
+    id: str('Memory id.'), confirm: str('Must be exactly "FORGET".'),
+  }, ['id', 'confirm']), async (args, exec) => {
+    if (cfg.allowForget !== true) {
+      return { ok: false, code: 'FORBIDDEN', message: 'memory_forget is disabled; operator must set allowForget:true' }
+    }
+    if (args.confirm !== 'FORGET') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'memory_forget requires confirm:"FORGET"' }
+    }
+    const row = db.prepare('SELECT id,scope,key,source_session FROM memories WHERE id=?').get(args.id)
+    if (row === undefined) return { ok: false, code: 'NOT_FOUND', message: 'memory not found: ' + args.id }
+    const deleted = db.prepare('DELETE FROM memories WHERE id=?').run(args.id).changes
+    try {
+      appendFileSync(join(dirname(file), 'forget-audit.jsonl'), JSON.stringify({
+        at: now(), actor: sessionOf(exec), id: row.id, scope: row.scope, key: row.key, sourceSession: row.source_session,
+      }) + '\n', 'utf8')
+    } catch { /* audit must not resurrect a deleted memory */ }
+    return { ok: deleted > 0, deleted: args.id, audit: 'forget-audit.jsonl' }
   })
 
   register(desc('memory_status', 'Read memory DB location and counts.'), async () => ({
@@ -399,6 +414,7 @@ export function apply(ctx, config) {
       injection: cfg.digestInjection !== false,
       staleDays: STALE_DAYS,
       latestKeys: DIGEST_MAX_KEYS,
+      allowForget: cfg.allowForget === true,
     },
   }))
 
