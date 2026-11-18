@@ -2122,14 +2122,88 @@ const COLLAB_STYLE = {
   cardLabel: { fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' },
   cardValue: { fontSize: '28px', fontWeight: 650, margin: '7px 0 2px' },
   cardNote: { fontSize: '12px', opacity: 0.68, minHeight: '16px' },
+  cardMeta: { fontSize: '11.5px', opacity: 0.65, marginTop: '8px' },
   error: { marginTop: '14px', padding: '9px 11px', borderRadius: '9px', border: '1px solid rgba(248,81,73,0.5)', background: 'rgba(248,81,73,0.10)', fontSize: '12.5px' },
   empty: { marginTop: '18px', fontSize: '13px', opacity: 0.7 },
+  list: { display: 'grid', gap: '8px', marginTop: '16px' },
+  row: { textAlign: 'left', width: '100%', border: '1px solid rgba(127,127,127,0.25)', background: 'rgba(127,127,127,0.04)', color: 'inherit', borderRadius: '10px', padding: '10px 12px', cursor: 'pointer', display: 'grid', gap: '3px' },
+  rowActive: { textAlign: 'left', width: '100%', border: '1px solid rgba(79,140,255,0.8)', background: 'rgba(79,140,255,0.12)', color: 'inherit', borderRadius: '10px', padding: '10px 12px', cursor: 'pointer', display: 'grid', gap: '3px' },
+  rowTitle: { fontSize: '13px', fontWeight: 600 },
+  rowMeta: { fontSize: '11.5px', opacity: 0.7 },
+  detail: { marginTop: '16px', border: '1px solid rgba(127,127,127,0.25)', borderRadius: '12px', padding: '14px', background: 'rgba(127,127,127,0.05)' },
+  pre: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '12px', lineHeight: 1.6, margin: '8px 0 0', maxHeight: '40vh', overflow: 'auto' },
 }
 
 const COLLAB_TABS = [
   ['overview', '总览'], ['inbox', '收件箱'], ['tasks', '任务'],
   ['meetings', '会议'], ['memory', '记忆'], ['runtime', '运行与存储'], ['subenv', '子环境'],
 ]
+
+function CollaborationDomainView({ api, domain, label }) {
+  const [page, setPage] = React.useState(undefined)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState(undefined)
+  const [selected, setSelected] = React.useState(undefined)
+  const [detail, setDetail] = React.useState(undefined)
+
+  const load = React.useCallback(async () => {
+    setLoading(true)
+    setError(undefined)
+    try {
+      if (typeof api.visibilityPage !== 'function') throw new Error('visibilityPage unavailable')
+      const result = await api.visibilityPage({ profileId: 'current', workspaceId: 'current', domain, limit: 50 })
+      const value = collabValue(result)
+      if (value?.ok === false) throw new Error(value.error ?? value.code ?? 'load failed')
+      setPage(value ?? { items: [], total: 0, state: 'empty' })
+    } catch (caught) {
+      setError(errorTextOf(caught))
+      setPage(undefined)
+    } finally {
+      setLoading(false)
+    }
+  }, [api, domain])
+
+  React.useEffect(() => {
+    setSelected(undefined)
+    setDetail(undefined)
+    void load()
+  }, [load])
+
+  const select = async item => {
+    setSelected(item)
+    setDetail(undefined)
+    if (!['messages', 'tasks'].includes(domain) || typeof api.visibilityDetail !== 'function') return
+    try {
+      const result = await api.visibilityDetail({ profileId: 'current', workspaceId: 'current', domain, id: item.id })
+      const value = collabValue(result)
+      setDetail(value?.ok === false ? { error: value.error ?? value.code } : value)
+    } catch (caught) {
+      setDetail({ error: errorTextOf(caught) })
+    }
+  }
+
+  const items = Array.isArray(page?.items) ? page.items : []
+  return panel('div', null,
+    panel('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginTop: '18px' } },
+      panel('div', { style: COLLAB_STYLE.cardLabel }, `${label} · ${page?.total ?? 0}`),
+      panel('button', { type: 'button', style: style.button, onClick: () => { void load() }, disabled: loading }, loading ? '加载中…' : '刷新')),
+    error !== undefined ? panel('div', { style: COLLAB_STYLE.error }, error) : null,
+    page?.state === 'empty' ? panel('div', { style: COLLAB_STYLE.empty }, '没有记录。') : null,
+    panel('div', { style: COLLAB_STYLE.list }, items.map((item, index) => {
+      const id = item.id ?? item.meetingId ?? `row-${index}`
+      const title = item.subject ?? item.title ?? item.key ?? item.meetingId ?? item.id ?? '(untitled)'
+      const meta = [item.status, item.assignee, item.from, item.to, item.at, item.scope].filter(Boolean).join(' · ')
+      return panel('button', { key: id, type: 'button', style: selected?.id === item.id ? COLLAB_STYLE.rowActive : COLLAB_STYLE.row, onClick: () => { void select(item) } },
+        panel('span', { style: COLLAB_STYLE.rowTitle }, String(title)),
+        meta !== '' ? panel('span', { style: COLLAB_STYLE.rowMeta }, String(meta)) : null)
+    })),
+    selected !== undefined ? panel('div', { style: COLLAB_STYLE.detail },
+      panel('div', { style: COLLAB_STYLE.cardLabel }, '详情 · 默认脱敏'),
+      detail === undefined ? panel('div', { style: COLLAB_STYLE.empty }, '加载中…') : null,
+      detail?.error !== undefined ? panel('div', { style: COLLAB_STYLE.error }, String(detail.error)) : null,
+      detail?.item !== undefined ? panel('pre', { style: COLLAB_STYLE.pre }, JSON.stringify(detail.item, null, 2)) : null,
+      Array.isArray(detail?.redacted) && detail.redacted.length > 0 ? panel('div', { style: COLLAB_STYLE.cardMeta }, `已隐藏：${detail.redacted.join(', ')}`) : null) : null)
+}
 
 function CollaborationPage(props) {
   const { api } = props
@@ -2183,7 +2257,7 @@ function CollaborationPage(props) {
         panel('div', { style: COLLAB_STYLE.cardLabel }, card.label),
         panel('div', { style: COLLAB_STYLE.cardValue }, card.count === null ? '—' : String(card.count)),
         panel('div', { style: COLLAB_STYLE.cardNote }, card.state === 'unavailable' ? '不可用' : (card.note ?? '')))))
-      : panel('div', { style: COLLAB_STYLE.empty }, `「${COLLAB_TABS.find(([id]) => id === view)?.[1] ?? view}」将在 Wave B/C 接入。`),
+      : panel(CollaborationDomainView, { api, domain: view, label: COLLAB_TABS.find(([id]) => id === view)?.[1] ?? view }),
     error !== undefined ? panel('div', { style: COLLAB_STYLE.error }, String(error)) : null)
 }
 

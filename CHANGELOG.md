@@ -1,3 +1,7 @@
+## 2026.11.17-22 (dev)
+
+- **Collaboration Inbox/Tasks views**: tabs now call `visibilityPage`; Inbox and Tasks render read-only lists and load `visibilityDetail` on selection, with redaction markers. No body/content is rendered by default.
+
 ## 2026.11.17-21 (dev)
 
 - **Visibility page/detail API**: `visibilityPage` returns safe message/task/meeting/memory rows (no body/content) with `ready|empty|unavailable`; `visibilityDetail` returns a body-free message or task detail plus evidence/redacted fields. Unknown domains return `DOMAIN_UNAVAILABLE`.
