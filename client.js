@@ -1880,6 +1880,105 @@ function CollaborationSettingsPage(props) {
       '提示：strictMode / crossPermissionGuard 可热更新；非 volatile 参数需原生保存并重启宿主。'))
 }
 
+const ROW_CONFIG_FIELDS = {
+  'message-bus': [
+    { path: 'strictMode', label: '严格模式 strictMode', kind: 'boolean' },
+    { path: 'crossPermissionGuard', label: '跨权限保护', kind: 'boolean' },
+    { path: 'autoResume', label: '自动恢复 inactive 会话', kind: 'boolean' },
+    { path: 'maxBodyChars', label: '消息正文上限', kind: 'number' },
+    { path: 'notFoundPolicy', label: '目标不存在策略', kind: 'enum', options: ['reject', 'queue'] },
+    { path: 'webUi.allowMemoryReveal', label: 'Web 单条记忆显示', kind: 'boolean' },
+    { path: 'subenv.allowTasks', label: '兼容 subenv task runner', kind: 'boolean' },
+  ],
+  'context-sentinel': [
+    { path: 'contextMeter.notifyPercent', label: '上下文提醒阈值 %', kind: 'number' },
+    { path: 'contextMeter.rearmPercent', label: '重新提醒阈值 %', kind: 'number' },
+    { path: 'teamHooks2.enabled', label: 'team-hooks2 提醒', kind: 'boolean' },
+  ],
+  'auto-backup': [
+    { path: 'enabled', label: '写前自动备份', kind: 'boolean' },
+    { path: 'backupDir', label: '备份目录', kind: 'string' },
+  ],
+  'host-relaunch': [
+    { path: 'allowRealRestart', label: '允许真实重启', kind: 'boolean' },
+  ],
+  'workbench-bundle': [
+    { path: 'pointer', label: '首轮能力提示', kind: 'boolean' },
+    { path: 'statusTool', label: 'workbench_status 工具', kind: 'boolean' },
+    { path: 'artifactTool', label: 'artifact_manifest 工具', kind: 'boolean' },
+  ],
+}
+
+function RowConfigPage(props) {
+  const { view, form, rowId } = props
+  const fields = ROW_CONFIG_FIELDS[rowId] ?? []
+  const [draft, setDraft] = React.useState({})
+  const [busy, setBusy] = React.useState(false)
+  const [message, setMessage] = React.useState(undefined)
+  React.useEffect(() => {
+    if (form?.state?.value === undefined) return
+    const next = {}
+    for (const field of fields) next[field.path] = settingsValueAt(form.state.value, field.path)
+    setDraft(next)
+    setMessage(undefined)
+  }, [form?.state?.value, fields])
+  if (view === 'summary') return fields.length > 0 ? `可配置 ${fields.length} 项` : '无运行时配置'
+  if (form === undefined) return panel('p', { style: { opacity: 0.7 } }, '该行没有可写的运行时配置。')
+  const state = form.state
+  if (state?.status === 'loading') return panel('p', { style: { opacity: 0.7 } }, '加载配置中…')
+  if (state?.status === 'unavailable') return panel('p', { style: { opacity: 0.7 } }, '该命名空间未向客户端暴露。')
+  const writable = state?.writable === true
+  const save = async () => {
+    if (!writable || busy) return
+    const ops = []
+    for (const field of fields) {
+      const current = settingsValueAt(state.value, field.path)
+      const next = draft[field.path]
+      if (field.kind === 'boolean') {
+        if (next !== current) ops.push({ op: 'set', path: field.path.split('.'), value: next === true })
+      } else if (field.kind === 'number') {
+        if (String(next ?? '') !== String(current ?? '')) {
+          const number = Number(next)
+          if (Number.isFinite(number)) ops.push({ op: 'set', path: field.path.split('.'), value: number })
+        }
+      } else if (String(next ?? '') !== String(current ?? '')) {
+        ops.push({ op: 'set', path: field.path.split('.'), value: String(next ?? '') })
+      }
+    }
+    if (ops.length === 0) return
+    setBusy(true); setMessage(undefined)
+    try {
+      const accepted = await form.mutate(ops, state.revision)
+      setMessage(accepted ? { tone: 'ok', text: '已保存' } : { tone: 'danger', text: '写入被拒绝' })
+    } catch (error) {
+      setMessage({ tone: 'danger', text: String(error?.message ?? error) })
+    } finally { setBusy(false) }
+  }
+  return panel('div', { style: { display: 'grid', gap: '8px' } },
+    panel('p', { style: { margin: 0, fontSize: 12, opacity: 0.7 } }, writable ? '写入 DSH settings；非热字段重启后生效。' : '当前配置只读。'),
+    fields.map(field => {
+      const value = draft[field.path]
+      const disabled = !writable || busy
+      let control
+      if (field.kind === 'boolean') {
+        control = panel('input', { type: 'checkbox', checked: value === true, disabled, onChange: event => setDraft(prev => ({ ...prev, [field.path]: event.target.checked })) })
+      } else if (field.kind === 'enum') {
+        control = panel('select', { value: value ?? '', disabled, onChange: event => setDraft(prev => ({ ...prev, [field.path]: event.target.value })) },
+          panel('option', { value: '' }, '—'), (field.options ?? []).map(option => panel('option', { key: option, value: option }, option)))
+      } else {
+        control = panel('input', {
+          type: field.kind === 'number' ? 'number' : 'text', value: value ?? '', disabled,
+          style: style.input, onChange: event => setDraft(prev => ({ ...prev, [field.path]: event.target.value })),
+        })
+      }
+      return panel('label', { key: field.path, style: { display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(120px, 1fr)', gap: '10px', alignItems: 'center' } },
+        panel('span', { style: { fontSize: 12.5 } }, field.label), control)
+    }),
+    panel('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+      panel('button', { type: 'button', style: style.button, disabled: !writable || busy, onClick: save }, busy ? '保存中…' : '保存'),
+      message === undefined ? null : panel('span', { style: { color: message.tone === 'ok' ? '#3c9a5f' : '#d9534f', fontSize: 11.5 } }, message.text)))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -2677,7 +2776,12 @@ function apply(ctx) {
         label: () => '协作设置',
         inject: () => ({ configForms: scope.configForms, layout: scope.layout }),
       }, CollaborationSettingsPage))
+      const disposeRowConfigs = Object.keys(ROW_CONFIG_FIELDS).map(rowId => scope.slots.inject('plugins.row.config', () => scope.slots.register({
+        name: 'plugins.row.config',
+        key: 'dsh-util-plugs#' + rowId,
+      }, props => panel(RowConfigPage, { ...props, rowId }))))
       return () => {
+        for (const dispose of disposeRowConfigs) if (typeof dispose === 'function') dispose()
         if (typeof disposeSettings === 'function') disposeSettings()
         if (typeof disposeMain === 'function') disposeMain()
         if (typeof disposeSidebar === 'function') disposeSidebar()

@@ -1,3 +1,7 @@
+## 2026.11.17-49 (dev)
+
+- **Native row configuration**: register `plugins.row.config` entries for message-bus/context-sentinel/auto-backup/host-relaunch/workbench rows, so the native Plugins page gains a “配置 {row}” page with write support; no plugin-console restoration needed.
+
 ## 2026.11.17-48 (dev)
 
 - **Settings editable**: fixed namespace mapping (message-bus/context/auto-backup/host-relaunch/workbench); volatile boolean fields render inline toggles through native `configForms.mutate`; non-volatile rows show current value or “需原生配置/重启” plus per-row config action.

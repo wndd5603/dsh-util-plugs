@@ -22,7 +22,7 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-48 (dev)
+### What is new in 2026.11.17-49 (dev)
 
 - **Subenv task output**: lossless JSON task views; completed result present, queued/running omit fake result.
 - **Embedded subenv uses host ctx.llm**: no separate provider JSON/key; route from DSH providers/models, configurable via `subenv.provider/model`.
