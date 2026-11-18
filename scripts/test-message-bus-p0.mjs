@@ -12,6 +12,7 @@ import {
   createPeerMessage,
   createPendingReminderHandler,
   isPendingReminderMessage,
+  peerSourceForItems,
 } from '../vendor/message-bus/index.js'
 import { openMessageStore, sha256Of } from '../vendor/message-bus/src/store.js'
 
@@ -70,6 +71,17 @@ test('createPeerMessage marks the wake source as peer-message, never user', () =
   assert.equal(fallback.source.kind, 'peer-message')
   assert.equal(fallback.source.fromSession, null)
   assert.equal(fallback.source.fromDisplay, null)
+})
+
+test('peerSourceForItems refuses mixed A+B and A+null attribution', () => {
+  const a = { fromSession: SENDER, from: 'A' }
+  const b = { fromSession: THIRD, from: 'B' }
+  const remote = { fromSession: null, from: 'Web' }
+  assert.deepEqual(peerSourceForItems([a]), { fromSession: SENDER, fromDisplay: 'A' })
+  assert.deepEqual(peerSourceForItems([a, { ...a }]), { fromSession: SENDER, fromDisplay: 'A' })
+  assert.deepEqual(peerSourceForItems([a, b]), { fromSession: null, fromDisplay: null })
+  assert.deepEqual(peerSourceForItems([a, remote]), { fromSession: null, fromDisplay: null })
+  assert.deepEqual(peerSourceForItems([]), { fromSession: null, fromDisplay: null })
 })
 
 test('unreadSummary counts distinct unread messages per recipient', (t) => {

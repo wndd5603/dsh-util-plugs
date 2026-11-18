@@ -1,5 +1,12 @@
 # Changelog — dsh-message-bus
 
+## v2026.11.17-2 (2026-11-18) — P0 read ownership / provenance / unread
+
+- `message_read` and legacy `pipe2_read_message` allow only the recipient or sender; missing/third-party callers get FORBIDDEN before any read receipt.
+- Legacy `pipe2_queue` is caller-scoped and rejects a cross-recipient `to`; it no longer exposes another recipient's body.
+- Wake envelopes use `source.kind:'peer-message'` with sender identity; mixed-sender/remote batches stay unattributed.
+- `unreadSummary`/`counts.unread` add absence visibility; pending reminders also fire for unread messages.
+
 ## Unreleased v2026.11.5-8 (2026-11-05) — WARN fixes / audit hardening
 
 - Web message center shows `strictMode` in the page header (`data-message-strict-mode` +

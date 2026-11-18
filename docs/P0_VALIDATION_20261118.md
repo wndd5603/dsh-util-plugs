@@ -42,4 +42,4 @@ dsh plugin --profile p0-blank add --offline <tarball>  # PASS
 - `legacyTools:true` `pipe2_queue` bypass found in independent review is fixed and regression-tested; still no live two-session bridge test.
 - Web Remote message reads are not covered by this patch (no caller identity in that path); treat as remaining WARN.
 - Merged wake envelopes: the source is attributed only when every item shares one sender; mixed-sender batches carry `fromSession:null`/`fromDisplay:null` (the text still lists each sender). This avoids false attribution; it is not per-item structured provenance.
-- No commit/tag/release in this validation; author decides release.
+- Committed/pushed dev as `c5ff6b4`, `983c8f7`, `0af56b6`; no tag/release. The author decides release.

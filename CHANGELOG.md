@@ -1,6 +1,6 @@
 ## 2026.11.17-2 (dev)
 
-- **Message-bus P0 hardening**: `message_read` (and its legacy alias) now allows only the recipient or sender; a missing or third-party caller session returns `FORBIDDEN` without writing a read receipt. Wake envelopes carry `source.kind:'peer-message'` with `fromSession`/`fromDisplay` instead of pretending to be a human `kind:'user'` turn. Absence detection adds `unreadSummary`/`counts.unread`, and the pending reminder also fires for unread messages. Root and vendor message-bus versions bumped to 2026.11.17-2.
+- **Message-bus P0 hardening**: `message_read` (and its legacy alias) now allows only the recipient or sender; a missing or third-party caller session returns `FORBIDDEN` without writing a read receipt. Legacy `pipe2_queue` is caller-scoped and rejects cross-recipient `to`; it no longer exposes another recipient's body. Wake envelopes carry `source.kind:'peer-message'` with `fromSession`/`fromDisplay` instead of pretending to be a human `kind:'user'` turn; mixed-sender/remote batches are unattributed. Absence detection adds `unreadSummary`/`counts.unread`, and the pending reminder also fires for unread messages. Root and vendor message-bus versions bumped to 2026.11.17-2.
 
 ## 2026.11.17-1 (dev)
 

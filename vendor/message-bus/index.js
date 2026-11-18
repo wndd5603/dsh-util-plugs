@@ -166,6 +166,23 @@ export function createPeerMessage(text, { fromSession = null, fromDisplay = null
 }
 
 /**
+ * Wake source for one batch. Attribute only when every item has the same
+ * non-null sender; a batch containing a Web UI/local item (null sender) or
+ * mixed senders stays unattributed rather than falsely naming the first.
+ */
+export function peerSourceForItems(items) {
+  if (!Array.isArray(items) || items.length === 0) return { fromSession: null, fromDisplay: null }
+  const first = items[0]
+  if (first === null || typeof first !== 'object') return { fromSession: null, fromDisplay: null }
+  const fromSession = typeof first.fromSession === 'string' && first.fromSession !== '' ? first.fromSession : null
+  if (fromSession === null) return { fromSession: null, fromDisplay: null }
+  const same = items.every(item => item !== null && typeof item === 'object'
+    && typeof item.fromSession === 'string' && item.fromSession === fromSession)
+  if (!same) return { fromSession: null, fromDisplay: null }
+  return { fromSession, fromDisplay: typeof first.from === 'string' ? first.from : null }
+}
+
+/**
  * Read authorization for one stored message row: only the recipient
  * (`to_session`) or the sender (`from_session`) may read it. A missing caller
  * session is never authorized.
@@ -1502,12 +1519,8 @@ export function apply(ctx, config) {
           + ' | sha=' + String(item.sha).slice(0, 8) + '(body) | id=' + item.id).join('\n')
         + '\n说明：外部消息；正文不在本条，逐条 message_read({messageId}) 读取。'
     try {
-      const senderIds = [...new Set(items.map(item => item.fromSession).filter(value => typeof value === 'string' && value !== ''))]
-      const singleSender = senderIds.length === 1
-      entry.agent.followup(createPeerMessage(text, {
-        fromSession: singleSender ? items[0].fromSession ?? null : null,
-        fromDisplay: singleSender ? items[0].from ?? null : null,
-      }))
+      const source = peerSourceForItems(items)
+      entry.agent.followup(createPeerMessage(text, source))
       logger.info('[message-bus] wake ' + sessionId + ' items=' + items.length)
     } catch (error) {
       logger.warn('[message-bus] wake failed for ' + sessionId + ': ' + String(error))

@@ -4,7 +4,7 @@ Cross-session messaging for DeepSeek Harness: a local SQLite message bus with wa
 
 为 DeepSeek Harness 提供跨会话消息总线：本地 SQLite、轻量唤醒信封、去重/优先级、已读回执与只读检查工具。
 
-> Version: 2026.11.5-1 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-2 · Not yet published on npm; install from GitHub.
 
 ## English
 
