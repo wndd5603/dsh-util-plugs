@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-8 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-9 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,8 +22,9 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-8 (dev)
+### What is new in 2026.11.17-9 (dev)
 
+- **Caller-scoped job reaper**: `job_reap` dry-runs by default; with `dryRun:false` + `confirm:"REAP"` it cancels only the caller's live jobs older than `staleMs` (default 15 min).
 - **Memory forget operator gate**: `memory_forget` defaults to disabled (`allowForget:false`); when enabled it requires `confirm:"FORGET"` and appends an audit row to `memory/forget-audit.jsonl`.
 - **Web body exposure default-off**: `webUi.exposeBody=false` by default; the Web Remote has no caller identity, so `messageBus.get` is body-redacted and list snippets are empty unless an operator opts in.
 - **Default stale digest**: `bulletin_digest` applies `staleAfterHours=24` when no explicit SLA/`updatedBefore` is supplied, so stale active tasks are visible without a remembered SLA.
@@ -68,7 +69,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | Unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-8; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-9; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -118,8 +119,9 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
-### 2026.11.17-8 新增
+### 2026.11.17-9 新增
 
+- **调用者范围 job reaper**：`job_reap` 默认 dry-run；`dryRun:false` + `confirm:"REAP"` 才取消调用者自己超过 `staleMs`（默认 15min）的 live job。
 - **记忆删除 operator 门**：`memory_forget` 默认禁用（`allowForget:false`）；开启后必须 `confirm:"FORGET"`，并写 `memory/forget-audit.jsonl` 审计。
 - **Web 正文默认关闭**：`webUi.exposeBody=false`；Web Remote 没有调用者身份，默认 `messageBus.get` 正文脱敏、列表 snippet 为空，只有 operator 显式开启才返回正文。
 - **默认 stale digest**：`bulletin_digest` 在未显式给 SLA/`updatedBefore` 时默认 `staleAfterHours=24`，无需记住 SLA 也能看到 stale 活跃任务。
@@ -164,7 +166,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-8，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-9，各插件保留自己的版本号。
 
 ### Web 界面
 

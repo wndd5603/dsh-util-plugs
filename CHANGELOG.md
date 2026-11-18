@@ -1,3 +1,7 @@
+## 2026.11.17-9 (dev)
+
+- **Caller-scoped job reaper**: `job_reap` lists only the calling session's live jobs older than `staleMs` (default 15 min); it is dry-run by default, and `dryRun:false` + `confirm:"REAP"` requests cancellation for exactly those jobs. This is a real reaper, not only a digest warning.
+
 ## 2026.11.17-8 (dev)
 
 - **Memory forget operator gate**: `memory_forget` is disabled unless `allowForget:true`; when enabled it requires `confirm:"FORGET"` and appends an id/scope/key/source-session audit row to `memory/forget-audit.jsonl` before returning.

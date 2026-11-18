@@ -352,6 +352,19 @@ export function resolveManualArchivePath({ workspaceDir, roleName, knownPath } =
   return canonicalArchivePath(workspace, role)
 }
 
+/**
+ * P0-3: select only the caller's live jobs older than `staleMs`. Pure and
+ * side-effect free; the job_reap tool applies the destructive confirmation.
+ */
+export function selectStaleJobs(jobs, { now = Date.now(), staleMs = 15 * 60 * 1000 } = {}) {
+  if (!Array.isArray(jobs)) return []
+  const threshold = Number.isFinite(Number(staleMs)) ? Math.max(1000, Number(staleMs)) : 15 * 60 * 1000
+  return jobs.filter(job => job !== null && typeof job === 'object'
+    && (job.status === 'running' || job.status === 'stopping')
+    && Number.isFinite(Number(job.startedAt))
+    && Number(now) - Number(job.startedAt) >= threshold)
+}
+
 /** Canonical absolute archive path when no archive exists yet. */
 function canonicalArchivePath(workspaceDir, roleName) {
   const now = new Date()
@@ -2634,6 +2647,53 @@ export function apply(ctx, config) {
       }
     },
     presentCall: () => ({ card: 'generic', title: 'Team hooks status', kind: 'read' }),
+  })
+
+  // ---- P0-3: caller-scoped stale job reaper --------------------------------
+  ctx.tools.register({
+    name: 'job_reap',
+    description:
+      'List the calling session\'s live background jobs older than staleMs (default 15 min); with dryRun:false and '
+      + 'confirm:"REAP", request cancellation for exactly those jobs. Read-only by default; never touches other '
+      + 'sessions\' jobs. Use job_output/job_list for inspection first.',
+    parameters: {
+      type: 'object',
+      properties: {
+        staleMs: { type: 'number', description: 'Minimum age in ms (default 900000; min 1000).' },
+        dryRun: { type: 'boolean', description: 'Default true; false requires confirm:"REAP".' },
+        confirm: { type: 'string', description: 'Must be exactly "REAP" to kill jobs.' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args, exec) {
+      const caller = exec?.agent?.session?.id
+      if (typeof caller !== 'string' || caller === '') throw new Error('job_reap requires an Agent-backed session')
+      let jobs
+      try { jobs = ctx.get?.('jobs') } catch { jobs = undefined }
+      if (jobs === undefined || jobs === null || typeof jobs.list !== 'function') {
+        return { ok: false, code: 'UNAVAILABLE', message: 'job registry is not available' }
+      }
+      const staleMs = Number.isFinite(Number(args.staleMs)) ? Math.max(1000, Number(args.staleMs)) : 900000
+      const candidates = selectStaleJobs(jobs.list(caller), { staleMs })
+      const projected = candidates.map(job => ({ id: job.id, kind: job.kind, label: job.label, status: job.status, startedAt: job.startedAt, progress: job.progress ?? null }))
+      if (args.dryRun !== false) return { ok: true, dryRun: true, staleMs, candidates: projected }
+      if (args.confirm !== 'REAP') return { ok: false, code: 'CONFIRM_REQUIRED', message: 'job_reap requires confirm:"REAP"', candidates: projected }
+      const killed = []
+      for (const job of candidates) {
+        try {
+          const result = typeof jobs.kill === 'function' ? jobs.kill(job.id, caller, 'stale job reaper') : 'unavailable'
+          killed.push({ id: job.id, result })
+        } catch (error) {
+          killed.push({ id: job.id, error: String(error?.message ?? error) })
+        }
+      }
+      return { ok: true, dryRun: false, staleMs, killed }
+    },
+    presentCall: () => ({ card: 'generic', title: 'Stale job reaper', kind: 'write' }),
   })
 
   // ---- post-execute: problem-loop failure observation (fail-open) ----------

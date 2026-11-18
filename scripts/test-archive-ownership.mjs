@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveManualArchivePath } from '../vendor/context-sentinel/team-hooks2/index.js'
+import { resolveManualArchivePath, selectStaleJobs } from '../vendor/context-sentinel/team-hooks2/index.js'
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'dsh-archive-ownership-'))
@@ -33,4 +33,15 @@ test('manual archive path falls back to canonical archive in own role dir', (t) 
   const root = fixture(t)
   const resolved = resolveManualArchivePath({ workspaceDir: root, roleName: 'new-role', knownPath: null })
   assert.match(resolved, /team[\\/]members[\\/]new-role[\\/]ARCHIVE_\d{8}_\d{6}\.md$/u)
+})
+
+test('selectStaleJobs only returns live jobs older than the threshold', () => {
+  const now = 10_000_000
+  const jobs = [
+    { id: 'job-old', status: 'running', startedAt: now - 1_000_000 },
+    { id: 'job-new', status: 'running', startedAt: now - 1_000 },
+    { id: 'job-done', status: 'completed', startedAt: now - 2_000_000 },
+    { id: 'job-stopping', status: 'stopping', startedAt: now - 2_000_000 },
+  ]
+  assert.deepEqual(selectStaleJobs(jobs, { now, staleMs: 900_000 }).map(job => job.id), ['job-old', 'job-stopping'])
 })
