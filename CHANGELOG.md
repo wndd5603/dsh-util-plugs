@@ -1,3 +1,7 @@
+## 2026.11.17-50 (dev)
+
+- **Row config availability**: mark auto-backup enabled/backupDir and workbench pointer/statusTool/artifactTool volatile so the native `plugins.row.config` page receives a writable form.
+
 ## 2026.11.17-49 (dev)
 
 - **Native row configuration**: register `plugins.row.config` entries for message-bus/context-sentinel/auto-backup/host-relaunch/workbench rows, so the native Plugins page gains a “配置 {row}” page with write support; no plugin-console restoration needed.

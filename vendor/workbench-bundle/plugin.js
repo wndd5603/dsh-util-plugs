@@ -37,11 +37,11 @@ const PLUGIN_VERSION = (() => {
  * Declarative config schema (Standard Schema v1, zero dependency).
  */
 export const Config = objectSchema({
-  enabled: boolean(true, { description: 'Register the workbench_status tool and the first-turn pointer.' }),
+  enabled: boolean(true, { description: 'Register the workbench_status tool and the first-turn pointer.', volatile: true }),
   schemaVersion: number(1, { description: 'Config schema version; newer values are rejected.', int: true, min: 1 }),
-  pointer: boolean(true, { description: 'Inject a one-time (≤3 line) capability pointer into each new session.' }),
-  statusTool: boolean(true, { description: 'Register the read-only workbench_status tool.' }),
-  artifactTool: boolean(true, { description: 'Register artifact_manifest for content-addressed build artifact manifests and the current pointer.' }),
+  pointer: boolean(true, { description: 'Inject a one-time (≤3 line) capability pointer into each new session.', volatile: true }),
+  statusTool: boolean(true, { description: 'Register the read-only workbench_status tool.', volatile: true }),
+  artifactTool: boolean(true, { description: 'Register artifact_manifest for content-addressed build artifact manifests and the current pointer.', volatile: true }),
   pointerText: string('', { description: 'Optional override for the pointer body (empty = built-in text, max 400 chars).' }),
 }, { description: 'Meta-bundle UX entry configuration (pointer + status tool).', schemaVersion: 1 })
 

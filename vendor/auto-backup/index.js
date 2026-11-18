@@ -36,12 +36,12 @@ const PLUGIN_VERSION = (() => {
  * truth; `cordis.patch.yml` only lists deviations.
  */
 export const Config = objectSchema({
-  enabled: boolean(true, { description: 'Enforce pre-write backups. false = keep the status tool only (no hook).' }),
+  enabled: boolean(true, { description: 'Enforce pre-write backups. false = keep the status tool only (no hook).', volatile: true }),
   schemaVersion: number(1, { description: 'Config schema version; newer values are rejected.', int: true, min: 1 }),
   projectRoot: string('', {
     description: 'Absolute project root to protect. Empty = resolve per call from the session workspace (recommended). Backups outside the resolved root are refused.',
   }),
-  backupDir: string('file_backups', { description: 'Backup directory, relative to the project root (must stay inside it).' }),
+  backupDir: string('file_backups', { description: 'Backup directory, relative to the project root (must stay inside it).', volatile: true }),
   batch: string('auto', { description: 'Batch tag used in backup file names.' }),
   include: any(null, { description: 'Array of {dir, ext[]} include rules. null = generic source/doc extensions anywhere in the root.' }),
   excludeDirs: stringArray(['file_backups', '.git', 'node_modules', 'team/pipe2/inbox', 'team/pipe2/ack', 'team/pipe2/cursor', 'team/pipe2/tmp', 'team/pipe2/_archive', 'backup', '.vs', 'images'], { description: 'Directories (relative) never backed up.' }),
