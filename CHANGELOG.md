@@ -1,3 +1,7 @@
+## 2026.11.17-23 (dev)
+
+- **Runtime/evidence view**: the Runtime tab reads apartment status (counts only, no paths); task/message detail now renders a separate evidence block and redaction markers. Subenv remains an explicit `SUBENV_NOT_CONFIGURED` state until its bridge lands.
+
 ## 2026.11.17-22 (dev)
 
 - **Collaboration Inbox/Tasks views**: tabs now call `visibilityPage`; Inbox and Tasks render read-only lists and load `visibilityDetail` on selection, with redaction markers. No body/content is rendered by default.

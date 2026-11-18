@@ -2154,6 +2154,17 @@ function CollaborationDomainView({ api, domain, label }) {
     setLoading(true)
     setError(undefined)
     try {
+      if (domain === 'runtime') {
+        if (typeof api.apartmentStatus !== 'function') throw new Error('runtime unavailable')
+        const value = collabValue(await api.apartmentStatus())
+        if (value === undefined || value === null) throw new Error('runtime unavailable')
+        setPage({ state: 'ready', items: [{ id: 'runtime', title: '公寓/租约', status: 'status', counts: value.counts ?? null }], total: 1 })
+        return
+      }
+      if (domain === 'subenv') {
+        setPage({ state: 'unavailable', items: [], total: 0, error: 'SUBENV_NOT_CONFIGURED' })
+        return
+      }
       if (typeof api.visibilityPage !== 'function') throw new Error('visibilityPage unavailable')
       const result = await api.visibilityPage({ profileId: 'current', workspaceId: 'current', domain, limit: 50 })
       const value = collabValue(result)
@@ -2206,6 +2217,9 @@ function CollaborationDomainView({ api, domain, label }) {
       detail === undefined ? panel('div', { style: COLLAB_STYLE.empty }, '加载中…') : null,
       detail?.error !== undefined ? panel('div', { style: COLLAB_STYLE.error }, String(detail.error)) : null,
       detail?.item !== undefined ? panel('pre', { style: COLLAB_STYLE.pre }, JSON.stringify(detail.item, null, 2)) : null,
+      detail?.evidence !== undefined && detail.evidence !== null ? panel('div', null,
+        panel('div', { style: COLLAB_STYLE.cardLabel }, '证据'),
+        panel('pre', { style: COLLAB_STYLE.pre }, JSON.stringify(detail.evidence, null, 2))) : null,
       Array.isArray(detail?.redacted) && detail.redacted.length > 0 ? panel('div', { style: COLLAB_STYLE.cardMeta }, `已隐藏：${detail.redacted.join(', ')}`) : null) : null)
 }
 
