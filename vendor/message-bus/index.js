@@ -2743,29 +2743,43 @@ export function apply(ctx, config) {
       visibilityPage(query) {
         const args = query !== null && typeof query === 'object' ? query : {}
         const domain = String(args.domain ?? '')
+        const filters = args.filters !== null && typeof args.filters === 'object' && !Array.isArray(args.filters) ? args.filters : {}
         const limit = Number.isFinite(Number(args.limit)) ? Math.min(100, Math.max(1, Math.trunc(Number(args.limit)))) : 25
         const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.trunc(Number(args.offset))) : 0
         let items = []
         let total = 0
         if (domain === 'messages') {
-          items = store.listMessages({ limit, offset }).map(safeMessageView).filter(Boolean)
+          items = store.listMessages({ limit, offset, keyword: typeof filters.keyword === 'string' ? filters.keyword : undefined }).map(safeMessageView).filter(Boolean)
           total = store.counts().messages
         } else if (domain === 'tasks') {
-          const page = readTasksPage({ limit, offset })
+          const page = readTasksPage({
+            limit, offset,
+            status: typeof filters.status === 'string' ? filters.status : undefined,
+            assignee: typeof filters.assignee === 'string' ? filters.assignee : undefined,
+            query: typeof filters.query === 'string' ? filters.query : undefined,
+          })
           items = page.tasks.map(safeTaskView).filter(Boolean)
           total = page.total
         } else if (domain === 'meetings') {
-          const page = readMeetingsPage({ limit, offset })
+          const page = readMeetingsPage({
+            limit, offset,
+            status: typeof filters.status === 'string' ? filters.status : undefined,
+            query: typeof filters.query === 'string' ? filters.query : undefined,
+          })
           items = page.meetings
           total = page.total
         } else if (domain === 'memory') {
-          const page = readMemoryPage({ limit, offset })
+          const page = readMemoryPage({
+            limit, offset,
+            scope: typeof filters.scope === 'string' ? filters.scope : undefined,
+            query: typeof filters.query === 'string' ? filters.query : undefined,
+          })
           items = page.memories.map(row => ({ ...row, content: undefined, redacted: true }))
           total = page.total
         } else {
-          return { ok: true, state: 'unavailable', items: [], total: 0, offset, limit, error: 'DOMAIN_UNAVAILABLE' }
+          return { ok: true, state: 'unavailable', items: [], total: 0, offset, limit, filters, error: 'DOMAIN_UNAVAILABLE' }
         }
-        return { ok: true, state: total === 0 ? 'empty' : 'ready', items, ...visibilityPageMeta(total, offset, limit), asOf: new Date().toISOString() }
+        return { ok: true, state: total === 0 ? 'empty' : 'ready', items, filters, ...visibilityPageMeta(total, offset, limit), asOf: new Date().toISOString() }
       }
       visibilityDetail(query) {
         const args = query !== null && typeof query === 'object' ? query : {}

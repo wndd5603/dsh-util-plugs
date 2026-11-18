@@ -1,3 +1,7 @@
+## 2026.11.17-31 (dev)
+
+- **Visibility filters**: `visibilityPage` now forwards task status/assignee/query, meeting status/query, memory scope/query, and message keyword filters; the response echoes `filters`.
+
 ## 2026.11.17-30 (dev)
 
 - **Read-only capability declaration**: `visibilitySummary` now returns `capabilities:{reads:true,writes:false,reveal:false}`; the collaboration center is explicitly read-only (no unauthenticated destructive controls). README scope wording updated.
