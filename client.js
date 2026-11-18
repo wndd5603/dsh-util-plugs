@@ -1736,6 +1736,14 @@ function SubenvSection({ api }) {
           : (task.error !== undefined ? panel('p', { className: 'mb-muted' }, String(task.error)) : null)))))
 }
 
+const SETTINGS_NS = {
+  'message-bus': ['dsh-util-plugs/plugins/message-bus', 'message-bus'],
+  'context-sentinel': ['dsh-util-plugs/plugins/context-sentinel', 'context-sentinel'],
+  'auto-backup': ['dsh-util-plugs/plugins/auto-backup', 'auto-backup'],
+  'host-relaunch': ['dsh-util-plugs/plugins/host-relaunch', 'host-relaunch'],
+  'workbench-bundle': ['dsh-util-plugs', 'workbench-bundle'],
+}
+
 const SETTINGS_GROUPS = [
   {
     title: '安全 Safety',
@@ -1782,6 +1790,56 @@ function settingsValueAt(value, path) {
   return current
 }
 
+function SettingRow(props) {
+  const { item, ns, configForms, openNative } = props
+  const form = React.useMemo(() => {
+    if (ns === undefined || configForms === undefined) return undefined
+    try { return configForms.get(ns.ns) } catch { return undefined }
+  }, [ns, configForms])
+  const [snapshot, setSnapshot] = React.useState(() => {
+    try { return form?.getSnapshot?.() } catch { return undefined }
+  })
+  React.useEffect(() => {
+    if (form === undefined) return undefined
+    try {
+      setSnapshot(form.getSnapshot())
+      return form.subscribe(() => setSnapshot(form.getSnapshot()))
+    } catch { return undefined }
+  }, [form])
+  const [busy, setBusy] = React.useState(false)
+  const [message, setMessage] = React.useState(undefined)
+  const raw = snapshot?.value ?? ns?.value
+  const value = settingsValueAt(raw, item.path)
+  const canEdit = typeof value === 'boolean' && snapshot?.status === 'ready'
+    && (snapshot?.writable === true || ns?.writable === true)
+  const toggle = async event => {
+    if (form === undefined || busy) return
+    setBusy(true); setMessage(undefined)
+    try {
+      const accepted = await form.mutate([{ op: 'set', path: String(item.path).split('.'), value: event.target.checked }], snapshot.revision)
+      setMessage(accepted ? { tone: 'ok', text: '已保存' } : { tone: 'danger', text: '写入被拒绝' })
+    } catch (error) {
+      setMessage({ tone: 'danger', text: String(error?.message ?? error) })
+    } finally { setBusy(false) }
+  }
+  const fmt = value === undefined ? '—' : (typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value))
+  return panel('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(160px, 1fr) minmax(130px, auto)', gap: '8px 12px', padding: '7px 0', borderTop: '1px solid rgba(127,127,127,0.12)' } },
+    panel('div', null,
+      panel('div', { style: { fontWeight: 600, fontSize: 12.5 } }, item.label),
+      panel('div', { style: { fontSize: 11.5, opacity: 0.65 } }, item.help)),
+    panel('div', { style: { textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' } },
+      canEdit
+        ? panel('label', { style: { display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' } },
+          panel('input', { type: 'checkbox', checked: value === true, disabled: busy, onChange: toggle }),
+          panel('code', { style: { fontSize: 12 } }, busy ? '…' : (value ? 'on' : 'off')))
+        : panel('code', { style: { fontSize: 12 } }, fmt),
+      !canEdit ? panel('span', { style: { fontSize: 10.5, opacity: 0.55 } }, ns === undefined ? '原生配置' : '需原生配置/重启') : null,
+      item.risk === 'high' ? panel('span', { style: { color: '#d9534f', fontSize: 11 } }, 'HIGH') : null,
+      panel('button', { type: 'button', style: style.button, onClick: openNative }, '配置'),
+      message === undefined ? null : panel('span', { style: { fontSize: 10.5, color: message.tone === 'ok' ? '#3c9a5f' : '#d9534f' } }, message.text))
+  )
+}
+
 function CollaborationSettingsPage(props) {
   const { configForms, layout } = props
   const [view, setView] = React.useState(() => {
@@ -1797,35 +1855,29 @@ function CollaborationSettingsPage(props) {
     } catch { return undefined }
   }, [configForms])
   const namespaces = Array.isArray(view?.namespaces) ? view.namespaces : []
-  const findNamespace = suffix => namespaces.find(row => row?.ns === suffix || (typeof row?.ns === 'string' && row.ns.endsWith('/' + suffix)))
+  const findNamespace = suffix => {
+    const candidates = SETTINGS_NS[suffix] ?? [suffix]
+    return namespaces.find(row => candidates.includes(row?.ns)
+      || (typeof row?.ns === 'string' && candidates.some(candidate => row.ns.endsWith('/' + candidate))))
+  }
   const openNative = () => {
     try { layout?.selectPanel?.('plugins') } catch { /* native panel unavailable */ }
   }
-  const fmt = value => value === undefined ? '—' : (typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value))
   return panel('section', { style: { display: 'grid', gap: '14px', padding: '4px 0' }, 'data-collaboration-settings': '' },
     panel('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' } },
       panel('div', null,
         panel('h2', { style: { margin: 0 } }, '协作设置'),
-        panel('p', { style: { margin: '4px 0 0', fontSize: 12.5, opacity: 0.7 } }, '只读索引；写入仍走 DSH 原生 Plugins 配置，避免重复实现配置表单。')),
+        panel('p', { style: { margin: '4px 0 0', fontSize: 12.5, opacity: 0.7 } }, '可热更新字段可直接切换；其余字段显示当前值/原生配置。写入统一走 DSH settings。')),
       panel('button', { type: 'button', style: style.button, onClick: openNative }, '打开原生插件设置')),
     view === undefined
       ? panel('p', { style: { opacity: 0.7 } }, '当前 profile 未提供 configForms；请使用原生 Plugins 页面。')
       : SETTINGS_GROUPS.map(group => panel('div', { key: group.title, style: { border: '1px solid rgba(127,127,127,0.2)', borderRadius: '10px', padding: '12px' } },
         panel('h3', { style: { margin: '0 0 8px', fontSize: 14 } }, group.title),
-        group.items.map(item => {
-          const ns = findNamespace(item.ns)
-          const value = settingsValueAt(ns?.value, item.path)
-          return panel('div', { key: item.ns + ':' + item.path, style: { display: 'grid', gridTemplateColumns: 'minmax(160px, 1fr) minmax(90px, auto)', gap: '8px 12px', padding: '7px 0', borderTop: '1px solid rgba(127,127,127,0.12)' } },
-            panel('div', null,
-              panel('div', { style: { fontWeight: 600, fontSize: 12.5 } }, item.label),
-              panel('div', { style: { fontSize: 11.5, opacity: 0.65 } }, item.help)),
-            panel('div', { style: { textAlign: 'right' } },
-              panel('code', { style: { fontSize: 12 } }, fmt(value)),
-              item.risk === 'high' ? panel('span', { style: { marginLeft: 6, color: '#d9534f', fontSize: 11 } }, 'HIGH') : null,
-              !ns ? panel('div', { style: { fontSize: 10.5, opacity: 0.55 } }, 'namespace 未匹配') : null))
-        }))),
+        group.items.map(item => panel(SettingRow, {
+          key: item.ns + ':' + item.path, item, ns: findNamespace(item.ns), configForms, openNative,
+        })))),
     panel('p', { style: { margin: 0, fontSize: 11.5, opacity: 0.6 } },
-      '提示：修改 strictMode / 跨权限 / 真实重启后，请重新检查 message_bus_status 或重启宿主。'))
+      '提示：strictMode / crossPermissionGuard 可热更新；非 volatile 参数需原生保存并重启宿主。'))
 }
 
 function MessageCenterPage(props) {

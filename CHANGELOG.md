@@ -1,3 +1,7 @@
+## 2026.11.17-48 (dev)
+
+- **Settings editable**: fixed namespace mapping (message-bus/context/auto-backup/host-relaunch/workbench); volatile boolean fields render inline toggles through native `configForms.mutate`; non-volatile rows show current value or “需原生配置/重启” plus per-row config action.
+
 ## 2026.11.17-47 (dev)
 
 - **Remove plugin-console residual client**: the bundle now composes only message-center + host-relaunch client halves; the console UI is gone (10 rows). Settings index remains in `settings.section`.
