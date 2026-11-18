@@ -1,3 +1,7 @@
+## 2026.11.17-47 (dev)
+
+- **Remove plugin-console residual client**: the bundle now composes only message-center + host-relaunch client halves; the console UI is gone (10 rows). Settings index remains in `settings.section`.
+
 ## 2026.11.17-46 (dev)
 
 - **Settings hub**: added a curated `协作设置` settings.section (safety/recall/bus/runtime index) that reads native `configForms` and deep-links to native Plugins for writes; removed the duplicate `plugin-console` row (10 rows).

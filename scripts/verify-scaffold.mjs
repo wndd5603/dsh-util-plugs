@@ -12,7 +12,7 @@ const check = (ok, message) => { if (!ok) failures.push(message) }
 const read = rel => readFileSync(join(root, rel), 'utf8')
 const exists = rel => existsSync(join(root, rel))
 
-const EXPECTED_VERSION = '2026.11.17-46'
+const EXPECTED_VERSION = '2026.11.17-47'
 const pkg = JSON.parse(read('package.json'))
 check(pkg.name === 'dsh-util-plugs', 'package name must be dsh-util-plugs')
 check(pkg.version === EXPECTED_VERSION, 'package version must be ' + EXPECTED_VERSION)
@@ -69,7 +69,7 @@ check(/PANEL_ID = 'messages'|PANEL_ID = "messages"/.test(client), 'message cente
 check(client.includes('conversation.session.header.utilities'), 'client.js must register the restart header button')
 check(client.includes('dsh-message-bus'), 'client.js must mount the messageBus Remote contribution')
 check(client.includes('dsh-host-relaunch'), 'client.js must mount the relaunch Remote contribution');
-check(client.includes('dsh-plugin-console') || client.includes('pluginConsole'), 'client.js must include the plugin console client half')
+check(client.includes('智能体协作网络'), 'client.js must include the message center client half')
 
 // Shipped files must not leak internal workspace paths.
 const SHIPPED_TEXT = [

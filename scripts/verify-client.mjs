@@ -84,17 +84,14 @@ moduleExports.apply(mockCtx)
 
 check(seen.locales.includes('messageBusClient'), 'message center locale namespace must register (messageBusClient)')
 check(seen.locales.includes('hostRelaunch'), 'restart button locale namespace must register (hostRelaunch)')
-check(seen.locales.includes('pluginConsole'), 'plugin console locale namespace must register (pluginConsole)')
 const panel = seen.slots.find(slot => slot.name === 'sidebar.panellist' && slot.id === 'messages')
 check(panel !== undefined, 'message center must register the sidebar.panellist "messages" entry')
 const page = seen.slots.find(slot => slot.name === 'main' && slot.key === 'messages')
 check(page !== undefined, 'message center must register the main "messages" page')
 const button = seen.slots.find(slot => slot.name === 'conversation.session.header.utilities' && slot.id === 'host-relaunch')
-const consolePanel = seen.slots.find(slot => slot.name === 'sidebar.panellist' && slot.id === 'plugin-console')
-const consolePage = seen.slots.find(slot => slot.name === 'main' && slot.key === 'plugin-console')
+const settings = seen.slots.find(slot => slot.name === 'settings.section' && slot.id === 'collaboration-settings')
 check(button !== undefined, 'host relaunch must register the conversation header utilities button')
-check(consolePanel !== undefined, 'plugin console must register the sidebar.panellist plugin-console entry')
-check(consolePage !== undefined, 'plugin console must register the main plugin-console page')
+check(settings !== undefined, 'collaboration settings section must register')
 check(clientText.includes('messageBusRemote'), 'message center must mount its messageBus Remote contribution')
 check(seen.remotes.includes('dsh-host-relaunch'), 'restart button must mount its relaunch Remote contribution')
 check(clientText.includes('dsh-bulletin-board'), 'Agent Network client must mount the bulletin-board Remote contribution')
@@ -102,8 +99,7 @@ check(clientText.includes('data-agent-network'), 'Agent Network panel must rende
 check(clientText.includes('dsh-agent-apartment'), 'Agent Network panel must mount the apartment Remote contribution')
 check(clientText.includes('data-apartment'), 'Agent Network panel must render the apartment settings/backup section')
 check(clientText.includes('智能体协作网络'), 'message center panel must be labeled 智能体协作网络')
-check(clientText.includes('插件控制台'), 'plugin console panel must remain separate and labeled 插件控制台')
-for (const service of ['slots', 'locale', 'remote', 'remoteAccess']) {
+for (const service of ['slots', 'locale', 'remote', 'remoteAccess', 'configForms', 'layout']) {
   check(moduleExports.inject.includes(service), 'client inject must include ' + service)
 }
 const declared = new Set(pkg.dsh?.client?.inject ?? [])
@@ -125,7 +121,7 @@ if (failures.length > 0) {
   for (const message of failures) console.error(' - ' + message)
   process.exitCode = 1
 } else {
-  console.log('CLIENT-OK: one client module "' + pkg.name + '" composes 3 halves; '
+  console.log('CLIENT-OK: one client module "' + pkg.name + '" composes 2 halves; '
     + seen.slots.length + ' slots, ' + seen.remotes.length + ' Remotes, ' + seen.locales.length + ' locales')
 }
 
