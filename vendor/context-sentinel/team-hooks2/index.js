@@ -289,9 +289,12 @@ function archivePathFromArguments(args) {
   return null
 }
 
-/** Latest `ARCHIVE_*.md` under `<workspace>/team/members/**`, absolute path. */
-function findLatestArchivePath(workspaceDir) {
-  const root = join(workspaceDir, 'team', 'members')
+/** Latest `ARCHIVE_*.md` under `<workspace>/team/members[/<role>]/**`, absolute path. */
+function findLatestArchivePath(workspaceDir, roleName) {
+  const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : null
+  const root = role === null
+    ? join(workspaceDir, 'team', 'members')
+    : join(workspaceDir, 'team', 'members', role)
   let best = null
   let bestMtime = -1
   const visit = (dir, depth) => {
@@ -321,6 +324,32 @@ function findLatestArchivePath(workspaceDir) {
   }
   visit(root, 0)
   return best
+}
+
+/** True when `file` is inside the role's own team/members directory. */
+function archiveBelongsToRole(file, workspaceDir, roleName) {
+  if (typeof file !== 'string' || file === '') return false
+  const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : null
+  if (role === null) return false
+  const ownDir = resolve(workspaceDir, 'team', 'members', role)
+  const rel = relative(ownDir, resolve(file))
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + (process.platform === 'win32' ? '\\' : '/')) && !isAbsolute(rel)
+}
+
+/**
+ * P0-6: a session may only resume from its own role archive. A remembered
+ * foreign `knownPath` is ignored; the fallback is the latest archive under the
+ * caller's role dir, then the canonical path for a new archive.
+ */
+export function resolveManualArchivePath({ workspaceDir, roleName, knownPath } = {}) {
+  const workspace = typeof workspaceDir === 'string' && workspaceDir !== '' ? workspaceDir : process.cwd()
+  const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : null
+  if (typeof knownPath === 'string' && archiveBelongsToRole(knownPath, workspace, role)) {
+    return knownPath
+  }
+  const ownLatest = findLatestArchivePath(workspace, role)
+  if (ownLatest !== null) return ownLatest
+  return canonicalArchivePath(workspace, role)
 }
 
 /** Canonical absolute archive path when no archive exists yet. */
@@ -2349,18 +2378,17 @@ export function apply(ctx, config) {
     let manualPathNote = ''
     if (manualPending) {
       const workspaceDir = sessionWorkspaceDir(agent)
-      manualPath = typeof s.archivePath === 'string' && ARCHIVE_FILE_RE.test(s.archivePath)
-        ? s.archivePath
-        : findLatestArchivePath(workspaceDir)
-      if (manualPath === null) {
-        let roleName
-        try {
-          roleName = ctx.get('agentTeams')?.membership(agent)?.name
-        } catch {
-          roleName = undefined
-        }
-        manualPath = canonicalArchivePath(workspaceDir, roleName)
+      let roleName
+      try {
+        roleName = ctx.get('agentTeams')?.membership(agent)?.name
+      } catch {
+        roleName = undefined
       }
+      manualPath = resolveManualArchivePath({
+        workspaceDir,
+        roleName,
+        knownPath: s.archivePath,
+      })
       if (!existsSync(manualPath)) {
         manualPathNote = '（该路径当前尚未发现归档文件；请按此规范路径创建/补全归档并读取后再继续，不要在此刻新建其他归档。）'
       }

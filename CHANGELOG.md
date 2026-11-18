@@ -1,3 +1,7 @@
+## 2026.11.17-5 (dev)
+
+- **Archive ownership**: the manual-compaction reminder resolves the caller's own `team/members/<role>/ARCHIVE_*.md`; a remembered foreign archive path is ignored, and the fallback is the latest archive in the caller's role directory. This prevents cross-role recovery from injecting another agent's conclusions.
+
 ## 2026.11.17-4 (dev)
 
 - **Artifact manifest + current pointer**: new `artifact_manifest` tool hashes a real build artifact, writes an immutable content-addressed manifest under `$DSH_HOME/artifacts/manifests/`, and optionally promotes it to the single `artifacts/current.json` pointer; prior pointers are archived under `history/`. Promotion is explicit, so a rebuild cannot silently overwrite the final pointer without a manifest.
