@@ -1,3 +1,7 @@
+## 2026.11.17-38 (dev)
+
+- **Embedded subenv uses host `ctx.llm`**: removed the separate `SUBENV_PROVIDER_JSON`/API-key requirement for embedded mode; provider/model are selected from DSH (`subenv.provider/model`, empty = first available). The task runner consumes the host LLM stream. External RPC mode remains opt-in.
+
 ## 2026.11.17-37 (dev)
 
 - **Memory operator reveal**: `memoryPage` masks content again; `memoryReveal({id,confirm:"REVEAL"})` is gated by `webUi.allowMemoryReveal` (default false), returns one memory body, and appends a body-free `reveal-audit.jsonl` row. 协作网络 shows a per-row “显示内容” action. Tests cover config/confirm/audit.

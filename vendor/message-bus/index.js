@@ -16,7 +16,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openMessageStore } from './src/store.js'
-import { createProvider } from './src/subenv/provider.mjs'
+import { createHostProvider } from './src/subenv/host-provider.mjs'
 import { createEmbeddedSubenv } from './src/subenv/embedded.mjs'
 import {
   boolean, number, string, record, nested, objectSchema, enumOf,
@@ -161,6 +161,8 @@ export const Config = objectSchema({
     url: string('http://127.0.0.1:47831/rpc', { description: 'External subenv RPC URL; used only when mode=external.' }),
     tokenEnv: string('SUBENV_TOKEN', { description: 'Environment variable holding the external subenv bearer token.' }),
     allowTasks: boolean(true, { description: 'Register subenv_task_* tools (embedded task runner). Provider may still be disabled.' }),
+    provider: string('', { description: 'Host LLM provider id for embedded subenv; empty = first host provider.' }),
+    model: string('', { description: 'Host LLM model id for embedded subenv; empty = first model of the selected provider.' }),
   }), { description: 'Embedded or external subenv integration.' }),
 }, { description: 'Universal session message bus configuration.', schemaVersion: 1 })
 
@@ -1405,6 +1407,8 @@ function normalizeConfig(config) {
       url: typeof subenv.url === 'string' && subenv.url !== '' ? subenv.url : 'http://127.0.0.1:47831/rpc',
       tokenEnv: typeof subenv.tokenEnv === 'string' && subenv.tokenEnv !== '' ? subenv.tokenEnv : 'SUBENV_TOKEN',
       allowTasks: subenv.allowTasks !== false,
+      provider: typeof subenv.provider === 'string' ? subenv.provider.trim() : '',
+      model: typeof subenv.model === 'string' ? subenv.model.trim() : '',
     },
   }
 }
@@ -1431,7 +1435,13 @@ export function apply(ctx, config) {
     return
   }
   const store = openMessageStore(cfg.dbPath)
-  const embeddedSubenv = createEmbeddedSubenv({ provider: createProvider({ env: process.env }) })
+  const embeddedSubenv = createEmbeddedSubenv({
+    provider: createHostProvider({
+      getLlm: () => { try { return ctx.get?.('llm') } catch { return undefined } },
+      providerId: cfg.subenv.provider,
+      modelId: cfg.subenv.model,
+    }),
+  })
   if (store.deliverySchema?.degraded) {
     logger.warn('[message-bus] Q2-A delivery columns unavailable (missing: '
       + store.deliverySchema.missing.join(', ') + '); legacy delivery schema in use')
