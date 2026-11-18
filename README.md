@@ -22,8 +22,9 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-36 (dev)
+### What is new in 2026.11.17-37 (dev)
 
+- **Memory operator reveal**: masked memory list + per-row reveal with confirm + `reveal-audit.jsonl`; `webUi.allowMemoryReveal` default false.
 - **Single collaboration tab**: removed duplicate `collaboration`; 协作网络 is the single operational console.
 - **Subenv section**: embedded status/provider + task results in 协作网络.
 - **Legacy detail restored**: old Web tasks/memory/meeting detail returns full content; visibility API remains redacted.

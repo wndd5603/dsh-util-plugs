@@ -159,6 +159,15 @@ function createRemoteContribution() {
         result: identityCodec('dsh-message-bus#messageBus/memoryPage:result'),
       },
       {
+        id: 'dsh-message-bus/messageBus/memoryReveal',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'memoryReveal',
+        invocation: { kind: 'direct' },
+        parameters: [jsonParameter('query')],
+        result: identityCodec('dsh-message-bus#messageBus/memoryReveal:result'),
+      },
+      {
         id: 'dsh-message-bus/messageBus/memoryForget',
         service: REMOTE_SERVICE,
         namespace: REMOTE_NAMESPACE,
@@ -1501,23 +1510,28 @@ function ApartmentSection(props) {
 }
 
 function MemoryRow(props) {
-  const { t, memoryRow, pendingDelete, onAskDelete, onCancelDelete, onConfirmDelete } = props
+  const { t, memoryRow, pendingDelete, revealContent, revealBusy, onReveal, onAskDelete, onCancelDelete, onConfirmDelete } = props
   const [expanded, setExpanded] = React.useState(false)
-  const content = typeof memoryRow.content === 'string' ? memoryRow.content : ''
+  const content = typeof revealContent === 'string' ? revealContent : ''
   const long = content.length > 280
   const visible = expanded || !long ? content : content.slice(0, 280) + '…'
   return panel('article', { key: memoryRow.id, className: 'mb-task', 'data-memory-row': memoryRow.id },
     panel('div', { className: 'mb-taskTitle' },
       panel('span', null, memoryRow.key || memoryRow.id),
       panel('span', { className: 'mb-pill' }, memoryRow.scope)),
-    panel('p', { style: { margin: '6px 0', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, 'data-memory-content': expanded ? 'expanded' : 'collapsed' }, visible),
-    long
-      ? panel('button', {
-        type: 'button', className: 'mb-chipButton', 'data-memory-toggle': '',
-        'aria-expanded': expanded ? 'true' : 'false',
-        onClick: () => setExpanded(value => !value),
-      }, expanded ? t('memoryCollapse') : t('memoryExpand'))
-      : null,
+    content === ''
+      ? panel('p', { className: 'mb-muted', style: { margin: '6px 0', fontSize: 12 } },
+        '内容默认隐藏。operator 可逐条显示；显示会写 reveal-audit。')
+      : panel('p', { style: { margin: '6px 0', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, 'data-memory-content': expanded ? 'expanded' : 'collapsed' }, visible),
+    content === ''
+      ? panel('button', { type: 'button', className: 'mb-chipButton', disabled: revealBusy, onClick: () => onReveal(memoryRow) }, revealBusy ? '读取中…' : '显示内容')
+      : (long
+        ? panel('button', {
+          type: 'button', className: 'mb-chipButton', 'data-memory-toggle': '',
+          'aria-expanded': expanded ? 'true' : 'false',
+          onClick: () => setExpanded(value => !value),
+        }, expanded ? t('memoryCollapse') : t('memoryExpand'))
+        : null),
     panel('div', { className: 'mb-taskMeta' },
       panel('span', null, memoryRow.updated_at ?? ''),
       memoryRow.source_session ? panel('span', null, 'source: ' + memoryRow.source_session) : null,
@@ -1532,7 +1546,7 @@ function MemoryRow(props) {
 }
 
 function MemorySection(props) {
-  const { t, memory, query, scope, setQuery, setScope, page, pageCount, busy, message, pendingDelete, onSearch, onPage, onAskDelete, onCancelDelete, onConfirmDelete } = props
+  const { t, memory, query, scope, setQuery, setScope, page, pageCount, busy, message, pendingDelete, reveals, revealBusy, onReveal, onSearch, onPage, onAskDelete, onCancelDelete, onConfirmDelete } = props
   if (memory === undefined || memory === null) return null
   const memories = Array.isArray(memory.memories) ? memory.memories : []
   return panel('section', { 'data-agent-memory': '', className: 'mb-card' },
@@ -1566,7 +1580,8 @@ function MemorySection(props) {
       ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, t('memoryEmpty'))
       : panel('div', { className: 'mb-taskList' }, memories.map(memoryRow => panel(MemoryRow, {
         key: memoryRow.id, t, memoryRow, pendingDelete,
-        onAskDelete, onCancelDelete, onConfirmDelete,
+        revealContent: reveals?.[memoryRow.id], revealBusy,
+        onReveal, onAskDelete, onCancelDelete, onConfirmDelete,
       }))),
     panel('div', { className: 'mb-actionRow' },
       panel('span', { className: 'mb-muted' }, t('pageInfo', { page: page + 1, pages: pageCount, total: memory.total ?? memories.length })),
@@ -1744,6 +1759,8 @@ function MessageCenterPage(props) {
   const [memoryBusy, setMemoryBusy] = React.useState(false)
   const [memoryMessage, setMemoryMessage] = React.useState(undefined)
   const [memoryDeleteId, setMemoryDeleteId] = React.useState(undefined)
+  const [memoryReveals, setMemoryReveals] = React.useState({})
+  const [memoryRevealBusy, setMemoryRevealBusy] = React.useState(undefined)
   const [meetings, setMeetings] = React.useState(undefined)
   const [meetingQuery, setMeetingQuery] = React.useState('')
   const [meetingStatus, setMeetingStatus] = React.useState('')
@@ -1939,6 +1956,28 @@ function MessageCenterPage(props) {
     }
   }
 
+  const revealMemory = async row => {
+    if (typeof api.memoryReveal !== 'function') return
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function'
+      && !window.confirm('显示这条记忆的完整内容？该操作会写入 reveal-audit。')) return
+    setMemoryRevealBusy(row.id)
+    setMemoryMessage(undefined)
+    try {
+      const result = await api.memoryReveal({ id: row.id, confirm: 'REVEAL' })
+      const value = collabValue(result)
+      if (value?.ok === true) {
+        setMemoryReveals(previous => ({ ...previous, [row.id]: value.content }))
+        setMemoryMessage({ text: '内容已显示；审计已记录。', tone: 'ok' })
+      } else {
+        setMemoryMessage({ text: value?.error ?? value?.code ?? 'REVEAL_FAILED', tone: 'danger' })
+      }
+    } catch (caught) {
+      setMemoryMessage({ text: errorTextOf(caught), tone: 'danger' })
+    } finally {
+      setMemoryRevealBusy(undefined)
+    }
+  }
+
   const deleteMemory = async id => {
     if (typeof api.memoryForget !== 'function') return
     setMemoryBusy(true)
@@ -2078,6 +2117,7 @@ function MessageCenterPage(props) {
     panel(MemorySection, {
       t, memory, query: memoryQuery, scope: memoryScope, setQuery: setMemoryQuery, setScope: setMemoryScope,
       page: memoryPage, pageCount: memoryPages, busy: memoryBusy, message: memoryMessage, pendingDelete: memoryDeleteId,
+      reveals: memoryReveals, revealBusy: memoryRevealBusy, onReveal: row => { void revealMemory(row) },
       onSearch: nextQuery => { void loadMemory({ page: 0, query: nextQuery }) },
       onPage: next => { void loadMemory({ page: Math.max(0, Math.min(memoryPages - 1, next)) }) },
       onAskDelete: id => setMemoryDeleteId(id),
@@ -2464,6 +2504,7 @@ function apply(ctx) {
       subenvStatus: () => scope.remote.messageBus.subenvStatus(),
       subenvTasks: () => scope.remote.messageBus.subenvTasks(),
       memoryPage: query => scope.remote.messageBus.memoryPage(query),
+      memoryReveal: query => scope.remote.messageBus.memoryReveal(query),
       memoryForget: query => scope.remote.messageBus.memoryForget(query),
       meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
       meetingDetail: query => scope.remote.messageBus.meetingDetail(query),

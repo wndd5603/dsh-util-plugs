@@ -1,3 +1,7 @@
+## 2026.11.17-37 (dev)
+
+- **Memory operator reveal**: `memoryPage` masks content again; `memoryReveal({id,confirm:"REVEAL"})` is gated by `webUi.allowMemoryReveal` (default false), returns one memory body, and appends a body-free `reveal-audit.jsonl` row. 协作网络 shows a per-row “显示内容” action. Tests cover config/confirm/audit.
+
 ## 2026.11.17-36 (dev)
 
 - **Single collaboration tab**: removed the duplicate `collaboration` sidebar/main/settings entry; the existing 协作网络 page remains the single operational console.

@@ -51,6 +51,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'subenvStatus', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'subenvTasks', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'memoryReveal', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingDetail', invocation: Object.freeze({ kind: 'direct' }) }),
@@ -147,6 +148,9 @@ export const Config = objectSchema({
     }),
     allowMemoryForget: boolean(false, {
       description: 'Allow the Web Remote memoryForget method. Default false: the Web Remote has no caller identity; an operator must opt in explicitly.',
+    }),
+    allowMemoryReveal: boolean(false, {
+      description: 'Allow the Web Remote memoryReveal method (one memory content at a time, explicit confirm + audit). Default false.',
     }),
     audit: boolean(true, { description: 'Append one JSONL audit row per Web delete/send under <db dir>/web-audit.jsonl (no body).' }),
   }), { description: 'Web message center (client half) configuration.' }),
@@ -836,6 +840,40 @@ function forgetMemory(rawArgs, options = {}) {
   }
 }
 
+/** Reveal exactly one memory body; explicit confirm + operator config + audit. */
+export function revealMemory(rawArgs, options = {}) {
+  const args = rawArgs !== null && typeof rawArgs === 'object' ? rawArgs : { id: rawArgs }
+  if (options.allow !== true) return { ok: false, code: 'REVEAL_DISABLED', error: 'web memoryReveal is disabled; operator must set webUi.allowMemoryReveal:true' }
+  if (args.confirm !== 'REVEAL') return { ok: false, code: 'CONFIRM_REQUIRED', error: 'memoryReveal requires confirm:"REVEAL"' }
+  const id = typeof args.id === 'string' ? args.id.trim() : ''
+  if (id === '') return { ok: false, code: 'INVALID_ARGUMENT', error: 'id is required' }
+  const path = memoryDbPath()
+  if (!existsSync(path)) return { ok: false, gone: true, code: 'NOT_FOUND', error: 'memory database not found' }
+  let db
+  try {
+    db = new DatabaseSync(path)
+    db.exec('PRAGMA busy_timeout = 5000')
+    const row = db.prepare('SELECT * FROM memories WHERE id=?').get(id)
+    if (row === undefined) return { ok: false, gone: true, code: 'NOT_FOUND', error: 'memory not found' }
+    try {
+      appendFileSync(join(dirname(path), 'reveal-audit.jsonl'), JSON.stringify({
+        at: nowIso(), actor: 'web-ui', id: row.id, scope: row.scope, key: row.key,
+      }) + '\n', 'utf8')
+    } catch { /* audit is best-effort; reveal still returns */ }
+    let tags = []
+    try { const parsed = JSON.parse(row.tags ?? '[]'); tags = Array.isArray(parsed) ? parsed : [] } catch { tags = [] }
+    return {
+      ok: true, id: row.id, scope: row.scope, key: row.key, content: row.content, tags,
+      sourceSession: row.source_session ?? null, createdAt: row.created_at, updatedAt: row.updated_at,
+      supersededBy: row.superseded_by ?? null, audit: 'reveal-audit.jsonl',
+    }
+  } catch (error) {
+    return { ok: false, code: 'REVEAL_FAILED', error: String(error?.message ?? error) }
+  } finally {
+    closeSnapshotDb(db)
+  }
+}
+
 /**
  * Resolve the session-network registry for the current profile: explicit env
  * overrides first, then the active profile's data dir, then the most recently
@@ -1359,6 +1397,7 @@ function normalizeConfig(config) {
       pageSize: Math.max(5, Math.min(100, Math.trunc(num(webUi.pageSize, 20)))),
       exposeBody: webUi.exposeBody === true,
       allowMemoryForget: webUi.allowMemoryForget === true,
+      allowMemoryReveal: webUi.allowMemoryReveal === true,
       audit: webUi.audit !== false,
     },
     subenv: {
@@ -2932,7 +2971,11 @@ export function apply(ctx, config) {
         }
         return embeddedSubenv.list()
       }
-      memoryPage(query) { return readMemoryPage(query) }
+      memoryPage(query) {
+        const page = readMemoryPage(query)
+        return { ...page, memories: page.memories.map(row => ({ ...row, content: undefined, redacted: true })) }
+      }
+      memoryReveal(query) { return revealMemory(query, { allow: cfg.webUi.allowMemoryReveal }) }
       memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }
       meetingsPage(query) { return readMeetingsPage(query) }
       meetingDetail(query) { return readMeetingDetail(query) }
