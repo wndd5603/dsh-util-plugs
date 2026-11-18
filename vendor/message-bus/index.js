@@ -636,9 +636,16 @@ function forgetMemory(rawArgs, options = {}) {
   try {
     db = new DatabaseSync(path)
     db.exec('PRAGMA busy_timeout = 5000')
+    const row = db.prepare('SELECT id,scope,key FROM memories WHERE id=?').get(id)
+    if (row === undefined) return { ok: false, gone: true, deleted: false, error: 'memory not found' }
     const result = db.prepare('DELETE FROM memories WHERE id=?').run(id)
     if (Number(result.changes) === 0) return { ok: false, gone: true, deleted: false, error: 'memory not found' }
-    return { ok: true, deleted: true, id }
+    try {
+      appendFileSync(join(dirname(path), 'forget-audit.jsonl'), JSON.stringify({
+        at: nowIso(), actor: 'web-ui', id: row.id, scope: row.scope, key: row.key,
+      }) + '\n', 'utf8')
+    } catch { /* audit must not resurrect the row */ }
+    return { ok: true, deleted: true, id, audit: 'forget-audit.jsonl' }
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) }
   } finally {

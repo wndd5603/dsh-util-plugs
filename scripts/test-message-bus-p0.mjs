@@ -152,7 +152,7 @@ test('message_read denies third parties and only marks authorized reads', async 
     },
   }
   try {
-    apply(ctx, { dbPath: join(dir, 'bus.sqlite'), strictMode: false, autoResume: false, legacyTools: true })
+    apply(ctx, { dbPath: join(dir, 'bus.sqlite'), strictMode: false, autoResume: false, legacyTools: true, allowPurge: true })
     const sent = await tools.get('message_send').execute(
       { to: TARGET, body: 'p0 body', subject: 'p0', priority: true },
       { agent: { session: { id: SENDER } } },
@@ -220,6 +220,15 @@ test('message_read denies third parties and only marks authorized reads', async 
     const asTarget = read.execute({ messageId: sent.messageId }, { agent: { session: { id: TARGET } } })
     assert.equal(asTarget.ok, true)
     assert.equal(status.execute().counts.unread, 0)
+
+    const purge = tools.get('message_purge')
+    assert.ok(purge, 'message_purge is registered when allowPurge=true')
+    const purged = purge.execute({ confirm: 'PURGE', all: true }, { agent: { session: { id: SENDER } } })
+    assert.equal(purged.ok, true)
+    assert.equal(purged.deletedMessages, 1)
+    const purgeAudit = join(dir, 'purge-audit.jsonl')
+    assert.ok(existsSync(purgeAudit))
+    assert.match(readFileSync(purgeAudit, 'utf8'), /deletedMessages/)
   } finally {
     for (const dispose of disposers.reverse()) dispose()
   }

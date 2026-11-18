@@ -1,3 +1,7 @@
+## 2026.11.17-15 (dev)
+
+- **Web forget audit + purge test**: the Web Remote `memoryForget` path now appends a body-free `forget-audit.jsonl` row; the enabled `message_purge` path is covered by a regression test asserting `purge-audit.jsonl`.
+
 ## 2026.11.17-14 (dev)
 
 - **Memory-forget operator identity**: `memory_forget` now requires `sandboxPolicy.resolve(session).mode === 'danger-full-access'` in addition to `allowForget:true`; a normal workspace-write session is FORBIDDEN even when the config flag is on.
