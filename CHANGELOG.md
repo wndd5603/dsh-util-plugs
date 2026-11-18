@@ -1,3 +1,7 @@
+## 2026.11.17-19 (dev)
+
+- **Collaboration Center shell**: a second sidebar entry (`collaboration`, order 3) with a six-card overview and tabs for inbox/tasks/meetings/memory/runtime/subenv; the page reads existing message/task/memory/meeting remotes, defaults to no body, and marks unavailable domains instead of showing fake zeros. A settings section is registered at order 25.
+
 ## 2026.11.17-18 (dev)
 
 - **Meeting action lifecycle**: `meeting_action_update` lets a participant/convener set one sidecar action's status/owner/due; completed/closed/cancelled actions stop appearing in `meeting_digest`, while the sidecar remains auditable.

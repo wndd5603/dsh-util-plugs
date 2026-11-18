@@ -2069,6 +2069,107 @@ function MessageCenterPage(props) {
     }) : null)
 }
 
+function CollaborationIcon(props) {
+  const size = typeof props.size === 'number' ? props.size : 18
+  return panel('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true', className: SIDEBAR_CLASS },
+    panel('rect', { x: 3, y: 3, width: 7, height: 7, rx: 1.5 }),
+    panel('rect', { x: 14, y: 3, width: 7, height: 7, rx: 1.5 }),
+    panel('rect', { x: 3, y: 14, width: 7, height: 7, rx: 1.5 }),
+    panel('path', { d: 'M14 17.5h7M17.5 14v7' }))
+}
+
+function collabValue(result) {
+  return result?.ok === true && result.value !== undefined ? result.value : result
+}
+
+const COLLAB_STYLE = {
+  page: { padding: '24px', height: '100%', overflow: 'auto', boxSizing: 'border-box' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' },
+  title: { margin: 0, fontSize: '22px', fontWeight: 600 },
+  subtitle: { margin: '4px 0 0', fontSize: '12.5px', opacity: 0.7 },
+  tabs: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '18px' },
+  tab: { appearance: 'none', border: '1px solid rgba(127,127,127,0.35)', background: 'transparent', color: 'inherit', borderRadius: '999px', padding: '6px 12px', fontSize: '12.5px', cursor: 'pointer' },
+  tabActive: { appearance: 'none', border: '1px solid rgba(79,140,255,0.9)', background: 'rgba(79,140,255,0.18)', color: 'inherit', borderRadius: '999px', padding: '6px 12px', fontSize: '12.5px', cursor: 'pointer', fontWeight: 600 },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginTop: '18px' },
+  card: { border: '1px solid rgba(127,127,127,0.28)', borderRadius: '12px', padding: '14px', background: 'rgba(127,127,127,0.06)' },
+  cardLabel: { fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' },
+  cardValue: { fontSize: '28px', fontWeight: 650, margin: '7px 0 2px' },
+  cardNote: { fontSize: '12px', opacity: 0.68, minHeight: '16px' },
+  error: { marginTop: '14px', padding: '9px 11px', borderRadius: '9px', border: '1px solid rgba(248,81,73,0.5)', background: 'rgba(248,81,73,0.10)', fontSize: '12.5px' },
+  empty: { marginTop: '18px', fontSize: '13px', opacity: 0.7 },
+}
+
+const COLLAB_TABS = [
+  ['overview', '总览'], ['inbox', '收件箱'], ['tasks', '任务'],
+  ['meetings', '会议'], ['memory', '记忆'], ['runtime', '运行与存储'], ['subenv', '子环境'],
+]
+
+function CollaborationPage(props) {
+  const { api } = props
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState(undefined)
+  const [cards, setCards] = React.useState([])
+  const [view, setView] = React.useState('overview')
+
+  const load = React.useCallback(async () => {
+    setLoading(true)
+    setError(undefined)
+    const [messages, tasks, memory, meetings] = await Promise.allSettled([
+      typeof api.list === 'function' ? api.list('', 1, 0) : Promise.reject(new Error('messages unavailable')),
+      typeof api.tasksPage === 'function' ? api.tasksPage({ limit: 1 }) : Promise.reject(new Error('tasks unavailable')),
+      typeof api.memoryPage === 'function' ? api.memoryPage({ limit: 1 }) : Promise.reject(new Error('memory unavailable')),
+      typeof api.meetingsPage === 'function' ? api.meetingsPage({ limit: 1 }) : Promise.reject(new Error('meetings unavailable')),
+    ])
+    const countOf = (result, keys) => {
+      if (result.status !== 'fulfilled') return { state: 'unavailable', count: null, note: '不可用' }
+      const value = collabValue(result.value) ?? {}
+      const count = typeof value.total === 'number' ? value.total : (Array.isArray(value[keys]) ? value[keys].length : 0)
+      return { state: count === 0 ? 'empty' : 'ready', count, note: count === 0 ? '无记录' : '已加载' }
+    }
+    const taskValue = tasks.status === 'fulfilled' ? (collabValue(tasks.value) ?? {}) : {}
+    const meetingValue = meetings.status === 'fulfilled' ? (collabValue(meetings.value) ?? {}) : {}
+    setCards([
+      { id: 'messages', label: '未读/消息', ...countOf(messages, 'items') },
+      { id: 'tasks', label: '任务', ...countOf(tasks, 'items'), note: taskValue.counts ? `stale ${taskValue.counts.stale ?? 0} · blocked ${taskValue.counts.blocked ?? 0}` : undefined },
+      { id: 'meetings', label: '会议 action', ...countOf(meetings, 'meetings'), note: typeof meetingValue.total === 'number' ? '摘要可用' : undefined },
+      { id: 'memory', label: '记忆', ...countOf(memory, 'memories') },
+      { id: 'runtime', label: '运行与存储', state: 'unavailable', count: null, note: 'Wave C' },
+      { id: 'subenv', label: '子环境', state: 'unavailable', count: null, note: '未配置' },
+    ])
+    setLoading(false)
+  }, [api])
+
+  React.useEffect(() => { void load() }, [load])
+
+  return panel('div', { style: COLLAB_STYLE.page },
+    panel('div', { style: COLLAB_STYLE.header },
+      panel('div', null,
+        panel('h1', { style: COLLAB_STYLE.title }, '协作中心'),
+        panel('p', { style: COLLAB_STYLE.subtitle }, '总览 · 证据 · 运行状态；默认脱敏，不显示正文。')),
+      panel('button', { type: 'button', style: style.button, onClick: () => { void load() }, disabled: loading }, loading ? '刷新中…' : '刷新')),
+    panel('div', { style: COLLAB_STYLE.tabs }, COLLAB_TABS.map(([id, label]) => panel('button', {
+      key: id, type: 'button', style: view === id ? COLLAB_STYLE.tabActive : COLLAB_STYLE.tab,
+      onClick: () => setView(id),
+    }, label))),
+    view === 'overview'
+      ? panel('div', { style: COLLAB_STYLE.grid }, cards.map(card => panel('div', { key: card.id, style: COLLAB_STYLE.card },
+        panel('div', { style: COLLAB_STYLE.cardLabel }, card.label),
+        panel('div', { style: COLLAB_STYLE.cardValue }, card.count === null ? '—' : String(card.count)),
+        panel('div', { style: COLLAB_STYLE.cardNote }, card.state === 'unavailable' ? '不可用' : (card.note ?? '')))))
+      : panel('div', { style: COLLAB_STYLE.empty }, `「${COLLAB_TABS.find(([id]) => id === view)?.[1] ?? view}」将在 Wave B/C 接入。`),
+    error !== undefined ? panel('div', { style: COLLAB_STYLE.error }, String(error)) : null)
+}
+
+function CollaborationSettings() {
+  return panel('div', { style: COLLAB_STYLE.page },
+    panel('h1', { style: COLLAB_STYLE.title }, '协作可见性'),
+    panel('p', { style: COLLAB_STYLE.subtitle }, '默认脱敏；operator reveal 将在后续 Wave 接入。'),
+    panel('ul', { style: { marginTop: '18px', lineHeight: 1.9, fontSize: '13px' } },
+      panel('li', null, '正文默认隐藏'),
+      panel('li', null, '危险操作仅 operator'),
+      panel('li', null, '子环境 token 不进入浏览器')))
+}
+
 function apply(ctx) {
   ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'message-bus client: dictionaries')
   ctx.effect(() => {
@@ -2141,6 +2242,30 @@ function apply(ctx) {
         if (typeof disposeSidebar === 'function') disposeSidebar()
       }
     }, 'message-bus client: panels')
+    ctx.effect(() => {
+      const disposeSidebar = scope.slots.inject('sidebar.panellist', () => scope.slots.register({
+        name: 'sidebar.panellist',
+        id: 'collaboration',
+        order: 3,
+        label: () => '协作中心',
+      }, CollaborationIcon))
+      const disposeMain = scope.slots.inject('main', () => scope.slots.register({
+        name: 'main',
+        key: 'collaboration',
+        inject: () => ({ api }),
+      }, CollaborationPage))
+      const disposeSettings = scope.slots.inject('settings.section', () => scope.slots.register({
+        name: 'settings.section',
+        id: 'collaboration-settings',
+        order: 25,
+        label: () => '协作可见性',
+      }, CollaborationSettings))
+      return () => {
+        if (typeof disposeSettings === 'function') disposeSettings()
+        if (typeof disposeMain === 'function') disposeMain()
+        if (typeof disposeSidebar === 'function') disposeSidebar()
+      }
+    }, 'message-bus client: collaboration center')
   })
 }
 
