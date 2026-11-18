@@ -1,3 +1,7 @@
+## 2026.11.17-44 (dev)
+
+- **Recall safety**: `collaboration_recall` now excludes completed/terminated tasks from assigned counts/rows and returns only basenames for task workspace and lease workDir; the brief text points at `collaboration_recall()`.
+
 ## 2026.11.17-43 (dev)
 
 - **Collaboration recall**: `collaboration_recall` (alias of `apartment_collaboration_brief`) now includes read-only identity/roles, aliases, tasks, leases, memory keys (no bodies), and the artifact pointer; memory bodies still require `memory_search`.

@@ -307,7 +307,7 @@ const bulletinTask = row => ({
   status: row.status ?? null,
   assigneeSession: row.assignee_session ?? null,
   assigneeAlias: row.assignee_alias ?? null,
-  workspace: row.workspace ?? null,
+  workspace: isNonEmptyString(row.workspace) ? basename(row.workspace) : null,
   priority: row.priority ?? 0,
   updatedAt: row.updated_at ?? null,
   createdAt: row.created_at ?? null,
@@ -359,7 +359,7 @@ export function readBulletinTasks({ sessionIds = [], aliases = [], taskId, board
       }
       params.push(...filterParams)
       const limit = BRIEF_LIMITS.tasks + 1
-      const scopeSql = `FROM tasks WHERE (${where.join(' OR ')})${filterSql}`
+      const scopeSql = `FROM tasks WHERE (${where.join(' OR ')}) AND status NOT IN ('completed','terminated')${filterSql}`
       result.total = Number(opened.db.prepare('SELECT COUNT(*) AS n ' + scopeSql).get(...params).n)
       const sql = `SELECT id, board_id, title, status, assignee_session, assignee_alias,
           workspace, priority, updated_at, created_at
@@ -479,8 +479,8 @@ const leaseRow = row => {
   return {
     id: row.id,
     agentId: row.agent_id,
-    workspace: row.workspace,
-    workDir: row.work_dir,
+    workspace: isNonEmptyString(row.workspace) ? basename(row.workspace) : null,
+    workDir: isNonEmptyString(row.work_dir) ? basename(row.work_dir) : null,
     taskId: row.task_id ?? null,
     state: row.state,
     expiresAt,
@@ -512,8 +512,9 @@ const briefText = (agentId, counts) => '[collab] agent=' + agentId
   + ' roles=' + counts.roles
   + ' aliases=' + counts.aliases
   + ' tasks=' + counts.tasks
+  + ' memory=' + (counts.memory ?? 0)
   + ' warnings=' + counts.warnings
-  + '; apartment_collaboration_brief()'
+  + '; collaboration_recall()'
 
 /**
  * Read-only Collaboration Brief for one session.
