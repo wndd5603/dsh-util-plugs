@@ -141,6 +141,15 @@ function createRemoteContribution() {
         result: identityCodec('dsh-message-bus#messageBus/subenvStatus:result'),
       },
       {
+        id: 'dsh-message-bus/messageBus/subenvTasks',
+        service: REMOTE_SERVICE,
+        namespace: REMOTE_NAMESPACE,
+        method: 'subenvTasks',
+        invocation: { kind: 'direct' },
+        parameters: [],
+        result: identityCodec('dsh-message-bus#messageBus/subenvTasks:result'),
+      },
+      {
         id: 'dsh-message-bus/messageBus/memoryPage',
         service: REMOTE_SERVICE,
         namespace: REMOTE_NAMESPACE,
@@ -1657,6 +1666,61 @@ function MeetingsSection(props) {
     message === undefined ? null : panel('p', { className: 'mb-feedback', 'data-tone': message.tone === 'danger' ? 'danger' : 'ok', role: 'status' }, message.text))
 }
 
+function SubenvSection({ api }) {
+  const [status, setStatus] = React.useState(undefined)
+  const [tasks, setTasks] = React.useState([])
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState(undefined)
+
+  const load = React.useCallback(async () => {
+    if (typeof api.subenvStatus !== 'function') return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const rawStatus = collabValue(await api.subenvStatus())
+      setStatus(rawStatus)
+      if (typeof api.subenvTasks === 'function') {
+        const rawTasks = collabValue(await api.subenvTasks())
+        setTasks(rawTasks?.ok === false ? [] : (rawTasks?.tasks ?? []))
+        if (rawTasks?.ok === false) setError(rawTasks.code ?? 'TASKS_UNAVAILABLE')
+      }
+    } catch (caught) {
+      setError(errorTextOf(caught))
+    } finally {
+      setBusy(false)
+    }
+  }, [api])
+
+  React.useEffect(() => { void load() }, [load])
+
+  const provider = status?.provider ?? {}
+  return panel('section', { 'data-subenv': '', className: 'mb-card' },
+    panel('div', { className: 'mb-cardHead' },
+      panel('div', null,
+        panel('h2', { className: 'mb-cardTitle' }, 'Subenv'),
+        panel('p', { className: 'mb-cardSub' }, '嵌入式子环境：状态、provider 与任务内容（宿主进程内，无端口/token）')),
+      panel('div', { className: 'mb-actionRow' },
+        panel('span', { className: 'mb-pill', 'data-status': status?.state ?? 'unknown' }, status?.state ?? 'unknown'),
+        panel('button', { type: 'button', className: 'mb-chipButton', disabled: busy, onClick: () => { void load() } }, busy ? '加载中…' : '刷新'))),
+    status === undefined ? panel('p', { className: 'mb-muted' }, '正在探测 Subenv…') : null,
+    status !== undefined ? panel('div', { className: 'mb-taskMeta' },
+      panel('span', null, `mode ${status.mode ?? 'embedded'}`),
+      panel('span', null, `provider ${provider.llmEnabled === true ? 'on' : 'off'}`),
+      provider.model !== null && provider.model !== undefined ? panel('span', null, provider.model) : null,
+      panel('span', null, `tasks ${Array.isArray(status.tasks) ? status.tasks.length : 0}`)) : null,
+    status?.state === 'degraded' ? panel('p', { className: 'mb-feedback', 'data-tone': 'danger' }, 'Provider 未启用：可查看状态，但不能提交任务。') : null,
+    error !== undefined ? panel('p', { className: 'mb-feedback', 'data-tone': 'danger' }, error) : null,
+    tasks.length === 0
+      ? panel('p', { className: 'mb-muted', style: { marginTop: 8 } }, '暂无任务内容。')
+      : panel('div', { className: 'mb-taskList' }, tasks.map(task => panel('article', { key: task.id, className: 'mb-task' },
+        panel('div', { className: 'mb-taskTitle' },
+          panel('span', null, task.id),
+          panel('span', { className: 'mb-pill', 'data-status': task.status }, task.status)),
+        task.result !== undefined && task.result !== null
+          ? panel('pre', { style: { whiteSpace: 'pre-wrap', margin: '8px 0 0', fontSize: '12.5px', lineHeight: 1.6 } }, String(task.result))
+          : (task.error !== undefined ? panel('p', { className: 'mb-muted' }, String(task.error)) : null)))))
+}
+
 function MessageCenterPage(props) {
   const { t, api } = props
   const [loading, setLoading] = React.useState(true)
@@ -2027,6 +2091,7 @@ function MessageCenterPage(props) {
       onPage: next => { void loadMeetings({ page: Math.max(0, Math.min(meetingPages - 1, next)) }) },
       onOpen: id => { void openMeetingDetail(id) },
     }),
+    panel(SubenvSection, { api }),
     panel('form', { style: style.toolbar, onSubmit: search },
       panel('input', {
         type: 'search',
@@ -2397,6 +2462,7 @@ function apply(ctx) {
       visibilityPage: query => scope.remote.messageBus.visibilityPage(query),
       visibilityDetail: query => scope.remote.messageBus.visibilityDetail(query),
       subenvStatus: () => scope.remote.messageBus.subenvStatus(),
+      subenvTasks: () => scope.remote.messageBus.subenvTasks(),
       memoryPage: query => scope.remote.messageBus.memoryPage(query),
       memoryForget: query => scope.remote.messageBus.memoryForget(query),
       meetingsPage: query => scope.remote.messageBus.meetingsPage(query),
@@ -2425,30 +2491,6 @@ function apply(ctx) {
         if (typeof disposeSidebar === 'function') disposeSidebar()
       }
     }, 'message-bus client: panels')
-    ctx.effect(() => {
-      const disposeSidebar = scope.slots.inject('sidebar.panellist', () => scope.slots.register({
-        name: 'sidebar.panellist',
-        id: 'collaboration',
-        order: 3,
-        label: () => '协作中心',
-      }, CollaborationIcon))
-      const disposeMain = scope.slots.inject('main', () => scope.slots.register({
-        name: 'main',
-        key: 'collaboration',
-        inject: () => ({ api }),
-      }, CollaborationPage))
-      const disposeSettings = scope.slots.inject('settings.section', () => scope.slots.register({
-        name: 'settings.section',
-        id: 'collaboration-settings',
-        order: 25,
-        label: () => '协作可见性',
-      }, CollaborationSettings))
-      return () => {
-        if (typeof disposeSettings === 'function') disposeSettings()
-        if (typeof disposeMain === 'function') disposeMain()
-        if (typeof disposeSidebar === 'function') disposeSidebar()
-      }
-    }, 'message-bus client: collaboration center')
   })
 }
 			return { apply, inject }

@@ -1,3 +1,9 @@
+## 2026.11.17-36 (dev)
+
+- **Single collaboration tab**: removed the duplicate `collaboration` sidebar/main/settings entry; the existing 协作网络 page remains the single operational console.
+- **Subenv section**: 协作网络 now includes an embedded Subenv card with status/provider and task results/conversation content.
+- **Legacy detail restored**: Web `tasksPage/taskDetail/memoryPage/meetingDetail` return full content again for the operational console; the new visibility API remains the redacted read-only layer.
+
 ## 2026.11.17-35 (dev)
 
 - **Subenv visibility**: visibilitySummary now surfaces embedded subenv state/mode/provider (degraded = partial) and the collaboration overview shows the mode/provider note; the Subenv row renders its meta instead of only "degraded".

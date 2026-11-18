@@ -49,6 +49,7 @@ const WEB_REMOTE_METHODS = Object.freeze([
   Object.freeze({ method: 'visibilityPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'visibilityDetail', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'subenvStatus', invocation: Object.freeze({ kind: 'direct' }) }),
+  Object.freeze({ method: 'subenvTasks', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryPage', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'memoryForget', invocation: Object.freeze({ kind: 'direct' }) }),
   Object.freeze({ method: 'meetingsPage', invocation: Object.freeze({ kind: 'direct' }) }),
@@ -2860,16 +2861,8 @@ export function apply(ctx, config) {
       get(messageId, readBy, markRead) { return remoteGet(messageId, readBy, markRead) }
       delete(messageId, confirm) { return remoteDeleteTask(messageId, confirm) }
       send(to, subject, body, from) { return remoteSendTask(to, subject, body, from) }
-      tasksPage(query) {
-        const page = readTasksPage(query)
-        return { ...page, tasks: page.tasks.map(safeTaskView).filter(Boolean) }
-      }
-      taskDetail(query) {
-        const detail = readTaskDetail(query)
-        if (detail?.ok === false) return detail
-        const task = safeTaskView(detail?.task ?? detail)
-        return { ...detail, task, redacted: ['description', 'metadata'] }
-      }
+      tasksPage(query) { return readTasksPage(query) }
+      taskDetail(query) { return readTaskDetail(query) }
       visibilitySummary(query) {
         return visibilitySummaryOf({
           messageCounts: store.counts(), tasks: readTasksPage({ limit: 1 }),
@@ -2933,13 +2926,16 @@ export function apply(ctx, config) {
         }
         return embeddedSubenv.status()
       }
-      memoryPage(query) {
-        const page = readMemoryPage(query)
-        return { ...page, memories: page.memories.map(row => ({ ...row, content: undefined, redacted: true })) }
+      subenvTasks() {
+        if (cfg.subenv.mode === 'external') {
+          return { ok: false, code: 'TASKS_UNAVAILABLE', message: 'external subenv has no task detail RPC' }
+        }
+        return embeddedSubenv.list()
       }
+      memoryPage(query) { return readMemoryPage(query) }
       memoryForget(query) { return forgetMemory(query, { allow: cfg.webUi.allowMemoryForget }) }
       meetingsPage(query) { return readMeetingsPage(query) }
-      meetingDetail(query) { return redactBodyFields(readMeetingDetail(query)) }
+      meetingDetail(query) { return readMeetingDetail(query) }
       networkPage(query) { return readNetworkPage(query) }
       messageAudit(query) { return readMessageAudit(store, query) }
       auditPage(query) { return readAuditPage(query) }

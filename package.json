@@ -1,6 +1,6 @@
 {
   "name": "dsh-util-plugs",
-  "version": "2026.11.17-35",
+  "version": "2026.11.17-36",
   "private": true,
   "description": "Self-contained DeepSeek Harness bundle with context sentinel, message/team buses, bulletin-board task board, agent apartment, persistent agent memory, agent workflows, workbench, auto backup, safe host relaunch and a unified plugin console (eleven switchable rows).",
   "author": "wndd5603 <2863689939@qq.com>",
