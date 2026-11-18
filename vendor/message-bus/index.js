@@ -664,6 +664,8 @@ export function visibilitySummaryOf({
     workspaceId: workspaceId.trim(),
     generatedAt: now,
     version: 'v1',
+    scopeMode: 'single-profile',
+    warnings: ['db-scope-not-enforced'],
     cards: {
       messages: card(messageCounts, messageCounts?.messages ?? 0, { unread: messageCounts?.unread ?? 0 }),
       tasks: card(tasks, tasks?.total ?? 0, { stale: taskCounts.stale ?? 0, blocked: taskCounts.blocked ?? 0 }),

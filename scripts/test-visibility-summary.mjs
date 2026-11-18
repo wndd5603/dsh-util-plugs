@@ -19,6 +19,8 @@ test('visibility summary maps ready/empty/unavailable without bodies', () => {
     subenv: null,
   })
   assert.equal(ready.ok, true)
+  assert.equal(ready.scopeMode, 'single-profile')
+  assert.deepEqual(ready.warnings, ['db-scope-not-enforced'])
   assert.equal(ready.cards.messages.state, 'ready')
   assert.equal(ready.cards.messages.unread, 1)
   assert.equal(ready.cards.tasks.stale, 1)

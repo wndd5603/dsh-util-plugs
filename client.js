@@ -2282,7 +2282,7 @@ function CollaborationPage(props) {
     panel('div', { style: COLLAB_STYLE.header },
       panel('div', null,
         panel('h1', { style: COLLAB_STYLE.title }, '协作中心'),
-        panel('p', { style: COLLAB_STYLE.subtitle }, '总览 · 证据 · 运行状态；默认脱敏，不显示正文。')),
+        panel('p', { style: COLLAB_STYLE.subtitle }, '总览 · 证据 · 运行状态；默认脱敏，不显示正文。单 profile 模式：profile/workspace 仅作关联，不做数据库隔离。')),
       panel('button', { type: 'button', style: style.button, onClick: () => { void load() }, disabled: loading }, loading ? '刷新中…' : '刷新')),
     panel('div', { style: COLLAB_STYLE.tabs }, COLLAB_TABS.map(([id, label]) => panel('button', {
       key: id, type: 'button', style: view === id ? COLLAB_STYLE.tabActive : COLLAB_STYLE.tab,

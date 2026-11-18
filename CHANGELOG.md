@@ -1,3 +1,7 @@
+## 2026.11.17-25 (dev)
+
+- **Explicit single-profile scope**: `visibilitySummary` now returns `scopeMode:"single-profile"` and `warnings:["db-scope-not-enforced"]`; the UI states this limitation instead of implying multi-profile isolation. MF-3 remains a WARN until a host scope API exists.
+
 ## 2026.11.17-24 (dev)
 
 - **Visibility review fixes**: task page rows now strip `description`/`metadata` via `safeTaskView`; task evidence is read from `detail.task.metadata.completion.evidence`; Overview now consumes `visibilitySummary` and shows its as-of.
