@@ -158,9 +158,22 @@ export function apply(ctx) {
     return store.claimTask(args.taskId, { session: args.assigneeSession ?? a.session, alias: args.assigneeAlias ?? a.alias }, exec, { operator: isOperator(exec) })
   })
 
-  register(describe('bulletin_task_complete', 'Mark a task completed. Only the assignee (or, for legacy unassigned '
-    + 'tasks, the creator) may complete it; danger-full-access operators may override.', { taskId: str('Task id.') }, ['taskId']),
-  async (args, exec) => store.completeTask(args.taskId, exec, { operator: isOperator(exec) }))
+  register(describe('bulletin_task_complete', 'Mark a task completed with artifact evidence. Only the assignee (or, for legacy unassigned '
+    + 'tasks, the creator) may complete it; danger-full-access operators may override. Evidence {artifactId, sha256 (64 hex), checkResult} is required.', {
+    taskId: str('Task id.'),
+    evidence: {
+      type: 'object',
+      description: 'Completion evidence; required. sha256 must be a 64-char hex digest.',
+      properties: {
+        artifactId: str('Artifact identifier/path/hash key.'),
+        sha256: str('SHA-256 of the artifact (64 hex chars).'),
+        checkResult: str('Human/machine-readable verification result, e.g. PASS or a check summary.'),
+      },
+      required: ['artifactId', 'sha256', 'checkResult'],
+      additionalProperties: false,
+    },
+  }, ['taskId', 'evidence']),
+  async (args, exec) => store.completeTask(args.taskId, exec, { operator: isOperator(exec), evidence: args.evidence }))
 
   register(describe('bulletin_digest', 'Read-only recall digest of tasks related to the caller (assignee, workspace, '
     + 'or explicit session/alias) that are blocked or stale. Stale is an SLA measured from updated_at; the board has '

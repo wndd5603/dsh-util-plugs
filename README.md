@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-2 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-3 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,9 +22,11 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-2 (dev)
+### What is new in 2026.11.17-3 (dev)
 
 - **Message-bus P0 hardening**: `message_read` now allows only the recipient or sender and returns FORBIDDEN for a missing/third-party caller; wake envelopes are typed `source.kind:'peer-message'` with sender identity; `message_bus_status` exposes `counts.unread`, and the pending reminder also fires for unread messages.
+- **Task completion evidence**: `bulletin_task_complete` requires `{artifactId, sha256, checkResult}`; completion state and event are transactional, and `bulletin_task_update` cannot set `status=completed`.
+- **Workbench self-report**: `workbench_status` reports the installed `dsh-util-plugs` bundle itself.
 
 ### What was new in 2026.11.17-1 (dev)
 
@@ -61,7 +63,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | Unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-2; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-3; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -111,9 +113,11 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
-### 2026.11.17-2 新增
+### 2026.11.17-3 新增
 
 - **消息总线 P0 加固**：`message_read` 只允许收件人或发件人读取，缺失/第三方 session 返回 FORBIDDEN；唤醒 envelope 使用 `source.kind:'peer-message'` 并带发送者身份；`message_bus_status` 增加 `counts.unread`，pending reminder 也对未读消息触发。
+- **任务完成证据**：`bulletin_task_complete` 要求 `{artifactId, sha256, checkResult}`，状态与事件同事务；`bulletin_task_update` 不能再直接设 `status=completed`。
+- **工作台自报**：`workbench_status` 会报告已安装的 `dsh-util-plugs` 自身。
 
 ### 2026.11.17-1 新增
 
@@ -150,7 +154,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-2，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-3，各插件保留自己的版本号。
 
 ### Web 界面
 

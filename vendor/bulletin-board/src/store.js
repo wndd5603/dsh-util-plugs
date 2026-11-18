@@ -242,6 +242,29 @@ export function createStore(dbPath, options = {}) {
   const event = (actor, action, entity, entityId, detail) => db.prepare(
     'INSERT INTO events (at, actor, action, entity, entity_id, detail) VALUES (?,?,?,?,?,?)',
   ).run(now(), actor, action, entity, entityId, detail === undefined ? null : json(detail))
+
+  /**
+   * P0-4: completion must identify the artifact that proves it. Keep this
+   * strict and stable: a caller cannot complete a task by prose consensus.
+   */
+  const completionEvidenceOf = (value) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw codedError('INVALID_ARGUMENT', 'completeTask: evidence {artifactId, sha256, checkResult} is required')
+    }
+    const artifactId = typeof value.artifactId === 'string' ? value.artifactId.trim() : ''
+    const sha256 = typeof value.sha256 === 'string' ? value.sha256.trim().toLowerCase() : ''
+    const checkResult = typeof value.checkResult === 'string' ? value.checkResult.trim() : ''
+    if (artifactId === '' || artifactId.length > 200) {
+      throw codedError('INVALID_ARGUMENT', 'completeTask: evidence.artifactId must be 1..200 chars')
+    }
+    if (!/^[a-f0-9]{64}$/u.test(sha256)) {
+      throw codedError('INVALID_ARGUMENT', 'completeTask: evidence.sha256 must be a 64-char hex digest')
+    }
+    if (checkResult === '' || checkResult.length > 120) {
+      throw codedError('INVALID_ARGUMENT', 'completeTask: evidence.checkResult must be 1..120 chars')
+    }
+    return { artifactId, sha256, checkResult }
+  }
   return {
     db,
     close: () => db.close(),
@@ -324,10 +347,11 @@ export function createStore(dbPath, options = {}) {
         throw codedError('FORBIDDEN', 'updateTask: only the assignee, creator, or an operator may update this task')
       }
       assertStatus(patch.status)
-      // P1-1: creator ownership is not a completion bypass. `status=completed`
-      // follows the same assignee-only boundary as completeTask.
-      if (patch.status === 'completed' && !operator && !isAssignee(existing, exec)) {
-        throw codedError('FORBIDDEN', 'updateTask: status=completed is assignee-only; claim the task first or ask an operator to override')
+      // P0-4: completed is only reachable through bulletin_task_complete,
+      // which requires artifact evidence. The generic update path cannot be a
+      // completion shortcut.
+      if (patch.status === 'completed') {
+        throw codedError('FORBIDDEN', 'updateTask: use bulletin_task_complete with {artifactId, sha256, checkResult} evidence')
       }
       // P1-1: reassignment is an explicit operator action, so a creator cannot
       // hand a task to another session as a completion shortcut.
@@ -460,6 +484,7 @@ export function createStore(dbPath, options = {}) {
     completeTask(id, exec = {}, options = {}) {
       const existing = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
       if (existing === undefined) throw codedError('NOT_FOUND', 'task not found: ' + id)
+      const evidence = completionEvidenceOf(options.evidence)
       const caller = actorOf(exec)
       const callerAlias = actorAliasOf(exec)
       if (options.operator !== true) {
@@ -488,15 +513,25 @@ export function createStore(dbPath, options = {}) {
           taskCode: 'CONFLICT', currentStatus: existing.status, currentTask: rowTask(existing),
         })
       }
-      const result = db.prepare(`UPDATE tasks SET status='completed', updated_at=?, revision=revision+1
-        WHERE id=? AND revision=? AND status IN (?,?,?,?)`).run(now(), id, existing.revision, ...COMPLETABLE_STATUSES)
-      if (result.changes === 0) {
-        const current = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
-        throw codedError('CONFLICT', 'revision changed concurrently', {
-          taskCode: 'CONFLICT', currentRevision: current === undefined ? null : Number(current.revision), currentTask: rowTask(current),
-        })
+      const completedAt = now()
+      const metadata = parse(existing.metadata) ?? {}
+      metadata.completion = { at: completedAt, by: caller, evidence }
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const result = db.prepare(`UPDATE tasks SET status='completed', metadata=?, updated_at=?, revision=revision+1
+          WHERE id=? AND revision=? AND status IN (?,?,?,?)`).run(json(metadata), completedAt, id, existing.revision, ...COMPLETABLE_STATUSES)
+        if (result.changes === 0) {
+          const current = db.prepare('SELECT * FROM tasks WHERE id=?').get(id)
+          throw codedError('CONFLICT', 'revision changed concurrently', {
+            taskCode: 'CONFLICT', currentRevision: current === undefined ? null : Number(current.revision), currentTask: rowTask(current),
+          })
+        }
+        event(caller, 'task.complete', 'task', id, { evidence })
+        db.exec('COMMIT')
+      } catch (error) {
+        try { db.exec('ROLLBACK') } catch { /* best effort */ }
+        throw error
       }
-      event(actorOf(exec), 'task.complete', 'task', id)
       return rowTask(db.prepare('SELECT * FROM tasks WHERE id=?').get(id))
     },
     digest(query = {}) {
