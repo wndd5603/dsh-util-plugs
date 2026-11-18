@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS memories (
   source_session TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  superseded_by TEXT,
   UNIQUE(scope, key)
 );
 CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope, updated_at);
@@ -297,6 +298,12 @@ export function apply(ctx, config) {
   mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(file)
   db.exec(schema)
+  {
+    const columns = db.prepare('PRAGMA table_info(memories)').all()
+    if (!columns.some(column => column.name === 'superseded_by')) {
+      db.exec('ALTER TABLE memories ADD COLUMN superseded_by TEXT')
+    }
+  }
   ctx.effect(() => () => db.close())
   const register = (descriptor, execute) => ctx.tools.register({ ...descriptor, execute })
   const sessionOf = exec => exec?.agent?.session?.id ?? null
@@ -333,27 +340,47 @@ export function apply(ctx, config) {
     return { ok: true, id, updated: false, quality }
   })
 
-  register(desc('memory_search', 'Search durable memories by LIKE over content/key/tags.', {
-    query: str('Search text; empty lists recent.'), scope: str('Optional scope filter.'), limit: num('Max rows (default 20).'),
+  register(desc('memory_supersede', 'Create a replacement memory and mark the old one superseded. The old row is retained for audit; default search/list hide it.', {
+    id: str('Memory id to supersede.'), content: str('Replacement memory text.'), tags: { type: 'array', items: { type: 'string' }, description: 'Optional replacement tags.' },
+  }, ['id', 'content']), async (args, exec) => {
+    const old = db.prepare('SELECT * FROM memories WHERE id=?').get(args.id)
+    if (old === undefined) return { ok: false, code: 'NOT_FOUND', message: 'memory not found: ' + args.id }
+    if (old.superseded_by !== null && old.superseded_by !== undefined) return { ok: false, code: 'CONFLICT', message: 'memory already superseded by ' + old.superseded_by }
+    const content = String(args.content ?? '')
+    if (content.trim() === '') return { ok: false, code: 'INVALID_ARGUMENT', message: 'content is required' }
+    const id = 'mem-' + randomUUID().slice(0, 8)
+    const key = typeof old.key === 'string' && old.key !== '' ? old.key + '#superseded-' + id : null
+    const tags = JSON.stringify(Array.isArray(args.tags) ? args.tags : safeTags(old.tags))
+    db.prepare('INSERT INTO memories (id,scope,key,content,tags,source_session,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, old.scope, key, content, tags, sessionOf(exec), now(), now())
+    db.prepare('UPDATE memories SET superseded_by=? WHERE id=?').run(id, old.id)
+    return { ok: true, id, superseded: old.id, key, supersededBy: id }
+  })
+
+  register(desc('memory_search', 'Search durable memories by LIKE over content/key/tags. Superseded rows are hidden unless includeSuperseded=true.', {
+    query: str('Search text; empty lists recent.'), scope: str('Optional scope filter.'), includeSuperseded: { type: 'boolean', description: 'Include superseded rows (default false).' }, limit: num('Max rows (default 20).'),
   }), async args => {
     const query = String(args.query ?? '').trim()
     const scope = typeof args.scope === 'string' && args.scope !== '' ? args.scope : null
     const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(100, Number(args.limit))) : 20
     const like = '%' + query.replace(/[\\%_]/g, '\\$&') + '%'
+    const include = args.includeSuperseded === true
+    const active = include ? '1=1' : 'superseded_by IS NULL'
     const rows = scope === null
-      ? db.prepare("SELECT * FROM memories WHERE content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?").all(like, like, like, limit)
-      : db.prepare("SELECT * FROM memories WHERE scope=? AND (content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT ?").all(scope, like, like, like, limit)
+      ? db.prepare(`SELECT * FROM memories WHERE ${active} AND (content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT ?`).all(like, like, like, limit)
+      : db.prepare(`SELECT * FROM memories WHERE scope=? AND ${active} AND (content LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT ?`).all(scope, like, like, like, limit)
     return { ok: true, memories: rows.map(row => ({ ...row, tags: safeTags(row.tags) })) }
   })
 
-  register(desc('memory_list', 'List durable memories, newest first.', {
-    scope: str('Optional scope filter.'), limit: num('Max rows (default 50).'),
+  register(desc('memory_list', 'List durable memories, newest first. Superseded rows are hidden unless includeSuperseded=true.', {
+    scope: str('Optional scope filter.'), includeSuperseded: { type: 'boolean', description: 'Include superseded rows (default false).' }, limit: num('Max rows (default 50).'),
   }), async args => {
     const scope = typeof args.scope === 'string' && args.scope !== '' ? args.scope : null
     const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(200, Number(args.limit))) : 50
+    const active = args.includeSuperseded === true ? '1=1' : 'superseded_by IS NULL'
     const rows = scope === null
-      ? db.prepare('SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?').all(limit)
-      : db.prepare('SELECT * FROM memories WHERE scope=? ORDER BY updated_at DESC LIMIT ?').all(scope, limit)
+      ? db.prepare(`SELECT * FROM memories WHERE ${active} ORDER BY updated_at DESC LIMIT ?`).all(limit)
+      : db.prepare(`SELECT * FROM memories WHERE scope=? AND ${active} ORDER BY updated_at DESC LIMIT ?`).all(scope, limit)
     return { ok: true, memories: rows.map(row => ({ ...row, tags: safeTags(row.tags) })) }
   })
 

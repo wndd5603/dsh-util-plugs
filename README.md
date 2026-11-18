@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-15 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-16 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,8 +22,9 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-15 (dev)
+### What is new in 2026.11.17-16 (dev)
 
+- **Memory supersede**: `memory_supersede` keeps the old row as an audit trail, marks `superseded_by`, and hides it from default search/list; `includeSuperseded:true` shows it.
 - **Web forget audit + purge test**: Web `memoryForget` writes a body-free audit row; the enabled `message_purge` path has a regression test for `purge-audit.jsonl`.
 - **Memory-forget operator identity**: `memory_forget` requires `allowForget:true` **and** a danger-full-access sandbox policy; workspace-write sessions are FORBIDDEN.
 - **Purge tombstone**: `message_purge` writes a body-free `purge-audit.jsonl` tombstone; `allowPurge:false` remains the default.
@@ -77,7 +78,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | Unified plugin console with cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-15; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-16; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -127,8 +128,9 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
-### 2026.11.17-15 新增
+### 2026.11.17-16 新增
 
+- **记忆 supersede**：`memory_supersede` 保留旧行作审计并写 `superseded_by`；默认 search/list 隐藏，`includeSuperseded:true` 可查。
 - **Web 删除审计 + purge 测试**：Web `memoryForget` 写无正文审计；启用 `message_purge` 路径有 `purge-audit.jsonl` 回归测试。
 - **记忆删除 operator 身份**：`memory_forget` 需 `allowForget:true` **且** sandbox policy 为 danger-full-access；workspace-write 直接 FORBIDDEN。
 - **purge tombstone**：`message_purge` 返回前写无正文 `purge-audit.jsonl`；`allowPurge:false` 仍是默认。
@@ -182,7 +184,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-15，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-16，各插件保留自己的版本号。
 
 ### Web 界面
 

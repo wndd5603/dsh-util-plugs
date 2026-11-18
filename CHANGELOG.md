@@ -1,3 +1,7 @@
+## 2026.11.17-16 (dev)
+
+- **Memory supersede**: `memory_supersede` inserts a replacement row under a derived audit key and sets the old row's `superseded_by`; `memory_search`/`memory_list` hide superseded rows by default and expose them with `includeSuperseded:true`. The old row is retained, never silently overwritten.
+
 ## 2026.11.17-15 (dev)
 
 - **Web forget audit + purge test**: the Web Remote `memoryForget` path now appends a body-free `forget-audit.jsonl` row; the enabled `message_purge` path is covered by a regression test asserting `purge-audit.jsonl`.
