@@ -1895,6 +1895,13 @@ export function apply(ctx, config) {
       fromDisplay, toSession: target.sessionId, subject, body, bytes, sha256: sha,
       dedupeKey, nonce, forced: force, priority, test, projectScope,
     })
+    try {
+      appendFileSync(join(dirname(cfg.dbPath), 'send-audit.jsonl'), JSON.stringify({
+        at, actor: caller.sessionId, to: target.sessionId, messageId,
+        subject: truncate(subject, 120), bytes, sha256: sha, priority, test,
+        projectScope, targetState: resolvedTargetState,
+      }) + '\n', 'utf8')
+    } catch { /* audit is best-effort; never fail an accepted message */ }
     if (agent === undefined) {
       const expiresAt = expiresFor(deliveryState)
       store.insertDelivery({

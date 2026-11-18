@@ -3,7 +3,7 @@
 // absence detection. Uses only a temporary SQLite DB; never touches the real bus.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -163,6 +163,11 @@ test('message_read denies third parties and only marks authorized reads', async 
     assert.equal(wakes[0].source.kind, 'peer-message')
     assert.equal(wakes[0].source.fromSession, SENDER)
     assert.match(wakes[0].content[0].text, new RegExp(sent.messageId))
+    const sendAudit = join(dir, 'send-audit.jsonl')
+    assert.ok(existsSync(sendAudit))
+    const auditText = readFileSync(sendAudit, 'utf8')
+    assert.match(auditText, new RegExp(sent.messageId))
+    assert.doesNotMatch(auditText, /p0 body/)
 
     const read = tools.get('message_read')
     const status = tools.get('message_bus_status')

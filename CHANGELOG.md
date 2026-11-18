@@ -1,3 +1,7 @@
+## 2026.11.17-10 (dev)
+
+- **Send audit**: every accepted `message_send` appends one body-free row to `send-audit.jsonl` (actor, target, messageId, subject, bytes, sha256, priority/test/projectScope, targetState). This closes the 0-send-audit gap without changing delivery semantics.
+
 ## 2026.11.17-9 (dev)
 
 - **Caller-scoped job reaper**: `job_reap` lists only the calling session's live jobs older than `staleMs` (default 15 min); it is dry-run by default, and `dryRun:false` + `confirm:"REAP"` requests cancellation for exactly those jobs. This is a real reaper, not only a digest warning.
