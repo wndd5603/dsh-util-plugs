@@ -1,3 +1,7 @@
+## 2026.11.17-81 (dev)
+
+- **Version caveat**: workbench_status now labels version as package metadata, lists observable markers, and warns that version may lag the loaded module generation; verify by new fields/wordings.
+
 ## 2026.11.17-80 (dev)
 
 - **network live-only**: sessions are joined aliases + Host-live sessions only; DB-only rows are no longer promoted, and network reports liveCount/joinedAliasCount/dbOnlyCount with a truthful sessionsScope.
