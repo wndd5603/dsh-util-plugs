@@ -1,3 +1,7 @@
+## 2026.11.17-89 (dev)
+
+- **Lossless backup history**: snapshots are never deleted. Older ones are gzipped once a per-file plain window or the global count/size threshold is crossed. `auto_backup_prune` is replaced by `auto_backup_compact` (compress by default; delete needs allowDelete + confirm), and new `auto_backup_history`/`auto_backup_show` make diffs between any two versions possible.
+
 ## 2026.11.17-88 (dev)
 
 - **Prune readability**: `auto_backup_prune` reports filesShown/filesTotal so a truncated preview cannot be mistaken for the whole plan.

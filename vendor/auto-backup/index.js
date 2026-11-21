@@ -16,8 +16,9 @@
  */
 
 import { createHash } from 'node:crypto'
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { boolean, number, string, stringArray, any, defaultsOf, objectSchema, fieldDocs } from './lib/standard-schema.js'
 
 export const inject = ['tools']
@@ -47,12 +48,16 @@ export const Config = objectSchema({
   excludeDirs: stringArray(['file_backups', '.git', 'node_modules', 'team/pipe2/inbox', 'team/pipe2/ack', 'team/pipe2/cursor', 'team/pipe2/tmp', 'team/pipe2/_archive', 'backup', '.vs', 'images'], { description: 'Directories (relative) never backed up.' }),
   toolNames: stringArray(['write', 'edit'], { description: 'Tools whose target file is backed up before execution.' }),
   bashToolNames: stringArray(['bash', 'pwsh', 'shell', 'cmd'], { description: 'Shell tools whose write commands are detected and WARNed (cannot be backed up before execution).' }),
-  keepPerFile: number(30, { description: 'Retention per file (small files).', int: true, min: 1 }),
-  largeFileBytes: number(131072, { description: 'Files at/above this size use largeRetention (default 128 KB: a 200 KB source file keeps 5 copies, not 30).', int: true, min: 1 }),
-  largeRetention: number(5, { description: 'Retention per large file.', int: true, min: 1 }),
+  keepPerFile: number(30, { description: 'Legacy retention hint. Snapshots are never deleted: this only sizes the plain (uncompressed) window for small files.', int: true, min: 1 }),
+  largeFileBytes: number(131072, { description: 'Files at/above this size use largeRetention as their plain window (default 128 KB).', int: true, min: 1 }),
+  largeRetention: number(5, { description: 'Plain-window size per large file.', int: true, min: 1 }),
   largeWarnBytes: number(131072, { description: 'WARN once when a backed-up file is at/above this size.', int: true, min: 1 }),
-  maxTotalMB: number(800, { description: 'Total backup size cap in MB; oldest `_改前_` files are pruned above it.', min: 1 }),
-  fileOverrides: any(null, { description: 'Per-path retention overrides: { "doc/*.md": {keep: 10}, "*": {keepIfLargerThanKB: 512, keep: 5} }.' }),
+  keepUncompressedPerFile: number(5, { description: 'Newest N snapshots per file stay plain for fast diff; older ones are gzipped, never deleted.', int: true, min: 1 }),
+  compressWhenFilesOver: number(400, { description: 'When total snapshots exceed this count, gzip the oldest plain snapshots until back under it.', int: true, min: 1 }),
+  compressWhenTotalMBOver: number(200, { description: 'When total backup size exceeds this many MB, gzip the oldest plain snapshots until back under it.', min: 1 }),
+  allowDelete: boolean(false, { description: 'Allow physical deletion of snapshots. Default false: the hook never deletes and the compact tool only compresses unless this is true.', volatile: true }),
+  maxTotalMB: number(800, { description: 'Hard size ceiling in MB. Above it snapshots are compressed first; with allowDelete:false nothing is deleted, only WARNed.', min: 1 }),
+  fileOverrides: any(null, { description: 'Per-basename plain-window overrides: { "doc/*.md": {keep: 10}, "*": {keepIfLargerThanKB: 512, keep: 5} }.' }),
 }, { description: 'Automatic pre-write backup configuration.', schemaVersion: 1 })
 
 /** 默认：备份项目根内常见的源码/文档扩展名（与具体项目无关）。 */
@@ -131,6 +136,12 @@ function sha256(file) {
   } catch { return undefined }
 }
 
+function sha256Buffer(buffer) {
+  try {
+    return createHash('sha256').update(buffer).digest('hex')
+  } catch { return undefined }
+}
+
 function timestamp() {
   const date = new Date()
   const pad = value => String(value).padStart(2, '0')
@@ -166,7 +177,7 @@ export function createBackupManager(config) {
     ? config.bashToolNames
     : ['bash', 'pwsh', 'shell', 'cmd'])
   const keepPerFile = Number.isFinite(config.keepPerFile) && config.keepPerFile > 0 ? config.keepPerFile : 30
-  // 分级保留：大文件只留少量（用户 2026-10-24 要求）
+  // 分级明文窗口：大文件的明文份数更少（更早压缩），但都不删除
   const largeFileBytes = Number.isFinite(config.largeFileBytes) && config.largeFileBytes > 0
     ? config.largeFileBytes
     : 128 * 1024
@@ -176,7 +187,18 @@ export function createBackupManager(config) {
   const largeWarnBytes = Number.isFinite(config.largeWarnBytes) && config.largeWarnBytes > 0
     ? config.largeWarnBytes
     : 128 * 1024
-  // 备份总量上限（MB），超限淘汰最旧 _改前_ 文件；绝不碰 归档_* 目录
+  /** 每文件保留明文份数（更新的明文，旧的压缩；永不删除）。 */
+  const keepUncompressedPerFile = Number.isFinite(config.keepUncompressedPerFile) && config.keepUncompressedPerFile > 0
+    ? Math.trunc(config.keepUncompressedPerFile)
+    : 5
+  const compressWhenFilesOver = Number.isFinite(config.compressWhenFilesOver) && config.compressWhenFilesOver > 0
+    ? Math.trunc(config.compressWhenFilesOver)
+    : 400
+  const compressWhenTotalMBOver = Number.isFinite(config.compressWhenTotalMBOver) && config.compressWhenTotalMBOver > 0
+    ? config.compressWhenTotalMBOver
+    : 200
+  const allowDelete = config.allowDelete === true
+  // 硬上限：超过先压缩；allowDelete=false 时只 WARN
   const maxTotalMB = Number.isFinite(config.maxTotalMB) && config.maxTotalMB > 0 ? config.maxTotalMB : 800
   const batch = (typeof config.batch === 'string' && config.batch.trim().length > 0 ? config.batch.trim() : 'auto')
     .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 40)
@@ -249,55 +271,99 @@ export function createBackupManager(config) {
     return { backup: true, relative: rel, absolute }
   }
 
-  /** 该文件已有的备份列表（新→旧）。 */
+  const SNAPSHOT_RE = /^_改前_(.+?)_(\d{8}_\d{9})(?:_(\d+))?_(.+?)(\.gz)?$/
+
+  /** Parse one snapshot entry name; null when it is not one of ours. */
+  function parseSnapshotEntry(entry) {
+    const match = SNAPSHOT_RE.exec(entry)
+    if (match === null) return null
+    return {
+      batch: match[1],
+      stamp: match[2],
+      collision: match[3] === undefined ? 1 : Number(match[3]),
+      file: match[4],
+      compressed: match[5] === '.gz',
+    }
+  }
+
+  /** Snapshot list for one target (plain + .gz), newest first by name stamp. */
   function existingBackups(absolute) {
     if (!existsSync(backupDir)) return []
     const name = basename(absolute)
-    const prefix = '_改前_'
-    const suffix = '_' + name
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const collisionSuffix = new RegExp('_' + escaped + '\\.\\d+$')
-    return readdirSync(backupDir)
-      .filter(entry => entry.startsWith(prefix) && (entry.endsWith(suffix) || collisionSuffix.test(entry)))
-      .map(entry => ({ entry, path: join(backupDir, entry), mtime: statSync(join(backupDir, entry)).mtimeMs }))
-      .sort((left, right) => right.mtime - left.mtime)
+    const out = []
+    for (const entry of readdirSync(backupDir)) {
+      const parsed = parseSnapshotEntry(entry)
+      if (parsed === null || parsed.file !== name) continue
+      const path = join(backupDir, entry)
+      try {
+        const info = statSync(path)
+        if (!info.isFile()) continue
+        out.push({
+          entry, path, mtime: info.mtimeMs, size: info.size,
+          compressed: parsed.compressed, stamp: parsed.stamp, collision: parsed.collision,
+        })
+      } catch { /* skip unreadable */ }
+    }
+    return out.sort((left, right) => {
+      if (left.stamp !== right.stamp) return right.stamp.localeCompare(left.stamp)
+      if (left.collision !== right.collision) return right.collision - left.collision
+      return right.mtime - left.mtime
+    })
   }
 
-  /** 备份目录内所有 `_改前_` 文件（新→旧）；排除 归档_* 等非本工具产物。 */
+  /** Every snapshot (plain + .gz) in the backup dir, newest first. */
   function allBackupFiles() {
     if (!existsSync(backupDir)) return []
     const files = []
     for (const entry of readdirSync(backupDir)) {
-      if (!entry.startsWith('_改前_')) continue
+      const parsed = parseSnapshotEntry(entry)
+      if (parsed === null) continue
       const absolute = join(backupDir, entry)
       try {
         const info = statSync(absolute)
         if (!info.isFile()) continue
-        files.push({ entry, path: absolute, mtime: info.mtimeMs, size: info.size })
+        files.push({
+          entry, path: absolute, mtime: info.mtimeMs, size: info.size,
+          compressed: parsed.compressed, stamp: parsed.stamp, file: parsed.file,
+        })
       } catch { /* skip */ }
     }
-    return files.sort((left, right) => right.mtime - left.mtime)
+    return files.sort((left, right) => {
+      if (left.stamp !== right.stamp) return right.stamp.localeCompare(left.stamp)
+      return right.mtime - left.mtime
+    })
+  }
+
+  /** Read one snapshot, transparently decompressing .gz. */
+  function readSnapshot(snapshot) {
+    const raw = readFileSync(snapshot.path)
+    return snapshot.compressed === true ? gunzipSync(raw) : raw
   }
 
   function totalBackupMB() {
     return allBackupFiles().reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
   }
 
-  /** 单文件保留份数：精确 → glob → '*' 兜底 → 大小分级默认。 */
-  function retentionFor(size, relative) {
+  /**
+   * How many snapshots of this file stay PLAIN (uncompressed) for fast diff.
+   * Snapshots beyond this window are gzipped, never deleted.
+   * Priority: exact → glob → '*' → size tier, capped by keepUncompressedPerFile.
+   */
+  function plainWindowFor(size, relative) {
+    const cap = value => Math.min(keepUncompressedPerFile, value)
     if (relative !== undefined) {
       const normalized = normalize(relative)
       const exact = exactOverrides.get(normalized)
-      if (exact !== undefined && Number.isFinite(exact.keep) && exact.keep > 0) return exact.keep
+      if (exact !== undefined && Number.isFinite(exact.keep) && exact.keep > 0) return cap(exact.keep)
       for (const rule of globOverrides) {
-        if (rule.regex.test(normalized) && Number.isFinite(rule.value.keep) && rule.value.keep > 0) return rule.value.keep
+        if (rule.regex.test(normalized) && Number.isFinite(rule.value.keep) && rule.value.keep > 0) return cap(rule.value.keep)
       }
       if (starOverride !== undefined && Number.isFinite(starOverride.keep) && starOverride.keep > 0) {
         const minBytes = Number.isFinite(starOverride.keepIfLargerThanKB) ? starOverride.keepIfLargerThanKB * 1024 : 0
-        if (size >= minBytes) return starOverride.keep
+        if (size >= minBytes) return cap(starOverride.keep)
       }
     }
-    return size >= largeFileBytes ? largeRetention : keepPerFile
+    return cap(size >= largeFileBytes ? largeRetention : keepPerFile)
   }
 
   /** 执行备份；返回 { ok, path?, skipped?, reason? }，永不抛出。 */
@@ -310,7 +376,7 @@ export function createBackupManager(config) {
       const latest = existingBackups(absolute)[0]
       if (latest !== undefined) {
         const currentHash = sha256(absolute)
-        const latestHash = sha256(latest.path)
+        const latestHash = sha256Buffer(readSnapshot(latest))
         if (currentHash !== undefined && currentHash === latestHash) {
           return { ok: true, skipped: true, reason: 'identical' }
         }
@@ -338,17 +404,18 @@ export function createBackupManager(config) {
         warn('[auto-backup] index write failed: ' + String(error))
       }
       prune(absolute, size, decision.relative)
-      // 大文件提醒（每文件一次）：提醒"这个文件很大，考虑降低备份频次"
+      // 大文件提醒（每文件一次）：提醒"这个文件很大"，但快照仍然保留
       if (size >= largeWarnBytes && !largeWarned.has(absolute)) {
         largeWarned.add(absolute)
         warn('[auto-backup] 大文件 WARN：' + decision.relative + '（' + (size / 1024).toFixed(0)
-          + 'KB ≥ ' + (largeWarnBytes / 1024).toFixed(0) + 'KB），建议降低备份频次或加入低保留名单')
+          + 'KB ≥ ' + (largeWarnBytes / 1024).toFixed(0) + 'KB），明文窗口已缩小；历史快照会压缩保留，不删除')
       }
-      // 总量上限：超限淘汰最旧 _改前_ 文件（绝不删 归档_*）
-      const overMB = totalBackupMB() - maxTotalMB
-      if (overMB > 0) {
-        const removed = enforceTotalLimit(overMB)
-        warn('[auto-backup] 备份总量超限（上限 ' + maxTotalMB + 'MB）：已淘汰最旧 ' + removed + ' 份备份')
+      const compacted = compactGlobal()
+      if (compacted.compressed > 0) {
+        warn('[auto-backup] 备份总量/数量超阈值：已压缩最旧 ' + compacted.compressed + ' 份快照（保留全部历史，不删除）')
+      }
+      if (compacted.overLimit === true && compacted.deleted === 0) {
+        warn('[auto-backup] 备份总量仍超过硬上限 ' + maxTotalMB + 'MB：allowDelete=false，未删除任何快照')
       }
       return { ok: true, path: finalPath, size }
     } catch (error) {
@@ -357,32 +424,70 @@ export function createBackupManager(config) {
     }
   }
 
-  /** 保留最近 N 份（大文件按 largeRetention），淘汰最旧。 */
-  function prune(absolute, size, relative) {
+  /** Gzip one plain snapshot in place (never deletes). Returns true on success. */
+  function compressOne(snapshot) {
+    if (snapshot.compressed === true) return false
     try {
-      const limit = retentionFor(size ?? statSync(absolute).size, relative)
-      const backups = existingBackups(absolute)
-      for (const stale of backups.slice(limit)) {
-        try { unlinkSync(stale.path) } catch { /* best effort */ }
-      }
+      const raw = readFileSync(snapshot.path)
+      const gzPath = snapshot.path + '.gz'
+      let finalPath = gzPath
+      let index = 2
+      while (existsSync(finalPath)) { finalPath = gzPath + '.' + index; index += 1 }
+      writeFileSync(finalPath, gzipSync(raw, { level: 9 }))
+      // Only remove the plain file AFTER the .gz is durable: same bytes survive.
+      unlinkSync(snapshot.path)
+      return true
     } catch (error) {
-      warn('[auto-backup] prune failed: ' + String(error))
+      warn('[auto-backup] compress failed for ' + snapshot.entry + ': ' + String(error))
+      return false
     }
   }
 
-  /** 按总量上限淘汰最旧备份，返回淘汰份数。 */
-  function enforceTotalLimit(overMB) {
-    let removed = 0
-    let remainingMB = overMB
-    for (const file of allBackupFiles()) {
-      if (remainingMB <= 0) break
-      try {
-        unlinkSync(file.path)
-        removed += 1
-        remainingMB -= file.size / (1024 * 1024)
-      } catch { /* best effort */ }
+  /** Compress this file's snapshots beyond its plain window. */
+  function prune(absolute, size, relative) {
+    try {
+      const limit = plainWindowFor(size ?? statSync(absolute).size, relative)
+      const backups = existingBackups(absolute)
+      for (const stale of backups.slice(limit)) compressOne(stale)
+    } catch (error) {
+      warn('[auto-backup] compact failed: ' + String(error))
     }
-    return removed
+  }
+
+  /**
+   * Global compaction: keep every snapshot, gzip the oldest plain ones until
+   * both thresholds are satisfied. Physical deletion only when allowDelete.
+   */
+  function compactGlobal() {
+    let compressed = 0
+    let deleted = 0
+    try {
+      const snapshots = allBackupFiles()
+      const plain = () => allBackupFiles().filter(file => file.compressed !== true)
+      const sizeMB = () => allBackupFiles().reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
+      const overLimit = () => allBackupFiles().length > compressWhenFilesOver || sizeMB() > compressWhenTotalMBOver
+      while (overLimit()) {
+        const oldest = plain().pop()
+        if (oldest === undefined) break
+        if (compressOne(oldest)) { compressed += 1; continue }
+        break
+      }
+      // Hard ceiling: compress first; delete only when the operator opted in.
+      if (sizeMB() > maxTotalMB) {
+        if (allowDelete) {
+          for (const file of allBackupFiles()) {
+            if (sizeMB() <= maxTotalMB) break
+            try { unlinkSync(file.path); deleted += 1 } catch { /* best effort */ }
+          }
+        } else {
+          return { compressed, deleted, overLimit: true, snapshots: snapshots.length }
+        }
+      }
+      return { compressed, deleted, overLimit: false, snapshots: snapshots.length }
+    } catch (error) {
+      warn('[auto-backup] global compaction failed: ' + String(error))
+      return { compressed, deleted, overLimit: false, snapshots: 0 }
+    }
   }
 
   /**
@@ -426,13 +531,21 @@ export function createBackupManager(config) {
   }
 
   return {
-    shouldBackup, backup, prune, targetFromArguments, detectBashWrite,
-    backupDir, projectRoot, keepPerFile, largeFileBytes, largeRetention, maxTotalMB, existingBackups, totalBackupMB,
-    allBackupFiles,
+    shouldBackup, backup, prune, compactGlobal, compressOne, readSnapshot, targetFromArguments, detectBashWrite,
+    backupDir, projectRoot, keepPerFile, largeFileBytes, largeRetention, maxTotalMB,
+    keepUncompressedPerFile, compressWhenFilesOver, compressWhenTotalMBOver, allowDelete,
+    existingBackups, totalBackupMB, allBackupFiles,
     /** Aggregate facts for the read-only status tool. */
     stats() {
       const files = allBackupFiles()
-      return { count: files.length, totalMB: Math.round(files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024) * 100) / 100 }
+      const plain = files.filter(file => file.compressed !== true)
+      return {
+        count: files.length,
+        plainCount: plain.length,
+        compressedCount: files.length - plain.length,
+        totalMB: Math.round(files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024) * 100) / 100,
+        compressionPolicy: 'snapshots are never deleted by default; older ones are gzipped',
+      }
     },
   }
 }
@@ -548,16 +661,19 @@ export function apply(ctx, config, deps = {}) {
   })
 
   ctx.tools.register({
-    name: 'auto_backup_prune',
+    name: 'auto_backup_compact',
     description:
-      '⚠ Scope: this workspace file_backups; irreversible: yes for the pruned snapshots; precondition: dryRun:false + confirm:"PRUNE". '
-      + 'Trim existing `_改前_` snapshots down to a per-file retention without waiting for the next write. Default dry-run lists what would go.',
+      '⚠ Scope: this workspace file_backups; reversible: yes (compression only keeps every snapshot); '
+      + 'precondition: dryRun:false requires confirm:"COMPACT". '
+      + 'Gzip the oldest plain snapshots beyond the per-file plain window and the global count/size thresholds. '
+      + 'Nothing is deleted unless the operator set allowDelete:true and passes mode:"delete".',
     parameters: {
       type: 'object',
       properties: {
-        keepPerFile: { type: 'number', description: 'Keep at most N newest snapshots per file (default: the effective largeRetention, 5).' },
-        dryRun: { type: 'boolean', description: 'Default true; false requires confirm:"PRUNE".' },
-        confirm: { type: 'string', description: 'Must be exactly "PRUNE" to delete.' },
+        keepPerFile: { type: 'number', description: 'Plain (uncompressed) snapshots to keep per file (default: manager.keepUncompressedPerFile).' },
+        mode: { type: 'string', enum: ['compress', 'delete'], description: 'Default "compress": gzip only. "delete" also requires allowDelete:true.' },
+        dryRun: { type: 'boolean', description: 'Default true; false requires confirm:"COMPACT".' },
+        confirm: { type: 'string', description: 'Must be exactly "COMPACT" when dryRun:false.' },
       },
       additionalProperties: false,
     },
@@ -571,51 +687,149 @@ export function apply(ctx, config, deps = {}) {
       const manager = managerFor(resolved.root)
       const keep = Number.isFinite(Number(args.keepPerFile)) && Number(args.keepPerFile) > 0
         ? Math.trunc(Number(args.keepPerFile))
-        : manager.largeRetention
+        : manager.keepUncompressedPerFile
+      const mode = args.mode === 'delete' ? 'delete' : 'compress'
       const dryRun = args.dryRun !== false
-      if (!dryRun && args.confirm !== 'PRUNE') {
-        return { ok: false, code: 'CONFIRM_REQUIRED', message: 'prune requires confirm:"PRUNE" when dryRun:false' }
+      if (!dryRun && args.confirm !== 'COMPACT') {
+        return { ok: false, code: 'CONFIRM_REQUIRED', message: 'compact requires confirm:"COMPACT" when dryRun:false' }
       }
-      // Group existing snapshots per original file name, newest first.
-      // NOTE: the backup file name only preserves the BASENAME
-      // (`_改前_<batch>_<ts>_<basename>`), so two different files with the same
-      // basename share one group. That matches the retention semantics used by
-      // the pre-write hook itself, and is why prune never claims per-path accuracy.
+      if (mode === 'delete' && manager.allowDelete !== true) {
+        return { ok: false, code: 'DELETE_DISABLED', message: 'mode:"delete" requires config allowDelete:true; default keeps every snapshot' }
+      }
+      // Group snapshots by basename (backup names preserve only the basename).
       const groups = new Map()
       for (const file of manager.allBackupFiles()) {
-        const match = /^_改前_(.+?)_(\d{8}_\d{9})(?:_\d+)?_(.+)$/.exec(file.entry)
-        const key = match === null ? file.entry : match[3]
-        const list = groups.get(key) ?? []
+        const list = groups.get(file.file) ?? []
         list.push(file)
-        groups.set(key, list)
+        groups.set(file.file, list)
       }
       const plan = []
-      let removed = 0
+      let compressed = 0
+      let deleted = 0
       for (const [file, list] of groups) {
-        const sorted = [...list].sort((a, b) => b.mtime - a.mtime)
-        for (const stale of sorted.slice(keep)) {
-          plan.push({ file, entry: stale.entry, size: stale.size })
-          if (!dryRun) {
-            try { unlinkSync(stale.path); removed += 1 } catch { /* best effort */ }
+        const sorted = [...list].sort((a, b) => (b.stamp ?? '').localeCompare(a.stamp ?? ''))
+        const plain = sorted.filter(item => item.compressed !== true)
+        for (const stale of plain.slice(keep)) {
+          plan.push({ file, entry: stale.entry, size: stale.size, action: 'compress' })
+          if (!dryRun && manager.compressOne(stale)) compressed += 1
+        }
+        if (mode === 'delete') {
+          for (const stale of sorted.filter(item => item.compressed === true)) {
+            plan.push({ file, entry: stale.entry, size: stale.size, action: 'delete' })
           }
         }
       }
       return {
         ok: true,
         dryRun,
+        mode,
         keepPerFile: keep,
         backupDir: manager.backupDir,
-        wouldRemove: plan.length,
-        removed,
+        wouldChange: plan.length,
+        compressed,
+        deleted,
         grouping: 'basename',
-        groupingCaveat: 'Snapshots preserve only the basename, so files with the same basename in different directories share one retention group.',
+        groupingCaveat: 'Snapshots preserve only the basename, so files with the same basename in different directories share one group.',
         files: plan.slice(0, 50),
         filesShown: Math.min(50, plan.length),
         filesTotal: plan.length,
         truncated: plan.length > 50,
       }
     },
-    presentCall: () => ({ card: 'generic', title: 'Prune auto-backups', kind: 'write' }),
+    presentCall: () => ({ card: 'generic', title: 'Compact auto-backups', kind: 'write' }),
+  })
+
+  ctx.tools.register({
+    name: 'auto_backup_history',
+    description:
+      'Read-only: list `_改前_` snapshots for one file (plain and .gz), newest first, so changes between any two '
+      + 'versions can be derived. Snapshots are never deleted by the hook; older ones are gzipped.',
+    parameters: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Basename or workspace-relative path of the backed-up file (e.g. lua_scripts/levels.lua).' },
+        limit: { type: 'number', description: 'Max rows (default 30, max 200).' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args = {}, exec = {}) {
+      const resolved = rootFor(exec?.agent)
+      if (resolved.root === null) return { ok: false, code: 'NO_ROOT', message: 'no projectRoot and no session workspace' }
+      const manager = managerFor(resolved.root)
+      const raw = typeof args.file === 'string' ? args.file.trim() : ''
+      if (raw === '') return { ok: false, code: 'INVALID_ARGUMENT', message: 'file is required' }
+      const name = basename(raw)
+      const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(200, Math.trunc(Number(args.limit)))) : 30
+      const rows = manager.existingBackups(join(resolved.root, name)).slice(0, limit)
+      return {
+        ok: true,
+        file: name,
+        backupDir: manager.backupDir,
+        total: manager.existingBackups(join(resolved.root, name)).length,
+        returned: rows.length,
+        snapshots: rows.map(row => ({
+          entry: row.entry,
+          stamp: row.stamp,
+          compressed: row.compressed === true,
+          size: row.size,
+          path: row.path,
+        })),
+        note: 'Use auto_backup_show to read one snapshot; .gz is decompressed transparently.',
+      }
+    },
+    presentCall: () => ({ card: 'generic', title: 'Auto-backup history', kind: 'read' }),
+  })
+
+  ctx.tools.register({
+    name: 'auto_backup_show',
+    description:
+      'Read-only: return one `_改前_` snapshot content (decompressing .gz) for diffing against the current file. '
+      + 'Bounded to 200 KB of decoded text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Basename or workspace-relative path of the backed-up file.' },
+        stamp: { type: 'string', description: 'Snapshot stamp from auto_backup_history (default: newest).' },
+        maxChars: { type: 'number', description: 'Max decoded characters to return (default 20000, max 200000).' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args = {}, exec = {}) {
+      const resolved = rootFor(exec?.agent)
+      if (resolved.root === null) return { ok: false, code: 'NO_ROOT', message: 'no projectRoot and no session workspace' }
+      const manager = managerFor(resolved.root)
+      const raw = typeof args.file === 'string' ? args.file.trim() : ''
+      if (raw === '') return { ok: false, code: 'INVALID_ARGUMENT', message: 'file is required' }
+      const name = basename(raw)
+      const snapshots = manager.existingBackups(join(resolved.root, name))
+      if (snapshots.length === 0) return { ok: false, code: 'NOT_FOUND', file: name, message: 'no snapshot for this file' }
+      const wanted = typeof args.stamp === 'string' ? args.stamp.trim() : ''
+      const snapshot = wanted === '' ? snapshots[0] : snapshots.find(row => row.stamp === wanted)
+      if (snapshot === undefined) return { ok: false, code: 'NOT_FOUND', file: name, stamp: wanted, message: 'no snapshot with that stamp' }
+      const maxChars = Number.isFinite(Number(args.maxChars)) ? Math.max(1, Math.min(200000, Math.trunc(Number(args.maxChars)))) : 20000
+      const buffer = manager.readSnapshot(snapshot)
+      const text = buffer.toString('utf8')
+      return {
+        ok: true,
+        file: name,
+        entry: snapshot.entry,
+        stamp: snapshot.stamp,
+        compressed: snapshot.compressed === true,
+        size: snapshot.size,
+        chars: text.length,
+        truncated: text.length > maxChars,
+        content: text.slice(0, maxChars),
+      }
+    },
+    presentCall: () => ({ card: 'generic', title: 'Show auto-backup snapshot', kind: 'read' }),
   })
 
   if (cfg.enabled === false) {
