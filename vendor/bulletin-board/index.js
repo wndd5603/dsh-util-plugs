@@ -188,7 +188,8 @@ export function apply(ctx) {
   }), async (args, exec) => {
     const a = actor(exec)
     const hasExplicitSla = args.updatedBefore !== undefined || args.staleAfterHours !== undefined
-    return { tasks: store.digest({
+    const staleAfterHours = hasExplicitSla ? args.staleAfterHours : 24
+    const tasks = store.digest({
       session: args.session ?? a.session,
       alias: args.alias ?? a.alias,
       workspace: args.workspace ?? a.cwd,
@@ -196,8 +197,17 @@ export function apply(ctx) {
       boardId: args.boardId,
       assignee: args.assignee,
       updatedBefore: args.updatedBefore,
-      staleAfterHours: hasExplicitSla ? args.staleAfterHours : 24,
-    }) }
+      staleAfterHours,
+    })
+    return {
+      ok: true,
+      tasks,
+      matched: tasks.length,
+      staleAfterHours: staleAfterHours ?? null,
+      asOf: new Date().toISOString(),
+      empty: tasks.length === 0,
+      emptyReason: tasks.length === 0 ? 'no-blocked-or-stale-tasks-for-scope' : null,
+    }
   })
 
   // Heartbeat read model for Lead orchestration: subagents write

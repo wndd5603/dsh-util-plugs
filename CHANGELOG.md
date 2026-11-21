@@ -1,3 +1,7 @@
+## 2026.11.17-69 (dev)
+
+- **RC3/RC1 residual**: network_info host-registry path now returns meetings + pitfalls (not empty arrays); bulletin_digest returns ok/matched/staleAfterHours/emptyReason; context_usage documents effective/pressure token semantics; message_bus_status adds caller-scoped countsMine; meeting_digest separates owned/unowned/absence pending actions.
+
 ## 2026.11.17-68 (dev)
 
 - **RC9 reply visibility**: danger-full-access → confined delivery now returns `replyChannel` and a `TARGET_CANNOT_REPLY` warning; the tool description tells callers to use bulletin/meeting for the reply leg. The permission guard itself is unchanged.

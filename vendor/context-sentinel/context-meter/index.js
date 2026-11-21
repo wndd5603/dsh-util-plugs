@@ -323,6 +323,13 @@ export function apply(ctx, config) {
           pressure.pressureTokens + pressure.surfaceTokens - pressure.sampledSurfaceTokens,
         )
       }
+      context.effectiveTokens = context.pressureTokens ?? usedTokens
+      context.tokenSemantics = {
+        usedTokens: 'tokenMeter total for the current request',
+        pressureTokens: 'provider-anchored pressure used for compaction when available',
+        projectedTokens: 'pressureTokens + surface delta (next-request estimate)',
+        compactionUses: 'pressureTokens when available, otherwise usedTokens',
+      }
 
       context.advisory = resolveAdvisoryThresholds(agent.ctx, ctx, config)
 

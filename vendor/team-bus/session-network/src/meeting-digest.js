@@ -216,6 +216,9 @@ function emptyDigest(nowMs, { limit = MEETING_DIGEST_DEFAULT_LIMIT, windowHours 
       deadlineExpired: 0,
       deadlineSoon: 0,
       pendingActions: 0,
+      pendingActionsWithOwner: 0,
+      pendingActionsUnowned: 0,
+      absenceActions: 0,
     },
     meetings: [],
     limit: normalizeLimit(limit),
@@ -272,6 +275,9 @@ export function buildMeetingDigest({
     deadlineExpired: 0,
     deadlineSoon: 0,
     pendingActions: 0,
+    pendingActionsWithOwner: 0,
+    pendingActionsUnowned: 0,
+    absenceActions: 0,
   }
   const matched = []
   for (const row of source) {
@@ -290,6 +296,8 @@ export function buildMeetingDigest({
     }
     const store = readMeetingSidecar(dataDir, meetingId)
     const pending = pendingActionsOf(store)
+    const absence = pending.filter(action => /缺席|absent|absence/iu.test(String(action.text ?? '')))
+    const owned = pending.filter(action => typeof action.owner === 'string' && action.owner.trim() !== '')
     const actionsHit = status !== 'cancelled' && pending.length > 0
     const deadlineHit = deadlineState === 'expired' || deadlineState === 'due_soon'
     if (!deadlineHit && !actionsHit) continue
@@ -312,6 +320,9 @@ export function buildMeetingDigest({
     if (deadlineState === 'expired') counts.deadlineExpired += 1
     if (deadlineState === 'due_soon') counts.deadlineSoon += 1
     counts.pendingActions += pending.length
+    counts.pendingActionsWithOwner += owned.length
+    counts.pendingActionsUnowned += pending.length - owned.length
+    counts.absenceActions += absence.length
     matched.push({
       meetingId,
       title: row.title ?? null,
@@ -321,6 +332,9 @@ export function buildMeetingDigest({
       deadlineState,
       deadlineInHours: deadlineMs === null ? null : Math.round(((deadlineMs - nowMs) / 3_600_000) * 100) / 100,
       pendingActionCount: pending.length,
+      pendingActionsWithOwner: owned.length,
+      pendingActionsUnowned: pending.length - owned.length,
+      absenceActions: absence.length,
       pendingActions: pending.slice(0, MEETING_DIGEST_MAX_ACTIONS_PER_MEETING),
       participantCount: Number.isFinite(Number(row.participants)) ? Number(row.participants) : 0,
       reasons: [

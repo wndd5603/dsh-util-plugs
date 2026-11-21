@@ -2611,10 +2611,10 @@ export function apply(ctx, config) {
       + 'sizes, row counts (messages/deliveries/read state/routes plus unread absence counts), delivery behaviour (lightweight envelope, '
       + 'dedupe and coalesce windows), host transport/directory/joinedCount, readAt support, and which optional '
       + 'tools are registered. Use it to verify the bus before blaming delivery, and to see the effective config '
-      + 'when a settings form is not available.',
+      + 'when a settings form is not available. counts/countsSummary are global; countsMine (if the caller is a session) separates this session\'s unread/messages.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     output: jsonOutput,
-    execute() {
+    execute(_args, exec) {
       let counts = null
       let dbError = null
       try {
@@ -2667,6 +2667,20 @@ export function apply(ctx, config) {
           actionable: counts.undeliveredDeliveries + (counts.pending?.queued ?? 0),
           note: 'unread is per-recipient read state; undelivered/queued are delivery state. Use message_queue({unreadOnly:true}) for reading, and inspect undeliverable reasons for queued failures.',
         },
+        countsMine: (() => {
+          const mine = exec?.agent?.session?.id
+          if (typeof mine !== 'string' || mine === '') return null
+          try {
+            return {
+              sessionId: mine,
+              unread: store.unreadSummary(mine).unread,
+              messages: store.countMessages({ toSession: mine, readBy: mine }),
+              scope: 'mine (this caller session)',
+            }
+          } catch {
+            return { sessionId: mine, unread: null, messages: null, scope: 'mine (read failed)' }
+          }
+        })(),
         delivery: {
           lightweight,
           dedupeWindowMs,

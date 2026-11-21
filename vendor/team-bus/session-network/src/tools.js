@@ -1207,6 +1207,14 @@ export function registerTools(ctx, deps) {
             source: 'host-registry',
           }
         })
+        const pitfallsForNetwork = safeCall(
+          () => modules.pitfalls?.buildPitfalls?.({ limit: 10, probe: false }) ?? { count: 0, items: [] },
+          () => ({ count: 0, items: [] }),
+        )
+        const meetingDigest = safeCall(() => {
+          const read = withReadDb(() => buildMeetingDigest({ db: modules.db, dataDir, now: Date.now(), limit: 50 }))
+          return read.ok ? read.value : emptyMeetingDigest(Date.now(), { limit: 50 })
+        }, () => emptyMeetingDigest(Date.now(), { limit: 50 }))
         const hostResult = {
           schemaVersion: 1,
           generatedAt: new Date().toISOString(),
@@ -1220,8 +1228,18 @@ export function registerTools(ctx, deps) {
             dataDirConfigured: dataDir !== null,
           },
           sessions,
-          meetings: [],
-          pitfalls: [],
+          meetings: (meetingDigest.meetings ?? []).map(row => ({
+            meetingId: row.meetingId,
+            status: row.status,
+            convener: row.convener ?? null,
+            participants: Number(row.participantCount ?? row.participants ?? 0),
+            pendingActions: Number(row.pendingActionCount ?? 0),
+          })),
+          meetingsData: {
+            counts: meetingDigest.counts ?? null,
+            scanned: meetingDigest.scanned ?? null,
+          },
+          pitfalls: pitfallsForNetwork.items ?? [],
         }
         safeCall(() => audit?.({ action: 'network_info', section, source: 'host-registry', joinedCount: sessions.length, caller: resolveAuditCaller(exec) }), () => {})
         return hostResult
