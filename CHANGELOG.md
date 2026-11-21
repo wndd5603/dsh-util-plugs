@@ -1,3 +1,7 @@
+## 2026.11.17-65 (dev)
+
+- **Recall labels**: tool output now says tasks(assigned)/memory(global) and includes the unassigned board count; UNBOUND_SESSION regression asserts the bind hint.
+
 ## 2026.11.17-64 (dev)
 
 - **Gap remediation (RC1-RC5)**: added effective/summary fields to team_hooks_status, message_bus_status, auto_backup_status and workbench_status; fixed archivePath validation, assigned/unassigned task counts, memory/global labels, UNBOUND_SESSION and MEETING_FINALIZED hints, cross-permission guidance, pitfalls full text, and consequence boundaries on destructive tools.

@@ -331,7 +331,16 @@ export function apply(ctx, config) {
       boardId: optionalText(args?.boardId),
       profileDir,
     })
-    if (result?.ok !== true) return result
+    if (result?.ok !== true) {
+      if (result?.code === COLLAB_ERROR_CODES.UNBOUND_SESSION) {
+        return {
+          ...result,
+          hint: 'Bind this session to an agent first: apartment_agent_bind({agentId, sessionId, isPrimary:true}); then collaboration_recall() returns a caller-scoped brief.',
+          text: '[collab] UNBOUND_SESSION: bind via apartment_agent_bind({agentId, sessionId, isPrimary:true}).',
+        }
+      }
+      return result
+    }
     const { teams, roles, taskRoles, teamTasks, ...recall } = result
     const counts = { ...(result.counts ?? {}) }
     delete counts.teams
@@ -347,10 +356,11 @@ export function apply(ctx, config) {
     recall.truncated = truncated
     recall.text = '[collab] agent=' + recall.agentId
       + ' aliases=' + counts.aliases
-      + ' tasks=' + counts.tasks
+      + ' tasks(assigned)=' + counts.tasks
       + ' leases=' + counts.leases
-      + ' memory=' + (counts.memory ?? 0)
+      + ' memory(global)=' + (counts.memory ?? 0)
       + ' warnings=' + counts.warnings
+      + (recall.unassignedTasks > 0 ? ' unassigned(board)=' + recall.unassignedTasks : '')
       + '; collaboration_recall()'
     return recall
   }

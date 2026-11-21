@@ -51,4 +51,5 @@ test('collaboration_recall without sessionId is caller-scoped, not operator-forb
   const result = await tool.execute({}, { agent: { session: { id: SESSION } } })
   assert.equal(result.ok, false)
   assert.equal(result.code, 'UNBOUND_SESSION')
+  assert.match(result.hint, /apartment_agent_bind/)
 })
