@@ -32,7 +32,7 @@ message_read({ messageId: "msg-..." })
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-The self-contained bundle adds eight independently switchable plugins; enable `message-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-message-bus`.
+The self-contained bundle adds eleven independently switchable plugins; enable `message-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-message-bus`.
 
 ### Usage
 

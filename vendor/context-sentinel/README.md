@@ -28,7 +28,7 @@ Example:
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-The self-contained bundle adds eight independently switchable plugins; enable `context-sentinel` for this plugin. No npm registry is used. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-context-sentinel`.
+The self-contained bundle adds eleven independently switchable plugins; enable `context-sentinel` for this plugin. No npm registry is used. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-context-sentinel`.
 
 ### Usage
 

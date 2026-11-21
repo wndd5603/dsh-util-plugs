@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-96 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-97 · Release tag: 0.0.3 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,8 +22,9 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-96 (dev)
+### What is new in 2026.11.17-97 (dev)
 
+- **Docs now match the eleven rows**: eight vendor READMEs said "eight plugins" / "8 个插件项" (and `plugin-console` called itself "the 8th row"), the root README pinned `Release tag: 0.0.2`, and `memory_remember` never stated its key rule (`2–5` `/`-joined segments of `a-z0-9._-`). All corrected.
 - **Out-of-pool anchors: any nesting depth** (docs): a subdirectory is skipped *without being descended into* (`index.js:380-386`), so `anchors/a/b/c/` is as invisible to the hook as `anchors/` — never counted, compressed or deleted.
 - **`envelopeMine` makes envelope counts comparable**: `envelope` is global across all recipients while `countsMine.unread` is per recipient, so "0 unread but N unconsumed" looked like duplicate delivery. `envelope` now states its `scope`/`note`, and `envelopeMine{sessionId, envelopes, consumedEnvelopes}` gives the caller's own numbers.
 - **Rollback anchors documented as an out-of-pool pattern**: the plain window and the global budget sort by time, so any snapshot can eventually be gzipped. A priority scheme for hand-made batches was evaluated and **rejected** (it fights the plain-count budget); instead copy the anchor into a subdirectory of `file_backups/` — the hook scans regular files only, so it is never counted, compressed or deleted.
@@ -115,7 +116,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `plugin-console` | Unified plugin console: cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-96; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-97; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -165,8 +166,9 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
-### 2026.11.17-96 新增
+### 2026.11.17-97 新增
 
+- **文档与实际 11 个插件项对齐**：8 个 vendor README 仍写"eight plugins / 8 个插件项"（`plugin-console` 还自称"第 8 个"），根 README 仍写 `Release tag: 0.0.2`，`memory_remember` 从未说明 key 规则（2–5 段 `/` 连接、每段 `a-z0-9._-`）。均已修正。
 - **出池锚点：任意嵌套深度**（文档）：目录条目被跳过且**从不进入**（`index.js:380-386`），所以 `锚点/a/b/c/` 与 `锚点/` 一样对钩子不可见——不计数、不压缩、不删除。
 - **`envelopeMine` 让信封计数可比**：`envelope` 是全库口径、`countsMine.unread` 是按收件人，于是"0 未读但 N 未消费"看起来像重复投递。现在 `envelope` 带 `scope`/`note`，并新增 `envelopeMine{sessionId, envelopes, consumedEnvelopes}` 给出本会话口径。
 - **回滚锚点定为"出池"模式**：明文窗口与全局预算都按时间排序，任何快照最终都可能被压缩。曾评估"手工批次优先保留明文"的方案并**否决**（会与明文预算冲突）；改为把锚点**复制**到 `file_backups/` 子目录——钩子只扫直属普通文件，子目录不计数、不压缩、不删除。
@@ -234,7 +236,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-96，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-97，各插件保留自己的版本号。
 
 ### Web 界面
 

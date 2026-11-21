@@ -1,3 +1,9 @@
+## 2026.11.17-97 (dev)
+
+- **Plugin count fixed in eight READMEs**: the bundle has **eleven** rows (`cordis.patch.yml`), but `auto-backup`, `host-relaunch`, `team-bus`, `workbench-bundle`, `plugin-console`, `context-sentinel` and `message-bus` said "eight plugins" / "8 个插件项"; `plugin-console` also called itself "the 8th row" (its position changed) and pinned an old bundle version. All now say eleven / "one of them", so an installer does not suspect a mis-install.
+- **Root README release tag**: `Release tag: 0.0.2` → `0.0.3` (tag `0.0.3` → `b4416ff`, which is also `master`).
+- **`memory_remember` documents its key rule**: the description now states the real constraint (`KEY_SEGMENT_RE`, 2–5 `/`-joined segments, lowercase a-z/0-9/`.`/`_`/`-`, 3 preferred) and that a non-conforming key is still accepted but lowers the quality score with `KEY_CHARSET` / `KEY_SEGMENTS`. Previously the rule was only discoverable by hitting it.
+
 ## 2026.11.17-96 (dev)
 
 - **Out-of-pool anchors: nesting depth stated** (docs only). The README said a subdirectory is never scanned but not whether that means one level or any depth. It is **any depth**: `allBackupFiles()` enumerates `readdirSync(backupDir)` entries and skips anything that is not a regular file **without ever descending into it** (`vendor/auto-backup/index.js:380-386`), so `anchors/a/b/c/` is as invisible as `anchors/`. Both language sections now say so, and `docs/AUTO_BACKUP_REDESIGN.md` §7.5 records the implementation reference.

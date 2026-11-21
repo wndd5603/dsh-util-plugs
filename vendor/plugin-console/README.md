@@ -87,7 +87,7 @@ MIT (package metadata)
 
 ### 安装（独立客户端插件）
 
-本包也是 `dsh-util-plugs` 的第 8 个插件项（`plugin-console`）：安装该安装包即可获得控制台，也可以独立安装本包。
+本包也是 `dsh-util-plugs` 的其中一个插件项（`plugin-console`）：安装该安装包即可获得控制台，也可以独立安装本包。
 
 本地包（当前机器采用的独立安装方式）：
 
@@ -103,7 +103,7 @@ dsh plugin --profile web add github:wndd5603/dsh-plugin-console
 
 加入后重启/刷新 DSH Web UI，在左栏查找「插件控制台」入口；不要重复添加同一个客户端插件。
 
-**当前机器状态**：本机 web profile 已作为独立客户端插件安装；`dsh-util-plugs` 2026.11.5-9 也已将本插件作为第 8 个插件项收录。
+**当前机器状态**：本机 web profile 已作为独立客户端插件安装；`dsh-util-plugs` 已将本插件作为其插件项收录。
 
 ### 配置、权限与隐私
 
@@ -117,7 +117,7 @@ dsh plugin --profile web add github:wndd5603/dsh-plugin-console
 
 - **不是安装器**：不执行安装/卸载/更新/启停；卡片与按钮深链到原生插件管理器，原生页面仍是唯一写入口。
 - **仅在客户端运行**：不提供宿主服务，也不执行任意命令或脚本。
-- **也包含在安装包中**：`dsh-util-plugs` 将本控制台作为第 8 个插件项，也可独立安装。
+- **也包含在安装包中**：`dsh-util-plugs` 将本控制台作为其中一个插件项，也可独立安装。
 
 ### 开发
 

@@ -27,7 +27,7 @@ restart_status()
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-The bundle adds eight plugins; enable `host-relaunch`. The bundle also ships the Web client that renders the header button. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-host-relaunch`.
+The bundle adds eleven plugins; enable `host-relaunch`. The bundle also ships the Web client that renders the header button. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-host-relaunch`.
 
 ### Usage
 
@@ -87,7 +87,7 @@ restart_status()
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-安装包会加入 8 个插件项；启用 `host-relaunch`。安装包还包含用于渲染顶栏按钮的 Web 客户端。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-host-relaunch`。
+安装包会加入 11 个插件项；启用 `host-relaunch`。安装包还包含用于渲染顶栏按钮的 Web 客户端。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-host-relaunch`。
 
 ### 使用
 

@@ -32,7 +32,7 @@ message_send({ to: "<alias>", body: "status: green" })
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-The bundle adds eight plugins; enable `team-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-team-bus`.
+The bundle adds eleven plugins; enable `team-bus`. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-team-bus`.
 
 ### Usage
 
@@ -81,7 +81,7 @@ message_send({ to: "<alias>", body: "状态：正常" })
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-安装包会加入 8 个插件项；启用 `team-bus`。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-team-bus`。
+安装包会加入 11 个插件项；启用 `team-bus`。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-team-bus`。
 
 ### 使用
 

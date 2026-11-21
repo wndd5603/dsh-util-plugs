@@ -28,7 +28,7 @@ workbench_status()
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-The bundle adds eight plugins; enable `workbench-bundle`. Do not install the individual component bundles alongside it. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-workbench-bundle`.
+The bundle adds eleven plugins; enable `workbench-bundle`. Do not install the individual component bundles alongside it. The packages are not published on npm yet; install from GitHub instead of `dsh plugin add dsh-workbench-bundle`.
 
 ### Usage
 
@@ -76,7 +76,7 @@ workbench_status()
 dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ```
 
-安装包会加入 8 个插件项；启用 `workbench-bundle`。不要与组件包同时安装。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-workbench-bundle`。
+安装包会加入 11 个插件项；启用 `workbench-bundle`。不要与组件包同时安装。目前尚未发布到 npm，请从 GitHub 安装；不要使用 `dsh plugin add dsh-workbench-bundle`。
 
 ### 使用
 
