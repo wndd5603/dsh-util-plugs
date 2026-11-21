@@ -1198,14 +1198,17 @@ export function registerTools(ctx, deps) {
         }
         const sessions = joined.map(entry => {
           const agent = liveById.get(entry.sessionId)
+          const isLive = agent !== undefined
           return {
             sessionId: entry.sessionId,
             alias: entry.alias,
             displayName: entry.displayName,
             roleName: entry.roleName ?? null,
-            status: agent?.status === 'running' ? 'running' : 'active',
-            routable: agent !== undefined,
-            source: 'host-registry',
+            status: isLive ? 'running' : 'inactive',
+            routable: isLive,
+            live: isLive,
+            availability: isLive ? 'running' : 'alias-only',
+            source: 'joined-alias',
           }
         })
         const knownSessionIds = new Set(sessions.map(item => item.sessionId))
@@ -1218,30 +1221,17 @@ export function registerTools(ctx, deps) {
             alias: null,
             displayName: agent?.session?.header?.displayName ?? agent?.displayName ?? null,
             roleName: agent?.session?.header?.roleName ?? null,
-            status: agent?.status === 'running' ? 'running' : 'active',
+            status: 'running',
             routable: true,
+            live: true,
+            availability: 'running',
             source: 'live-agent',
           })
         }
-        const dbSessionRows = safeCall(() => {
-          const read = withReadDb(() => (typeof modules.db?.listSessions === 'function' ? modules.db.listSessions() : []))
-          return read.ok && Array.isArray(read.value) ? read.value : []
-        }, [])
-        for (const row of dbSessionRows) {
-          const id = row?.session_id
-          if (typeof id !== 'string' || id === '' || knownSessionIds.has(id)) continue
-          if (row.status !== 'active') continue
-          knownSessionIds.add(id)
-          sessions.push({
-            sessionId: id,
-            alias: null,
-            displayName: row.display_name ?? null,
-            roleName: row.role_name ?? null,
-            status: typeof row.status === 'string' ? row.status : 'active',
-            routable: true,
-            source: 'session-network-db',
-          })
-        }
+        // Session-network DB rows are metadata only: never promote a DB-only row
+        // to a live session (status is a write default, not a liveness proof).
+        const liveCount = sessions.filter(item => item.live === true).length
+        const joinedAliasCount = sessions.filter(item => typeof item.alias === 'string' && item.alias !== '').length
         const pitfallsForNetwork = safeCall(
           () => (modules.pitfalls?.buildPitfalls ?? buildPitfallsDirect)({ limit: 10, probe: false }),
           () => ({ count: 0, items: [] }),
@@ -1256,10 +1246,14 @@ export function registerTools(ctx, deps) {
           section,
           network: {
             total: sessions.length,
-            active: sessions.filter(item => item.routable).length,
-            joinedCount: sessions.length,
+            active: liveCount,
+            liveCount,
+            joinedCount: joinedAliasCount,
+            joinedAliasCount,
+            dbOnlyCount: 0,
+            liveSource: liveCount > 0 ? 'sessions-or-agents' : 'none',
             source: 'host-registry',
-            sessionsScope: 'joined aliases only; live sessions without an alias are not enumerated',
+            sessionsScope: 'joined aliases + host-live sessions (this Host process); session-network DB rows are metadata only and never prove liveness',
             transport: 'sqlite-directory',
             dataDirConfigured: dataDir !== null,
           },

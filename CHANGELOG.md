@@ -1,3 +1,7 @@
+## 2026.11.17-80 (dev)
+
+- **network live-only**: sessions are joined aliases + Host-live sessions only; DB-only rows are no longer promoted, and network reports liveCount/joinedAliasCount/dbOnlyCount with a truthful sessionsScope.
+
 ## 2026.11.17-79 (dev)
 
 - **network sessions active-only**: session-network DB rows are included only when status is active; stale historical rows stay out of network_info.
