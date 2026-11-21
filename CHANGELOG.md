@@ -1,3 +1,7 @@
+## 2026.11.17-68 (dev)
+
+- **RC9 reply visibility**: danger-full-access → confined delivery now returns `replyChannel` and a `TARGET_CANNOT_REPLY` warning; the tool description tells callers to use bulletin/meeting for the reply leg. The permission guard itself is unchanged.
+
 ## 2026.11.17-67 (dev)
 
 - **RC8 pending notices**: reminders now key off unread/readAt only (read deliveries never re-trigger), produce the unread count they report, and recommend message_queue({unreadOnly:true}). Regression covers total>0/unread=0.

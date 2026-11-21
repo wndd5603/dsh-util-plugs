@@ -2235,12 +2235,24 @@ export function apply(ctx, config) {
         transport = 'agent-followup'
       }
     }
+    const senderMode = sandboxModeOf(exec)
+    const targetMode = target.agent === undefined ? null : sandboxModeOfAgent(target.agent)
+    const replyRestricted = senderMode === 'danger-full-access'
+      && targetMode !== null && targetMode !== 'danger-full-access'
+    const replyWarnings = replyRestricted
+      ? [{
+          code: 'TARGET_CANNOT_REPLY',
+          message: 'target is confined and cannot send back to a danger-full-access sender; delivery succeeded, but expect no direct reply.',
+          replyChannel: 'bulletin-board or meeting (meeting_post/meeting_action_update)',
+        }]
+      : []
     return {
       ok: true, accepted: true, stored: true, delivered: shouldWake, session: target.sessionId,
       alias: target.alias ?? null, messageId, subject, bodySha256: sha,
       targetState: 'live', deliveryState: effectiveDeliveryState, notDeliverable: false, retryable: false,
       reasonCode: effectiveReasonCode, reason: reasonText(effectiveReasonCode), expiresAt: null, route,
       lightweight, priority, queued: shouldWake, selfDelivery, woke: shouldWake,
+      ...(replyRestricted ? { replyChannel: 'bulletin-board/meeting', warnings: replyWarnings } : {}),
       transport, ...(transportError === null ? {} : { transportError }),
     }
   }
@@ -2289,7 +2301,7 @@ export function apply(ctx, config) {
     description: 'Send a message to any DSH session (id or registered alias). Bodies are stored in a '
       + 'global SQLite database; the recipient gets only a lightweight envelope and reads the body '
       + 'with message_read. Supports dedupeKey/force/nonce and priority bypass. strictMode (default true) '
-      + 'requires a one-time approval for direct session-id targets; alias/join is preferred. Project-agnostic. '
+      + 'requires a one-time approval for direct session-id targets; alias/join is preferred. Cross-permission note: a danger-full-access sender can deliver to a confined target, but that target cannot reply directly; use bulletin-board or meetings for the reply leg. Project-agnostic. '
       + 'Capability/operator-only index: skill("team-bootstrap") §2 / capability audit.',
     parameters: {
       type: 'object',
