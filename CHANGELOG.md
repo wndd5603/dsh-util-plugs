@@ -1,3 +1,7 @@
+## 2026.11.17-77 (dev)
+
+- **network sessions from DB**: network_info now augments host-registry sessions with session-network DB rows, so known intercommunicating sessions without aliases appear with source=session-network-db.
+
 ## 2026.11.17-76 (dev)
 
 - **network live sessions**: team-bus now injects the Host `sessions` service; readLiveAgents uses the global session store first, so unjoined live sessions are listed.

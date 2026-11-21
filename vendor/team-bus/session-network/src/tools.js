@@ -1223,6 +1223,24 @@ export function registerTools(ctx, deps) {
             source: 'live-agent',
           })
         }
+        const dbSessionRows = safeCall(() => {
+          const read = withReadDb(() => (typeof modules.db?.listSessions === 'function' ? modules.db.listSessions() : []))
+          return read.ok && Array.isArray(read.value) ? read.value : []
+        }, [])
+        for (const row of dbSessionRows) {
+          const id = row?.session_id
+          if (typeof id !== 'string' || id === '' || knownSessionIds.has(id)) continue
+          knownSessionIds.add(id)
+          sessions.push({
+            sessionId: id,
+            alias: null,
+            displayName: row.display_name ?? null,
+            roleName: row.role_name ?? null,
+            status: typeof row.status === 'string' ? row.status : 'active',
+            routable: true,
+            source: 'session-network-db',
+          })
+        }
         const pitfallsForNetwork = safeCall(
           () => (modules.pitfalls?.buildPitfalls ?? buildPitfallsDirect)({ limit: 10, probe: false }),
           () => ({ count: 0, items: [] }),
