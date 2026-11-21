@@ -1,3 +1,7 @@
+## 2026.11.17-63 (dev)
+
+- **Settings schema fix**: `message-bus.notFoundPolicy` is a volatile string (validated/normalized) instead of a volatile enum union. DSH `settings.describe` walked the enum union into an undefined node and failed with `Cannot read properties of undefined (reading 'meta')`; this fixes the Models/General settings load.
+
 ## 2026.11.17-62 (dev)
 
 - **CR regressions**: added tests for Web delete default-disable and no-arg `collaboration_recall` caller scoping.

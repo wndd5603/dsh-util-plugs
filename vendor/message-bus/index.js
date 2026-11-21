@@ -82,9 +82,9 @@ export const Config = objectSchema({
     description: 'Hard maximum message body length in characters (default 100000). Longer bodies are rejected with INVALID_ARGUMENT and neither stored nor queued; there is no silent truncation.',
     int: true, min: 1,
   }),
-  notFoundPolicy: enumOf('reject', ['reject', 'queue'], {
+  notFoundPolicy: string('reject', {
     volatile: true,
-    description: "Q2-B not-found policy (default 'reject'): a session-<uuid> target that does not exist is not stored and returns deliveryState=undeliverable/reasonCode=session-not-found. 'queue' keeps the legacy store+queue behaviour. Per-call queueUndeliverable:true overrides either value for one send.",
+    description: "Q2-B not-found policy (default 'reject'; accepted values reject|queue): a session-<uuid> target that does not exist is not stored and returns deliveryState=undeliverable/reasonCode=session-not-found. 'queue' keeps the legacy store+queue behaviour. Per-call queueUndeliverable:true overrides either value for one send.",
   }),
   strictMode: boolean(true, {
     description: '严格模式/Strict mode (default true): direct session-id delivery requires one-time approval in confined modes; set false to allow direct ids. Auto-bypassed under danger-full-access (no approval answerer). Alias/join is always unaffected.',
