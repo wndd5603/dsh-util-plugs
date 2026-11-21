@@ -1,3 +1,7 @@
+## 2026.11.17-79 (dev)
+
+- **network sessions active-only**: session-network DB rows are included only when status is active; stale historical rows stay out of network_info.
+
 ## 2026.11.17-78 (dev)
 
 - **network sessions**: filter stale session-network DB rows from network_info; active intercommunicating sessions remain and historical stale ids no longer inflate total.
