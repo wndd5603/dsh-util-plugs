@@ -2710,7 +2710,18 @@ export function apply(ctx, config) {
         transport,
         directory: directoryView ?? { source: 'unavailable', joinedCount: 0 },
         joinedCount: directoryView?.joinedCount ?? 0,
-        envelope: typeof store.envelopeCounts === 'function' ? safeCall(() => store.envelopeCounts(), null) : null,
+        envelope: typeof store.envelopeCounts === 'function' ? {
+          ...(safeCall(() => store.envelopeCounts(), null) ?? {}),
+          scope: 'global (all recipients, every session in this bus DB)',
+          note: 'consumedEnvelopes counts envelopes whose recipient already read the body. This is NOT comparable with countsMine.unread (per recipient) — use envelopeMine for that.',
+        } : null,
+        envelopeMine: (() => {
+          const mine = exec?.agent?.session?.id
+          if (typeof mine !== 'string' || mine === '') return null
+          const counts = safeCall(() => store.envelopeCountsFor?.(mine), null)
+          if (counts === null || counts === undefined) return null
+          return { ...counts, scope: 'mine (this caller session; comparable with countsMine.unread)' }
+        })(),
         counts,
         countsSummary: counts === null ? null : (() => {
           const byReason = counts.pending?.byReason ?? {}

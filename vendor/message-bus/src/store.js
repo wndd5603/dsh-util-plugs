@@ -553,6 +553,25 @@ export function openMessageStore(dbPath, options = {}) {
     }
   }
 
+  /**
+   * Envelope counts for ONE recipient. `envelopeCounts()` is global, so comparing
+   * it with a per-session unread count looks contradictory ("0 unread but N
+   * unconsumed") — this is the comparable number.
+   */
+  const envelopeCountsFor = (toSession) => {
+    const session = String(toSession ?? '')
+    if (session === '') return { sessionId: null, envelopes: 0, consumedEnvelopes: 0 }
+    const one = (sql) => {
+      const row = db.prepare(sql).get(session)
+      return row === undefined || row === null ? 0 : Number(Object.values(row)[0])
+    }
+    return {
+      sessionId: session,
+      envelopes: one('SELECT COUNT(*) AS n FROM envelope_state WHERE to_session = ?'),
+      consumedEnvelopes: one('SELECT COUNT(*) AS n FROM envelope_state WHERE to_session = ? AND consumed_at IS NOT NULL'),
+    }
+  }
+
   const envelopeState = (toSession, messageId) => {
     const row = db.prepare('SELECT * FROM envelope_state WHERE to_session = ? AND message_id = ?')
       .get(String(toSession), String(messageId))
@@ -598,7 +617,7 @@ export function openMessageStore(dbPath, options = {}) {
     deleteMessage, listSuppressed, countSuppressed, latestDeliveries,
     pendingDeliveries, markDeliveryDelivered, deliveryView,
     markRead, getReadAt, upsertRoute, resolveRoute, listRoutes, counts, pendingSummary, unreadSummary, purge,
-    envelopeState, markEnvelopeDelivered, markEnvelopeConsumed, envelopeCounts,
+    envelopeState, markEnvelopeDelivered, markEnvelopeConsumed, envelopeCounts, envelopeCountsFor,
     databaseFacts, checkpoint,
     close: () => { try { db.close() } catch { /* already closed */ } },
   }

@@ -41,6 +41,30 @@ Use the normal write/edit tools; existing files are copied before the edit. Chec
 
 `enabled`, the plain (uncompressed) window and project-root resolution (per session workspace). Backups stay under the project's `file_backups/`; `allowDelete` defaults to `false` and the hook never deletes a snapshot.
 
+### Keeping a long-lived rollback point (out-of-pool anchors)
+
+The plain window and the global budget decide which snapshots stay readable as
+plain text, and both sort by time — so **any snapshot can eventually be gzipped**,
+including one you created by hand. If you need a rollback point that stays plain
+text forever, keep it **outside the snapshot pool**:
+
+```text
+file_backups/_改前_auto_…_levels.lua           ← pool: may be gzipped later
+file_backups/rollback-anchors-20261121/        ← subdirectory: never scanned
+  01_before-refactor_levels.lua
+  02_before-bugfix_levels.lua
+  README.txt
+```
+
+- The hook scans **regular files directly inside `backupDir`** (`_改前_*`), so a
+  subdirectory is never counted, compressed, or deleted.
+- Copy (do not move) the snapshot you want to keep, then verify the copy:
+  `sha256sum` both files and compare; the copy is independent of the pool.
+- Trade-off: an anchor is not tracked by `auto_backup_status` / `auto_backup_history`,
+  and it does not follow later edits — that is the point: it must not move.
+- Recommended: add a short `README.txt` in the anchor directory explaining what each
+  file is and how to restore it, so the intent survives without external notes.
+
 ### Permissions, compatibility & privacy
 
 - Local backups only; no network calls and no credentials.
@@ -91,6 +115,25 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#v2026.11.5-9
 ### 配置
 
 `enabled`、明文（未压缩）窗口与项目根解析（按会话工作区）。备份保存在项目的 `file_backups/` 下；`allowDelete` 默认 `false`，钩子永不删除快照。
+
+### 长期保留一个"回滚锚点"（出池法）
+
+明文窗口与全局预算都按时间排序决定谁保持明文 ⇒ **任何快照最终都可能被压缩**，
+包括你手工建的那份。若需要"永远保持明文"的回滚点，把它**放到快照池之外**：
+
+```text
+file_backups/_改前_auto_…_levels.lua           ← 池内：将来可能被压成 .gz
+file_backups/回滚锚点_20261121/                 ← 子目录：永不被扫描
+  01_重构前_levels.lua
+  02_修复前_levels.lua
+  README.txt
+```
+
+- 钩子只扫 `backupDir` **直属的普通文件**（`_改前_*`），子目录不计数、不压缩、不删除。
+- 用**复制**（不是移动）：复制后用 `sha256sum` 对比两份文件一致；复制件独立于快照池。
+- 代价：锚点不出现在 `auto_backup_status` / `auto_backup_history` 里，也不跟随后续编辑
+  —— 这正是它的目的：不允许它变。
+- 建议在锚点目录里放一份 `README.txt` 说明每份文件是什么、怎么还原，意图不依赖外部笔记。
 
 ### 权限、兼容与隐私
 

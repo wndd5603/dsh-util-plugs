@@ -182,6 +182,20 @@ test('message_read denies third parties and only marks authorized reads', async 
     assert.equal(typeof resumeState.note, 'string')
     assert.match(resumeState.note, /replays session history/)
     assert.equal(status.execute().resumedCount, 0)
+    // `envelope` is GLOBAL and `countsMine.unread` is per recipient, so the two
+    // looked contradictory ("0 unread but N unconsumed"). envelopeMine is the
+    // comparable number for the caller's own session.
+    const globalEnvelope = status.execute().envelope
+    assert.equal(typeof globalEnvelope.scope, 'string')
+    assert.match(globalEnvelope.scope, /global/)
+    assert.match(globalEnvelope.note, /countsMine/)
+    const mineEnvelope = status.execute({}, { agent: { session: { id: TARGET } } }).envelopeMine
+    assert.equal(mineEnvelope.sessionId, TARGET)
+    assert.equal(mineEnvelope.envelopes, 1, 'the recipient has exactly one envelope')
+    assert.equal(mineEnvelope.consumedEnvelopes, 0, 'not read yet at this point')
+    assert.match(mineEnvelope.scope, /mine/)
+    assert.equal(status.execute({}, { agent: { session: { id: SENDER } } }).envelopeMine.envelopes, 0,
+      'the sender received no envelope for its own message')
     const deniedAck = ack.execute({ ids: [sent.messageId] }, { agent: { session: { id: THIRD } } })
     assert.equal(deniedAck.ok, false)
     assert.deepEqual(deniedAck.denied, [sent.messageId])
