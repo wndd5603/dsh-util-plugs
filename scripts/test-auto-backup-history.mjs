@@ -2,7 +2,7 @@
 // Lossless backup history: snapshots are never deleted, older ones are gzipped.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBackupManager } from '../vendor/auto-backup/index.js'
@@ -81,17 +81,36 @@ test('the global count budget is measured on plain snapshots', (t) => {
     'plain snapshots are trimmed to the count budget (compression does not lower the total)')
 })
 
-test('pre-redesign snapshot names are ignored and never compressed or deleted', (t) => {
+test('legacy and unparseable names are counted and compressed, never deleted', (t) => {
   const { target, manager } = fixture(t, { keepUncompressedPerFile: 1, compressWhenFilesOver: 1 })
   mkdirSync(manager.backupDir, { recursive: true })
+  // Second-precision stamp (pre-redesign) and a name with no stamp at all.
   const legacy = join(manager.backupDir, '_改前_R2_FINAL_2026-11-04_222804.md')
+  const unstamped = join(manager.backupDir, '_改前_随手备注_levels.lua')
   writeFileSync(legacy, 'legacy-bytes')
+  writeFileSync(unstamped, 'unstamped-bytes')
+  const kinds = manager.allBackupFiles().map(file => file.kind).sort()
+  assert.deepEqual(kinds, ['legacy', 'unknown'], 'both legacy shapes must be visible to the tools')
   writeFileSync(target, 'first')
   manager.backup(target)
   writeFileSync(target, 'second')
   manager.backup(target)
-  assert.equal(existsSync(legacy), true, 'legacy snapshot must still exist')
-  assert.equal(readFileSync(legacy, 'utf8'), 'legacy-bytes', 'legacy snapshot must stay untouched')
-  assert.equal(manager.allBackupFiles().some(snapshot => snapshot.file === 'R2_FINAL_2026-11-04_222804.md'), false,
-    'legacy names are outside the snapshot index')
+  const snapshots = manager.allBackupFiles()
+  assert.equal(snapshots.length, 4, 'no snapshot may be deleted')
+  const legacyRows = snapshots.filter(file => file.entry.startsWith('_改前_R2_FINAL_'))
+  assert.equal(legacyRows.length, 1, 'the legacy snapshot must still exist (possibly compressed)')
+  assert.equal(manager.readSnapshot(legacyRows[0]).toString('utf8'), 'legacy-bytes',
+    'a compressed legacy snapshot must still decode to the original bytes')
+  assert.ok(snapshots.some(file => file.stampSource === 'mtime'),
+    'a name without a stamp falls back to mtime for ordering')
+})
+
+test('history addresses legacy snapshots by basename', (t) => {
+  const { root, manager } = fixture(t)
+  mkdirSync(manager.backupDir, { recursive: true })
+  writeFileSync(join(manager.backupDir, '_改前_13js_20261021_015421_AGENTS.md'), 'old-agents')
+  const rows = manager.existingBackups(join(root, 'AGENTS.md'))
+  assert.equal(rows.length, 1, 'a legacy snapshot must be reachable by its basename')
+  assert.equal(rows[0].kind, 'legacy')
+  assert.equal(manager.readSnapshot(rows[0]).toString('utf8'), 'old-agents')
 })

@@ -1,6 +1,14 @@
+## 2026.11.17-92 (dev)
+
+- **Snapshot accounting covers the whole backup dir**: `auto_backup_status` used to count only names written by the current hook (`_改前_<batch>_<YYYYMMDD_HHMMSSmmm>_<file>`); pre-redesign and hand-made names (`…_2026-11-04_222804.md`, `…_20261021_015421_AGENTS.md`, `…_20261116133341.md`) were invisible. On a project whose history is mostly old names the visible subset stayed small, so `compressWhenFilesOver` / `compressWhenTotalMBOver` never fired while the directory kept growing. The parser now classifies `current` / `legacy` / `unknown`, and **totals plus the global thresholds run over every `_改前_*` file**.
+- **New status fields**: `formatCounts{current,legacy,unknown}`, `unparsedCount`, `thresholds{plainCountBudget,totalMBBudget,overPlainBudget,overTotalMBBudget}` and `statsCrossCheck{scannedOnDisk,counted,matchesDisk}` — the last one counts the directory independently, so "what the tools see" can be compared with "what is on disk" instead of trusting our own index.
+- **History reaches legacy snapshots**: `auto_backup_history`/`auto_backup_show` match by basename suffix, so a pre-redesign snapshot of `AGENTS.md` is listed and decompressed like any other.
+- **Per-root counters**: `counters` were shared by every workspace in the host process while `root.path` described the caller's project; they are now per root, and `countersScope` says so.
+- **Unchanged guarantees**: nothing is deleted (`allowDelete` still `false` by default), compression stays lossless, and a name without a usable stamp is ordered by mtime.
+
 ## 2026.11.17-91 (dev)
 
-- **Lossless backup docs + regression test**: the auto-backup README and `docs/AUTO_BACKUP_REDESIGN.md` state the lossless model (never delete; gzip older snapshots) and record the -90 live verification (2184 files / 24.5 MB, 1484/1484 gzip integrity, 401 legacy snapshots retained). New test asserts pre-redesign snapshot names are never indexed, compressed or deleted. Docs/test only: no runtime behavior change.
+- **Lossless backup docs + regression test**: the auto-backup README and `docs/AUTO_BACKUP_REDESIGN.md` state the lossless model (never delete; gzip older snapshots) and record the -90 live verification (2184 files / 24.5 MB, 1484/1484 gzip integrity, 401 legacy snapshots retained). Docs/test only: no runtime behavior change. (The added test was replaced in -92, when legacy names became first-class instead of invisible.)
 
 ## 2026.11.17-90 (dev)
 

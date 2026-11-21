@@ -271,38 +271,95 @@ export function createBackupManager(config) {
     return { backup: true, relative: rel, absolute }
   }
 
+  const SNAPSHOT_PREFIX = '_改前_'
   const SNAPSHOT_RE = /^_改前_(.+?)_(\d{8}_\d{9})(?:_(\d+))?_(.+?)(\.gz)?$/
+  // Pre-redesign names use second precision; hand-made ones may use an ISO date,
+  // and some drop the date/time separator entirely (`20261116133341`).
+  // A stamp is followed by a basename (`_AGENTS.md`), only an extension
+  // (`…_20261017_160939.lua`), a collision counter, or the end of the name.
+  const LEGACY_STAMP_RE = /_(?:(\d{4}-\d{2}-\d{2})[_-]?(\d{6})|(\d{8})[_-]?(\d{6}))(?:_(\d+))?(?=_|\.|$)/g
 
-  /** Parse one snapshot entry name; null when it is not one of ours. */
-  function parseSnapshotEntry(entry) {
-    const match = SNAPSHOT_RE.exec(entry)
-    if (match === null) return null
-    return {
-      batch: match[1],
-      stamp: match[2],
-      collision: match[3] === undefined ? 1 : Number(match[3]),
-      file: match[4],
-      compressed: match[5] === '.gz',
-    }
+  /** `2026-10-17` + `155816` → `20261017_155816000` so every stamp sorts the same way. */
+  function normalizeLegacyStamp(datePart, timePart) {
+    return datePart.replace(/-/g, '') + '_' + (timePart + '000').slice(0, 9)
   }
 
-  /** Snapshot list for one target (plain + .gz), newest first by name stamp. */
+  /** Millisecond stamp for a snapshot whose name carries no usable timestamp. */
+  function stampFromMtime(mtimeMs) {
+    const when = new Date(mtimeMs)
+    const pad = (value, size) => String(value).padStart(size, '0')
+    return String(when.getFullYear()) + pad(when.getMonth() + 1, 2) + pad(when.getDate(), 2) + '_'
+      + pad(when.getHours(), 2) + pad(when.getMinutes(), 2) + pad(when.getSeconds(), 2)
+      + pad(when.getMilliseconds(), 3)
+  }
+
+  /**
+   * Classify one directory entry; null when it is not a snapshot at all.
+   *
+   * kind: `current` — millisecond stamp written by this hook;
+   *       `legacy`  — older stamp format, still parseable;
+   *       `unknown` — a `_改前_` file whose name has no recognisable stamp.
+   *
+   * Every kind counts toward totals and the global thresholds (compression is
+   * per file, so it never needs a parseable name). Parsing only makes a snapshot
+   * addressable by file name (history/show) and comparable by stamp.
+   */
+  function classifySnapshotEntry(entry) {
+    const match = SNAPSHOT_RE.exec(entry)
+    if (match !== null) {
+      return {
+        kind: 'current',
+        batch: match[1],
+        stamp: match[2],
+        collision: match[3] === undefined ? 1 : Number(match[3]),
+        file: match[4],
+        compressed: match[5] === '.gz',
+      }
+    }
+    if (!entry.startsWith(SNAPSHOT_PREFIX)) return null
+    const compressed = entry.endsWith('.gz')
+    const stem = compressed ? entry.slice(0, -3) : entry
+    if (stem.length <= SNAPSHOT_PREFIX.length) return null
+    // Take the LAST stamp-looking group so a date inside the batch tag cannot win.
+    let stamp = null
+    let collision = 1
+    let batch = null
+    let file = null
+    LEGACY_STAMP_RE.lastIndex = 0
+    for (let found = LEGACY_STAMP_RE.exec(stem); found !== null; found = LEGACY_STAMP_RE.exec(stem)) {
+      const isoDate = found[1]
+      const isoTime = found[2]
+      stamp = isoDate !== undefined
+        ? normalizeLegacyStamp(isoDate, isoTime)
+        : normalizeLegacyStamp(found[3], found[4])
+      collision = found[5] === undefined ? 1 : Number(found[5])
+      batch = stem.slice(SNAPSHOT_PREFIX.length, found.index)
+      const rest = stem.slice(found.index + found[0].length).replace(/^_/, '')
+      // Only an extension left ⇒ the original basename is not recoverable.
+      file = rest === '' || rest.startsWith('.') ? null : rest
+    }
+    if (stamp === null) return { kind: 'unknown', batch: null, stamp: null, collision: 1, file: null, compressed }
+    return { kind: 'legacy', batch, stamp, collision, file, compressed }
+  }
+
+  /** Does this snapshot belong to the given basename? */
+  function snapshotIsFor(snapshot, name) {
+    if (snapshot.file !== null) return snapshot.file === name
+    const stem = snapshot.compressed === true ? snapshot.entry.slice(0, -3) : snapshot.entry
+    return stem.endsWith('_' + name)
+  }
+
+  /** Snapshot list for one target (plain + .gz), newest first. */
   function existingBackups(absolute) {
     if (!existsSync(backupDir)) return []
     const name = basename(absolute)
     const out = []
-    for (const entry of readdirSync(backupDir)) {
-      const parsed = parseSnapshotEntry(entry)
-      if (parsed === null || parsed.file !== name) continue
-      const path = join(backupDir, entry)
-      try {
-        const info = statSync(path)
-        if (!info.isFile()) continue
-        out.push({
-          entry, path, mtime: info.mtimeMs, size: info.size,
-          compressed: parsed.compressed, stamp: parsed.stamp, collision: parsed.collision,
-        })
-      } catch { /* skip unreadable */ }
+    for (const file of allBackupFiles()) {
+      if (!snapshotIsFor(file, name)) continue
+      out.push({
+        entry: file.entry, path: file.path, mtime: file.mtime, size: file.size,
+        compressed: file.compressed, stamp: file.stamp, collision: file.collision, kind: file.kind,
+      })
     }
     return out.sort((left, right) => {
       if (left.stamp !== right.stamp) return right.stamp.localeCompare(left.stamp)
@@ -311,12 +368,17 @@ export function createBackupManager(config) {
     })
   }
 
-  /** Every snapshot (plain + .gz) in the backup dir, newest first. */
+  /**
+   * Every snapshot (plain + .gz) in the backup dir, newest first.
+   * Includes legacy and unparseable `_改前_` names: the totals and the global
+   * thresholds must see the whole directory, not just what this hook wrote.
+   * `stampSource` is `mtime` when the name carries no usable timestamp.
+   */
   function allBackupFiles() {
     if (!existsSync(backupDir)) return []
     const files = []
     for (const entry of readdirSync(backupDir)) {
-      const parsed = parseSnapshotEntry(entry)
+      const parsed = classifySnapshotEntry(entry)
       if (parsed === null) continue
       const absolute = join(backupDir, entry)
       try {
@@ -324,7 +386,10 @@ export function createBackupManager(config) {
         if (!info.isFile()) continue
         files.push({
           entry, path: absolute, mtime: info.mtimeMs, size: info.size,
-          compressed: parsed.compressed, stamp: parsed.stamp, file: parsed.file,
+          compressed: parsed.compressed, file: parsed.file, kind: parsed.kind,
+          collision: parsed.collision,
+          stamp: parsed.stamp === null ? stampFromMtime(info.mtimeMs) : parsed.stamp,
+          stampSource: parsed.stamp === null ? 'mtime' : 'name',
         })
       } catch { /* skip */ }
     }
@@ -459,6 +524,10 @@ export function createBackupManager(config) {
    * the PLAIN budget (`compressWhenFilesOver`) and the total-size budget
    * (`compressWhenTotalMBOver`) are both satisfied. Compression does not lower
    * the file count, so the count budget must be measured on plain snapshots.
+   *
+   * Runs over the WHOLE backup directory (current + legacy + unparseable names):
+   * a budget computed on a subset silently never fires, which is exactly the
+   * failure mode a project with mostly pre-redesign names would hit.
    * Physical deletion only when allowDelete.
    */
   function compactGlobal() {
@@ -542,11 +611,40 @@ export function createBackupManager(config) {
     stats() {
       const files = allBackupFiles()
       const plain = files.filter(file => file.compressed !== true)
+      const bytes = files.reduce((sum, file) => sum + file.size, 0)
+      const totalMB = bytes / (1024 * 1024)
+      const formatCounts = { current: 0, legacy: 0, unknown: 0 }
+      for (const file of files) formatCounts[file.kind] = (formatCounts[file.kind] ?? 0) + 1
+      // Independent on-disk count so "what the tools see" can be compared with
+      // "what is actually in the directory" instead of trusting our own parser.
+      let scannedOnDisk = 0
+      try {
+        if (existsSync(backupDir)) {
+          for (const entry of readdirSync(backupDir)) {
+            if (!entry.startsWith(SNAPSHOT_PREFIX)) continue
+            try { if (statSync(join(backupDir, entry)).isFile()) scannedOnDisk += 1 } catch { /* skip */ }
+          }
+        }
+      } catch { /* ignore */ }
       return {
         count: files.length,
         plainCount: plain.length,
         compressedCount: files.length - plain.length,
-        totalMB: Math.round(files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024) * 100) / 100,
+        totalMB: Math.round(totalMB * 100) / 100,
+        formatCounts,
+        unparsedCount: formatCounts.unknown,
+        statsCrossCheck: {
+          scannedOnDisk,
+          counted: files.length,
+          matchesDisk: scannedOnDisk === files.length,
+          note: 'scannedOnDisk counts every `_改前_` file in backupDir; counted is what the tools see. They must match.',
+        },
+        thresholds: {
+          plainCountBudget: compressWhenFilesOver,
+          totalMBBudget: compressWhenTotalMBOver,
+          overPlainBudget: plain.length > compressWhenFilesOver,
+          overTotalMBBudget: totalMB > compressWhenTotalMBOver,
+        },
         compressionPolicy: 'snapshots are never deleted by default; older ones are gzipped',
       }
     },
@@ -578,7 +676,18 @@ export function apply(ctx, config, deps = {}) {
   const managers = new Map()
   /** 同一命令+目标只提醒一次（apply 作用域）。 */
   const bashWarned = new Set()
-  const counters = { backups: 0, identical: 0, errors: 0, lastBackupAt: null, lastBackup: null }
+  /** Counters are per project root: one host process serves several workspaces. */
+  const countersByRoot = new Map()
+  const emptyCounters = () => ({ backups: 0, identical: 0, errors: 0, lastBackupAt: null, lastBackup: null })
+  const countersFor = (root) => {
+    if (root === null) return emptyCounters()
+    let value = countersByRoot.get(root)
+    if (value === undefined) {
+      value = emptyCounters()
+      countersByRoot.set(root, value)
+    }
+    return value
+  }
   let inactiveReason = null
   let resolvedLast = { root: null, source: 'unavailable' }
   let hookRegistered = false
@@ -638,6 +747,7 @@ export function apply(ctx, config, deps = {}) {
       } catch (error) {
         stats = { error: String(error) }
       }
+      const counters = countersFor(resolved.root)
       return {
         ok: true,
         plugin: 'dsh-auto-backup',
@@ -648,14 +758,14 @@ export function apply(ctx, config, deps = {}) {
         inactiveReason: resolved.root === null ? 'no projectRoot configured and no session workspace (hook is a no-op)' : inactiveReason,
         backupDir: manager === null ? null : manager.backupDir,
         backupStats: stats,
-        backupStatsScope: 'on-disk historical files',
+        backupStatsScope: 'all `_改前_*` snapshots in backupDir (every batch, every name format, plain + .gz)',
         counters: { ...counters },
-        countersScope: 'this-host-process since start (not historical total)',
+        countersScope: 'this-host-process since start, for THIS project root only (never another workspace)',
         summary: {
           onDisk: typeof stats?.count === 'number' ? stats.count : null,
           processBackups: counters.backups,
           lastProcessBackupAt: counters.lastBackupAt,
-          note: 'backupStats is historical disk total; counters only count this process. A null lastProcessBackupAt does not mean no historical backups.',
+          note: 'backupStats is the historical disk total for this root; counters only count this process. A null lastProcessBackupAt does not mean no historical backups.',
         },
         config: { defaults: defaultsOf(Config), fields: fieldDocs(Config) },
       }
@@ -700,11 +810,16 @@ export function apply(ctx, config, deps = {}) {
         return { ok: false, code: 'DELETE_DISABLED', message: 'mode:"delete" requires config allowDelete:true; default keeps every snapshot' }
       }
       // Group snapshots by basename (backup names preserve only the basename).
+      // Unparseable names get their own group so the per-file window never
+      // treats unrelated files as one history.
       const groups = new Map()
+      const formatCounts = { current: 0, legacy: 0, unknown: 0 }
       for (const file of manager.allBackupFiles()) {
-        const list = groups.get(file.file) ?? []
+        formatCounts[file.kind] = (formatCounts[file.kind] ?? 0) + 1
+        const key = file.file === null ? '~' + file.entry : file.file
+        const list = groups.get(key) ?? []
         list.push(file)
-        groups.set(file.file, list)
+        groups.set(key, list)
       }
       const plan = []
       let compressed = 0
@@ -713,12 +828,12 @@ export function apply(ctx, config, deps = {}) {
         const sorted = [...list].sort((a, b) => (b.stamp ?? '').localeCompare(a.stamp ?? ''))
         const plain = sorted.filter(item => item.compressed !== true)
         for (const stale of plain.slice(keep)) {
-          plan.push({ file, entry: stale.entry, size: stale.size, action: 'compress' })
+          plan.push({ file, entry: stale.entry, size: stale.size, kind: stale.kind, action: 'compress' })
           if (!dryRun && manager.compressOne(stale)) compressed += 1
         }
         if (mode === 'delete') {
           for (const stale of sorted.filter(item => item.compressed === true)) {
-            plan.push({ file, entry: stale.entry, size: stale.size, action: 'delete' })
+            plan.push({ file, entry: stale.entry, size: stale.size, kind: stale.kind, action: 'delete' })
           }
         }
       }
@@ -728,6 +843,7 @@ export function apply(ctx, config, deps = {}) {
         mode,
         keepPerFile: keep,
         backupDir: manager.backupDir,
+        formatCounts,
         wouldChange: plan.length,
         compressed,
         deleted,
@@ -853,6 +969,7 @@ export function apply(ctx, config, deps = {}) {
         ctx.logger.info('[auto-backup] active again for root=' + resolved.root + ' (source=' + resolved.source + ')')
       }
       const manager = managerFor(resolved.root)
+      const counters = countersFor(resolved.root)
       const target = manager.targetFromArguments(exec.name, exec.arguments)
       if (target !== undefined) {
         const result = manager.backup(target)
@@ -877,7 +994,7 @@ export function apply(ctx, config, deps = {}) {
         }
       }
     } catch (error) {
-      counters.errors += 1
+      countersFor(null).errors += 1
       ctx.logger.warn('[auto-backup] hook error: ' + String(error))
     }
     return next()
