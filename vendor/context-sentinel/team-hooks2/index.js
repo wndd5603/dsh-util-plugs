@@ -129,6 +129,7 @@ export const Config = objectSchema({
     archiveThreshold: number(50, { description: 'Occupancy percent that starts a new archive cycle.', int: true, min: 1, max: 100 }),
     reminderEveryNTurns: number(2, { description: 'After archive creation, remind to update every N turns.', int: true, min: 1 }),
     dropThreshold: number(15, { description: 'Occupancy drop that means compaction: read the archive and reset.', int: true, min: 1, max: 100 }),
+    archiveRoot: string('', { description: 'Optional workspace-relative root for ARCHIVE_*.md when team/members is read-only; empty = team/members.' }),
     templates: nested(objectSchema({
       create: string('', { description: 'Create-archive template; placeholders {percent}/{threshold}.' }),
       remind: string('', { description: 'Update-archive template; placeholders {turns}/{everyNTurns}/{percent}.' }),
@@ -193,6 +194,7 @@ const DEFAULT_ARCHIVE_REMINDER = Object.freeze({
   archiveThreshold: ARCHIVE_PERCENT,
   reminderEveryNTurns: 2,
   dropThreshold: DROP_POINTS,
+  archiveRoot: '',
   templates: DEFAULT_ARCHIVE_TEMPLATES,
 })
 
@@ -217,6 +219,7 @@ function normalizeArchiveReminderConfig(config) {
     archiveThreshold: archiveInteger(source.archiveThreshold, DEFAULT_ARCHIVE_REMINDER.archiveThreshold, 1, 100),
     reminderEveryNTurns: archiveInteger(source.reminderEveryNTurns, DEFAULT_ARCHIVE_REMINDER.reminderEveryNTurns, 1, 1000),
     dropThreshold: archiveInteger(source.dropThreshold, DEFAULT_ARCHIVE_REMINDER.dropThreshold, 1, 100),
+    archiveRoot: typeof source.archiveRoot === 'string' ? source.archiveRoot.trim() : '',
     templates,
   }
 }
@@ -290,11 +293,12 @@ function archivePathFromArguments(args) {
 }
 
 /** Latest `ARCHIVE_*.md` under `<workspace>/team/members[/<role>]/**`, absolute path. */
-function findLatestArchivePath(workspaceDir, roleName) {
+function findLatestArchivePath(workspaceDir, roleName, archiveRoot = '') {
   const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : null
-  const root = role === null
-    ? join(workspaceDir, 'team', 'members')
-    : join(workspaceDir, 'team', 'members', role)
+  const base = typeof archiveRoot === 'string' && archiveRoot.trim() !== ''
+    ? resolve(workspaceDir, archiveRoot.trim())
+    : join(workspaceDir, 'team', 'members')
+  const root = role === null ? base : join(base, role)
   let best = null
   let bestMtime = -1
   const visit = (dir, depth) => {
@@ -327,11 +331,14 @@ function findLatestArchivePath(workspaceDir, roleName) {
 }
 
 /** True when `file` is inside the role's own team/members directory. */
-function archiveBelongsToRole(file, workspaceDir, roleName) {
+function archiveBelongsToRole(file, workspaceDir, roleName, archiveRoot = '') {
   if (typeof file !== 'string' || file === '') return false
   const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : null
   if (role === null) return false
-  const ownDir = resolve(workspaceDir, 'team', 'members', role)
+  const base = typeof archiveRoot === 'string' && archiveRoot.trim() !== ''
+    ? resolve(workspaceDir, archiveRoot.trim())
+    : resolve(workspaceDir, 'team', 'members')
+  const ownDir = join(base, role)
   const rel = relative(ownDir, resolve(file))
   return rel !== '' && rel !== '..' && !rel.startsWith('..' + (process.platform === 'win32' ? '\\' : '/')) && !isAbsolute(rel)
 }
@@ -341,15 +348,15 @@ function archiveBelongsToRole(file, workspaceDir, roleName) {
  * foreign `knownPath` is ignored; the fallback is the latest archive under the
  * caller's role dir, then the canonical path for a new archive.
  */
-export function resolveManualArchivePath({ workspaceDir, roleName, knownPath } = {}) {
+export function resolveManualArchivePath({ workspaceDir, roleName, knownPath, archiveRoot = '' } = {}) {
   const workspace = typeof workspaceDir === 'string' && workspaceDir !== '' ? workspaceDir : process.cwd()
   const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : null
-  if (typeof knownPath === 'string' && archiveBelongsToRole(knownPath, workspace, role)) {
+  if (typeof knownPath === 'string' && archiveBelongsToRole(knownPath, workspace, role, archiveRoot)) {
     return knownPath
   }
-  const ownLatest = findLatestArchivePath(workspace, role)
+  const ownLatest = findLatestArchivePath(workspace, role, archiveRoot)
   if (ownLatest !== null) return ownLatest
-  return canonicalArchivePath(workspace, role)
+  return canonicalArchivePath(workspace, role, archiveRoot)
 }
 
 /**
@@ -390,12 +397,15 @@ export function reapJobs(registry, caller, { staleMs = 15 * 60 * 1000, dryRun = 
 }
 
 /** Canonical absolute archive path when no archive exists yet. */
-function canonicalArchivePath(workspaceDir, roleName) {
+function canonicalArchivePath(workspaceDir, roleName, archiveRoot = '') {
   const now = new Date()
   const two = value => String(value).padStart(2, '0')
   const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}_${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`
   const role = typeof roleName === 'string' && roleName.trim() !== '' ? roleName.trim() : 'member'
-  return join(workspaceDir, 'team', 'members', role, `ARCHIVE_${stamp}.md`)
+  const base = typeof archiveRoot === 'string' && archiveRoot.trim() !== ''
+    ? resolve(workspaceDir, archiveRoot.trim())
+    : join(workspaceDir, 'team', 'members')
+  return join(base, role, `ARCHIVE_${stamp}.md`)
 }
 
 /** Role-based write policy defaults: read-only roles may not edit/write files. */
@@ -2313,7 +2323,7 @@ export function apply(ctx, config) {
     s.lastManualCompactTurn = Number.isInteger(data.turn) ? data.turn : null
     s.lastAction = 'manual-compact'
     s.lastDedupeReason = null
-    s.archivePath = knownPath ?? findLatestArchivePath(workspaceDir) ?? canonicalArchivePath(workspaceDir)
+    s.archivePath = knownPath ?? findLatestArchivePath(workspaceDir, undefined, archiveReminder.archiveRoot) ?? canonicalArchivePath(workspaceDir, undefined, archiveReminder.archiveRoot)
     s.updatedAt = s.lastManualCompactAt
     state.set(key, s)
     save()
@@ -2430,6 +2440,7 @@ export function apply(ctx, config) {
         workspaceDir,
         roleName,
         knownPath: s.archivePath,
+        archiveRoot: archiveReminder.archiveRoot,
       })
       if (!existsSync(manualPath)) {
         manualPathNote = '（该路径当前尚未发现归档文件；请按此规范路径创建/补全归档并读取后再继续，不要在此刻新建其他归档。）'
@@ -2647,7 +2658,7 @@ export function apply(ctx, config) {
         && !/(?:^|[\\/])scratch[\\/]/iu.test(s.archivePath)
         ? s.archivePath
         : null
-      const archivePath = observedPath ?? resolveManualArchivePath({ workspaceDir, roleName, knownPath: null })
+      const archivePath = observedPath ?? resolveManualArchivePath({ workspaceDir, roleName, knownPath: null, archiveRoot: archiveReminder.archiveRoot })
       return {
         session: agent.session.id,
         percent: percent === null ? null : percent,
@@ -2668,6 +2679,7 @@ export function apply(ctx, config) {
           archiveThreshold: archiveReminder.archiveThreshold,
           reminderEveryNTurns: archiveReminder.reminderEveryNTurns,
           dropThreshold: archiveReminder.dropThreshold,
+          archiveRoot: archiveReminder.archiveRoot === '' ? 'team/members (default)' : archiveReminder.archiveRoot,
           phase: s.phase,
           cycle: s.cycle === true,
           archiveTurn: Number.isInteger(s.archiveTurn) ? s.archiveTurn : null,

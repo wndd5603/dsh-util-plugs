@@ -1,3 +1,7 @@
+## 2026.11.17-82 (dev)
+
+- **Archive root fallback**: team-hooks2 archiveReminder accepts `archiveRoot` (workspace-relative); find/resolve/canonical paths use it when team/members is read-only. Default unchanged.
+
 ## 2026.11.17-81 (dev)
 
 - **Version caveat**: workbench_status now labels version as package metadata, lists observable markers, and warns that version may lag the loaded module generation; verify by new fields/wordings.
