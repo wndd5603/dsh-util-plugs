@@ -33,7 +33,7 @@ export const Config = objectSchema({
   globalFallback: boolean(true, { description: 'When the workspace has no team/pipe2/PEERS.json, fall back to the host-wide live-session registry for discovery (zero-config first use). Set false for strict workspace-only privacy.' }),
 }, { description: 'Cross-session network plugin configuration (plugin-level only).', schemaVersion: 1 })
 
-export const inject = ['tools']
+export const inject = ['tools', 'sessions']
 
 const log = (ctx, ...args) => {
   try {

@@ -1,3 +1,7 @@
+## 2026.11.17-76 (dev)
+
+- **network live sessions**: team-bus now injects the Host `sessions` service; readLiveAgents uses the global session store first, so unjoined live sessions are listed.
+
 ## 2026.11.17-75 (dev)
 
 - **network_info live sessions**: readLiveAgents now prefers ctx.sessions.list(), so sessions outside the caller team are enumerated; falls back to agents.list when no global store exists.
