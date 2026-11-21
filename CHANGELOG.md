@@ -1,3 +1,7 @@
+## 2026.11.17-75 (dev)
+
+- **network_info live sessions**: readLiveAgents now prefers ctx.sessions.list(), so sessions outside the caller team are enumerated; falls back to agents.list when no global store exists.
+
 ## 2026.11.17-74 (dev)
 
 - **network_info scope note**: sessions[] now labels itself as joined-aliases-only; live unjoined sessions are explicitly out of scope instead of silently missing.

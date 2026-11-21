@@ -2164,7 +2164,13 @@ export function registerTools(ctx, deps) {
 /** Live agents via the agent-teams service when present; never throws. */
 export function readLiveAgents(ctx) {
   return safeCall(() => {
-    // Prefer a global live-session source; the team projection only lists this team.
+    // Prefer the Host session store: it lists every live session, including
+    // sessions that are not members of the caller's current team.
+    const sessions = ctx.get?.('sessions') ?? ctx.sessions
+    if (sessions?.list) {
+      return sessions.list().map(session => ({ session, status: 'running' }))
+    }
+    // Graceful fallback for profiles without a global session store.
     const agents = ctx.get?.('agents')
     if (agents?.list) return agents.list()
     const teams = ctx.get?.('agentTeams')
