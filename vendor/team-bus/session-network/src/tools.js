@@ -1208,6 +1208,21 @@ export function registerTools(ctx, deps) {
             source: 'host-registry',
           }
         })
+        const knownSessionIds = new Set(sessions.map(item => item.sessionId))
+        for (const agent of Array.isArray(live) ? live : []) {
+          const id = agent?.session?.id
+          if (typeof id !== 'string' || id === '' || knownSessionIds.has(id)) continue
+          knownSessionIds.add(id)
+          sessions.push({
+            sessionId: id,
+            alias: null,
+            displayName: agent?.session?.header?.displayName ?? agent?.displayName ?? null,
+            roleName: agent?.session?.header?.roleName ?? null,
+            status: agent?.status === 'running' ? 'running' : 'active',
+            routable: true,
+            source: 'live-agent',
+          })
+        }
         const pitfallsForNetwork = safeCall(
           () => (modules.pitfalls?.buildPitfalls ?? buildPitfallsDirect)({ limit: 10, probe: false }),
           () => ({ count: 0, items: [] }),

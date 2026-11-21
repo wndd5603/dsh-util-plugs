@@ -2642,6 +2642,13 @@ export function apply(ctx, config) {
       if (cfg.allowRouteRegister) tools.splice(5, 0, 'message_route_register')
       if (cfg.allowPurge) tools.push('message_purge')
       if (cfg.legacyTools) tools.push('pipe2_session_post', 'pipe2_queue', 'pipe2_read_message')
+      const directoryJoined = Array.isArray(directoryStatus?.joined) ? directoryStatus.joined : []
+      const directoryView = directoryStatus === null ? null : {
+        ...directoryStatus,
+        joinedCount: directoryJoined.length,
+        staleCount: directoryJoined.filter(item => item?.stale === true).length,
+        staleNote: 'staleCount is computed from the joined[] array returned here; it never hides a stale row.',
+      }
       return {
         ok: true,
         plugin: 'dsh-message-bus',
@@ -2659,8 +2666,8 @@ export function apply(ctx, config) {
         dbPath: cfg.dbPath,
         database: { ...facts, ...(hostDb ?? {}), ...(dbError === null ? {} : { error: dbError }) },
         transport,
-        directory: directoryStatus ?? { source: 'unavailable', joinedCount: 0 },
-        joinedCount: directoryStatus?.joinedCount ?? 0,
+        directory: directoryView ?? { source: 'unavailable', joinedCount: 0 },
+        joinedCount: directoryView?.joinedCount ?? 0,
         envelope: typeof store.envelopeCounts === 'function' ? safeCall(() => store.envelopeCounts(), null) : null,
         counts,
         countsSummary: counts === null ? null : {
@@ -2668,7 +2675,7 @@ export function apply(ctx, config) {
           undelivered: counts.undeliveredDeliveries,
           queued: counts.pending?.queued ?? 0,
           actionable: counts.undeliveredDeliveries + (counts.pending?.queued ?? 0),
-          note: 'unread is per-recipient read state; undelivered/queued are delivery state. Use message_queue({unreadOnly:true}) for reading, and inspect undeliverable reasons for queued failures.',
+          note: 'global across all recipients, not "mine"; countsMine below is this caller session. unread is per-recipient read state; undelivered/queued are delivery state. Use message_queue({unreadOnly:true}) for your reading, and inspect undeliverable reasons for queued failures.',
         },
         countsMine: (() => {
           const mine = exec?.agent?.session?.id

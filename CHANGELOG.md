@@ -1,3 +1,7 @@
+## 2026.11.17-73 (dev)
+
+- **Scope clarity**: message_bus_status countsSummary is explicitly global with countsMine, staleCount comes from joined[], and network_info includes live-agent sessions in addition to joined aliases.
+
 ## 2026.11.17-72 (dev)
 
 - **RC9 observability**: every live send now returns targetPermission and replyExpectation, so callers can verify the target mode without guessing; pending reminder drops the duplicate unread count.
