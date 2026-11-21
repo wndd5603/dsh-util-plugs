@@ -1,3 +1,7 @@
+## 2026.11.17-88 (dev)
+
+- **Prune readability**: `auto_backup_prune` reports filesShown/filesTotal so a truncated preview cannot be mistaken for the whole plan.
+
 ## 2026.11.17-87 (dev)
 
 - **Prune grouping fix**: `auto_backup_prune` now groups snapshots by the true basename (batch names containing underscores no longer merge different files) and reports the basename grouping caveat.

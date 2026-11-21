@@ -610,6 +610,8 @@ export function apply(ctx, config, deps = {}) {
         grouping: 'basename',
         groupingCaveat: 'Snapshots preserve only the basename, so files with the same basename in different directories share one retention group.',
         files: plan.slice(0, 50),
+        filesShown: Math.min(50, plan.length),
+        filesTotal: plan.length,
         truncated: plan.length > 50,
       }
     },
