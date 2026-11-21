@@ -577,9 +577,14 @@ export function apply(ctx, config, deps = {}) {
         return { ok: false, code: 'CONFIRM_REQUIRED', message: 'prune requires confirm:"PRUNE" when dryRun:false' }
       }
       // Group existing snapshots per original file name, newest first.
+      // NOTE: the backup file name only preserves the BASENAME
+      // (`_改前_<batch>_<ts>_<basename>`), so two different files with the same
+      // basename share one group. That matches the retention semantics used by
+      // the pre-write hook itself, and is why prune never claims per-path accuracy.
       const groups = new Map()
       for (const file of manager.allBackupFiles()) {
-        const key = file.entry.replace(/^_改前_/, '').replace(/^[^_]*_/, '').replace(/^\d{8}_\d{9}(?:_\d+)?_/, '')
+        const match = /^_改前_(.+?)_(\d{8}_\d{9})(?:_\d+)?_(.+)$/.exec(file.entry)
+        const key = match === null ? file.entry : match[3]
         const list = groups.get(key) ?? []
         list.push(file)
         groups.set(key, list)
@@ -602,6 +607,8 @@ export function apply(ctx, config, deps = {}) {
         backupDir: manager.backupDir,
         wouldRemove: plan.length,
         removed,
+        grouping: 'basename',
+        groupingCaveat: 'Snapshots preserve only the basename, so files with the same basename in different directories share one retention group.',
         files: plan.slice(0, 50),
         truncated: plan.length > 50,
       }

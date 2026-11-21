@@ -1,3 +1,7 @@
+## 2026.11.17-87 (dev)
+
+- **Prune grouping fix**: `auto_backup_prune` now groups snapshots by the true basename (batch names containing underscores no longer merge different files) and reports the basename grouping caveat.
+
 ## 2026.11.17-86 (dev)
 
 - **Fix false compaction detection**: team-hooks2 records the measurement source + context window with each reading and only compares a drop when both match; a window/source change is ignored (logged, never injected) instead of being reported as compaction. Reminder text and status expose percentSource/window.
