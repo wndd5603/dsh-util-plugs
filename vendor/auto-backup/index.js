@@ -456,7 +456,10 @@ export function createBackupManager(config) {
 
   /**
    * Global compaction: keep every snapshot, gzip the oldest plain ones until
-   * both thresholds are satisfied. Physical deletion only when allowDelete.
+   * the PLAIN budget (`compressWhenFilesOver`) and the total-size budget
+   * (`compressWhenTotalMBOver`) are both satisfied. Compression does not lower
+   * the file count, so the count budget must be measured on plain snapshots.
+   * Physical deletion only when allowDelete.
    */
   function compactGlobal() {
     let compressed = 0
@@ -465,7 +468,7 @@ export function createBackupManager(config) {
       const snapshots = allBackupFiles()
       const plain = () => allBackupFiles().filter(file => file.compressed !== true)
       const sizeMB = () => allBackupFiles().reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
-      const overLimit = () => allBackupFiles().length > compressWhenFilesOver || sizeMB() > compressWhenTotalMBOver
+      const overLimit = () => plain().length > compressWhenFilesOver || sizeMB() > compressWhenTotalMBOver
       while (overLimit()) {
         const oldest = plain().pop()
         if (oldest === undefined) break

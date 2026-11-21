@@ -68,3 +68,15 @@ test('global threshold compaction never deletes by default', (t) => {
   assert.ok(snapshots.some(snapshot => snapshot.compressed === true), 'threshold must trigger compression')
   assert.equal(manager.allowDelete, false, 'deletion stays off unless explicitly enabled')
 })
+
+test('the global count budget is measured on plain snapshots', (t) => {
+  const { target, manager } = fixture(t, { keepUncompressedPerFile: 99, compressWhenFilesOver: 3 })
+  for (let index = 0; index < 8; index += 1) {
+    writeFileSync(target, 'row-' + String(index))
+    manager.backup(target)
+  }
+  const snapshots = manager.allBackupFiles()
+  assert.equal(snapshots.length, 8, 'nothing is deleted')
+  assert.equal(snapshots.filter(snapshot => snapshot.compressed !== true).length, 3,
+    'plain snapshots are trimmed to the count budget (compression does not lower the total)')
+})
