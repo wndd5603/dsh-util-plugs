@@ -2,7 +2,7 @@
 // Lossless backup history: snapshots are never deleted, older ones are gzipped.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBackupManager } from '../vendor/auto-backup/index.js'
@@ -79,4 +79,19 @@ test('the global count budget is measured on plain snapshots', (t) => {
   assert.equal(snapshots.length, 8, 'nothing is deleted')
   assert.equal(snapshots.filter(snapshot => snapshot.compressed !== true).length, 3,
     'plain snapshots are trimmed to the count budget (compression does not lower the total)')
+})
+
+test('pre-redesign snapshot names are ignored and never compressed or deleted', (t) => {
+  const { target, manager } = fixture(t, { keepUncompressedPerFile: 1, compressWhenFilesOver: 1 })
+  mkdirSync(manager.backupDir, { recursive: true })
+  const legacy = join(manager.backupDir, '_改前_R2_FINAL_2026-11-04_222804.md')
+  writeFileSync(legacy, 'legacy-bytes')
+  writeFileSync(target, 'first')
+  manager.backup(target)
+  writeFileSync(target, 'second')
+  manager.backup(target)
+  assert.equal(existsSync(legacy), true, 'legacy snapshot must still exist')
+  assert.equal(readFileSync(legacy, 'utf8'), 'legacy-bytes', 'legacy snapshot must stay untouched')
+  assert.equal(manager.allBackupFiles().some(snapshot => snapshot.file === 'R2_FINAL_2026-11-04_222804.md'), false,
+    'legacy names are outside the snapshot index')
 })

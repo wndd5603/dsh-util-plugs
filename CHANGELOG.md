@@ -1,3 +1,7 @@
+## 2026.11.17-91 (dev)
+
+- **Lossless backup docs + regression test**: the auto-backup README and `docs/AUTO_BACKUP_REDESIGN.md` state the lossless model (never delete; gzip older snapshots) and record the -90 live verification (2184 files / 24.5 MB, 1484/1484 gzip integrity, 401 legacy snapshots retained). New test asserts pre-redesign snapshot names are never indexed, compressed or deleted. Docs/test only: no runtime behavior change.
+
 ## 2026.11.17-90 (dev)
 
 - **Plain-budget fix**: the global count threshold is measured on plain snapshots (compression never lowers the file count), so compaction stops at the intended plain budget instead of gzipping everything.

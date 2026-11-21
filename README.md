@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-90 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-91 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -21,6 +21,10 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 ### What it adds
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
+
+### What is new in 2026.11.17-91 (dev)
+
+- **Lossless backup docs + regression test**: the auto-backup README and the redesign doc now state the lossless model (snapshots are never deleted; older ones are gzipped), and a new test asserts that pre-redesign snapshot names are never indexed, compressed or deleted.
 
 ### What is new in 2026.11.17-90 (dev)
 
@@ -103,7 +107,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `plugin-console` | Unified plugin console: cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-90; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-91; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -152,6 +156,10 @@ MIT © 2026 wndd5603
 ### 这个安装包增加什么
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
+
+### 2026.11.17-91 新增
+
+- **无损备份文档 + 回归测试**：auto-backup 的 README 与改造文档改为"无损历史"口径（快照永不删除，旧快照压缩为 `.gz`），并新增用例断言重设计前的旧命名快照不会被索引、压缩或删除。
 
 ### 2026.11.17-90 新增
 
@@ -206,11 +214,11 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `team-bus` | 会话网络、别名、会议注册/权限/CAS、共享坑点与协作技能。 | [`vendor/team-bus/README.md`](vendor/team-bus/README.md) |
 | `agent-workflows` | Team Coordinator 与 Prompt Studio 工作流工具。 | [`vendor/agent-workflows/README.md`](vendor/agent-workflows/README.md) |
 | `workbench-bundle` | 只读 `workbench_status()` 总览与首轮能力提示。 | [`vendor/workbench-bundle/README.md`](vendor/workbench-bundle/README.md) |
-| `auto-backup` | 写前文件快照、保留策略与 `auto_backup_status()`。 | [`vendor/auto-backup/README.md`](vendor/auto-backup/README.md) |
+| `auto-backup` | 写前文件快照、无损历史（旧快照压缩不删除）、任意版本对比与 `auto_backup_status()`。 | [`vendor/auto-backup/README.md`](vendor/auto-backup/README.md) |
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-90，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-91，各插件保留自己的版本号。
 
 ### Web 界面
 
