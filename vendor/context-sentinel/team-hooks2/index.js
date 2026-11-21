@@ -185,7 +185,7 @@ const STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const DEFAULT_ARCHIVE_TEMPLATES = Object.freeze({
   create: '[team-hooks2] 上下文归档提醒（自动，非用户消息）：当前占用 {percent}%（≥{threshold}%）⇒ 请立即创建本会话归档文件（如 team/members/<你的角色名>/ARCHIVE_<YYYYMMDD_HHMMSS>.md），记录：当前任务 / 已得结论（带 文件:行号）/ 未完成项 / 关键事实 / 下次从哪续；并把本轮稳定结论/关键事实用 memory_remember 固化（若记忆库无）。此后本周期内完工只更新该归档，不新建。',
   remind: '[team-hooks2] 上下文归档提醒（自动）：本周期归档已创建；距上次提醒已 {turns} 轮（≥{everyNTurns}）⇒ 请更新归档文件（当前 {percent}%），不要新建；更新前先 memory_search 检查记忆库，有新结论先用 memory_remember 固化再更新。',
-  read: '[team-hooks2] 上下文占用从 {previous}% 骤降至 {percent}%（≥{dropThreshold} 点）⇒ 可能已触发记忆压缩：请读取最新归档文件并继续（已得结论/未完成项），把核对结果追加到归档；同时用 memory_search 核对项目记忆，再继续；再次超过 {threshold}% 时会创建新归档。',
+  read: '[team-hooks2] 上下文占用从 {previous}% 骤降至 {percent}%（≥{dropThreshold} 点；来源 {previousSource}/{previousWindow} → {percentSource}/{percentWindow}）⇒ 可能已触发记忆压缩：请读取最新归档文件并继续（已得结论/未完成项），把核对结果追加到归档；同时用 memory_search 核对项目记忆，再继续；再次超过 {threshold}% 时会创建新归档。',
   manualRead: '[team-hooks2] 检测到手动压缩（手动压缩会压缩完整会话，Agent 容易忘记归档位置）：本会话最新归档文件位置：{path}。请先读取该归档（核对已得结论/未完成项/关键事实），并用 memory_search 召回项目记忆，再继续当前任务；不要在此刻立即新建归档，只有之后再次超过 {threshold}% 才创建新周期。{pathNote}',
 })
 
@@ -2372,18 +2372,27 @@ export function apply(ctx, config) {
     sessionEventDisposers.length = 0
   }, 'team-hooks2: manual-compaction session events')
 
-  const measurePercent = (agent) => {
+  const measurePercentDetail = (agent) => {
     try {
       const measurement = ctx.tokenMeter.measure(agent.session)
       const routed = agent.session.requestContext()
       const pressure = ctx.get('sessionProjections')?.stateOf(agent.session, 'contextPressure')
       const window = routed?.contextWindow ?? pressure?.contextWindow
       if (window === undefined || window <= 0) return null
-      return Math.min(100, Math.round((measurement.totalTokens / window) * 100))
+      const tokens = Number(measurement.totalTokens)
+      return {
+        percent: Math.min(100, Math.round((tokens / window) * 100)),
+        tokens,
+        window,
+        source: 'tokenMeter.totalTokens',
+        at: new Date().toISOString(),
+      }
     } catch {
       return null
     }
   }
+
+  const measurePercent = (agent) => measurePercentDetail(agent)?.percent ?? null
 
   const injectText = (agent, text, tag) => {
     try {
@@ -2403,13 +2412,14 @@ export function apply(ctx, config) {
    * creates a new archive. Context-meter threshold advisory/[ctx] pending
    * messages suppress this turn's archive reminder (state is retried later).
    */
-  const evaluate = (agent, percent, turn) => {
+  const evaluate = (agent, percent, turn, detail = null) => {
     const key = agent.session.id
     let s = state.get(key) ?? { phase: 'idle', cycle: false }
     s = normalizeArchiveSessionState(s)
     state.set(key, s)
     if (!archiveReminder.enabled) {
       s.lastPercent = percent
+      if (detail !== null) s.lastPercentMeta = detail
       s.updatedAt = new Date().toISOString()
       save()
       return
@@ -2417,13 +2427,24 @@ export function apply(ctx, config) {
     const turnNumber = Number.isInteger(turn) ? turn : null
     if (turnNumber !== null && Number.isInteger(s.lastTurn) && turnNumber <= s.lastTurn) {
       s.lastPercent = percent
+      if (detail !== null) s.lastPercentMeta = detail
       s.updatedAt = new Date().toISOString()
       save()
       return
     }
     const prev = typeof s.lastPercent === 'number' ? s.lastPercent : undefined
+    const prevMeta = s.lastPercentMeta !== null && typeof s.lastPercentMeta === 'object' ? s.lastPercentMeta : null
     const prevAt = Date.parse(s.updatedAt || '')
     const baselineFresh = Number.isFinite(prevAt) ? Date.now() - prevAt <= DROP_WINDOW_MS : false
+    // A drop is only comparable when both readings share the same measurement
+    // source AND the same context window. A window change (model/route switch)
+    // lowers the percentage without any compaction, so it must never be read as
+    // "compaction happened".
+    const comparable = prevMeta === null
+      || (detail !== null
+        && prevMeta.source === detail.source
+        && Number(prevMeta.window) === Number(detail.window))
+    const dropReason = comparable ? null : 'measurement-source-or-window-changed'
     const nowIso = new Date().toISOString()
     const manualPending = s.pendingReadKind === 'manual'
     let manualPath = null
@@ -2448,8 +2469,12 @@ export function apply(ctx, config) {
     }
     const values = {
       percent,
-      threshold: archiveReminder.archiveThreshold,
+      percentSource: detail?.source ?? 'unknown',
+      percentWindow: detail?.window ?? 'unknown',
       previous: prev === undefined ? percent : prev,
+      previousSource: prevMeta?.source ?? 'unknown',
+      previousWindow: prevMeta?.window ?? 'unknown',
+      threshold: archiveReminder.archiveThreshold,
       dropThreshold: archiveReminder.dropThreshold,
       path: manualPath === null ? '' : manualPath,
       pathNote: manualPathNote,
@@ -2460,7 +2485,7 @@ export function apply(ctx, config) {
     }
     let action = null
     let resetForRead = false
-    const dropping = prev !== undefined && baselineFresh && prev - percent >= archiveReminder.dropThreshold
+    const dropping = prev !== undefined && baselineFresh && comparable && prev - percent >= archiveReminder.dropThreshold
     if (manualPending) {
       // Manual compaction takes priority over the automatic drop/read branch:
       // it carries the concrete archive location the agent must read first.
@@ -2471,6 +2496,16 @@ export function apply(ctx, config) {
     } else if (dropping) {
       action = 'read'
       resetForRead = true
+    } else if (dropReason !== null && s.phase === 'archive' && prev !== undefined && prev - percent >= archiveReminder.dropThreshold) {
+      // A large apparent drop across a measurement/window change is NOT
+      // compaction evidence: record it, never inject a "compaction happened"
+      // reminder, and keep the archive cycle intact.
+      try {
+        ctx.logger.warn('[team-hooks2] drop ignored (' + dropReason + ') session=' + key
+          + ' prev=' + prev + '%(' + String(prevMeta?.source) + '/' + String(prevMeta?.window) + ')'
+          + ' now=' + percent + '%(' + String(detail?.source) + '/' + String(detail?.window) + ')')
+      } catch { /* ignore */ }
+      s.lastDedupeReason = dropReason
     } else if (s.phase !== 'archive' && percent >= archiveReminder.archiveThreshold) {
       action = 'create'
     } else if (s.phase === 'archive' && percent >= archiveReminder.archiveThreshold) {
@@ -2550,6 +2585,7 @@ export function apply(ctx, config) {
 
     if (turnNumber !== null) s.lastTurn = turnNumber
     s.lastPercent = percent
+    if (detail !== null) s.lastPercentMeta = detail
     s.updatedAt = nowIso
     save()
   }
@@ -2581,10 +2617,11 @@ export function apply(ctx, config) {
             // ignore
           }
         }
-        const percent = measurePercent(agent)
-        if (percent === null) return
+        const detail = measurePercentDetail(agent)
+        if (detail === null) return
+        const percent = detail.percent
         try {
-          evaluate(agent, percent, payload !== null && typeof payload === 'object' ? payload.turn : undefined)
+          evaluate(agent, percent, payload !== null && typeof payload === 'object' ? payload.turn : undefined, detail)
         } catch (error) {
           try {
             ctx.logger.warn('[team-hooks2] archive reminder escaped (ignored): ' + errorText(error))
@@ -2674,6 +2711,10 @@ export function apply(ctx, config) {
         cycle: s.cycle === true,
         lastPercent: typeof s.lastPercent === 'number' ? s.lastPercent : null,
         lastPercentScope: 'previous-caller-measurement',
+        lastPercentMeta: s.lastPercentMeta ?? null,
+        percentComparable: s.lastPercentMeta === null || s.lastPercentMeta === undefined
+          ? 'no-baseline'
+          : (s.lastPercentMeta.source === 'tokenMeter.totalTokens' ? 'same-source' : 'source-changed'),
         lastRemindPercent: typeof s.lastRemindPercent === 'number' ? s.lastRemindPercent : null,
         archiveReminder: {
           enabled: archiveReminder.enabled,

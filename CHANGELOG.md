@@ -1,3 +1,7 @@
+## 2026.11.17-86 (dev)
+
+- **Fix false compaction detection**: team-hooks2 records the measurement source + context window with each reading and only compares a drop when both match; a window/source change is ignored (logged, never injected) instead of being reported as compaction. Reminder text and status expose percentSource/window.
+
 ## 2026.11.17-85 (dev)
 
 - **Round-2 gaps**: countsSummary separates deadLetters from retryable actionable; crossPermission.last locates the blocked delivery; message_bus_status carries versionIdentity/partOf; auto-backup large-file threshold lowered to 128 KB and a new `auto_backup_prune` tool can trim existing snapshots.
