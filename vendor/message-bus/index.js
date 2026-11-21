@@ -277,7 +277,6 @@ function pendingReminderText(pending, nowMs) {
   const parts = []
   if (Number(pending?.queued) > 0) parts.push(Number(pending.queued) + ' queued')
   if (Number(pending?.undeliverable) > 0) parts.push(Number(pending.undeliverable) + ' undeliverable')
-  if (unread > 0) parts.push(unread + ' unread')
   const detail = parts.length > 0 ? ' (' + parts.join(', ') + ')' : ''
   const age = pending?.oldestAt ? '; oldest ' + formatPendingAge(pending.oldestAt, nowMs) + ' ago' : ''
   const line1 = '[message-bus] ' + unread + ' unread message(s) for this session'
@@ -2251,6 +2250,9 @@ export function apply(ctx, config) {
       alias: target.alias ?? null, messageId, subject, bodySha256: sha,
       targetState: 'live', deliveryState: effectiveDeliveryState, notDeliverable: false, retryable: false,
       reasonCode: effectiveReasonCode, reason: reasonText(effectiveReasonCode), expiresAt: null, route,
+      targetPermission: targetMode,
+      replyExpectation: targetMode === null ? 'unknown-target-mode'
+        : (replyRestricted ? 'no-direct-reply' : 'direct-reply-allowed'),
       lightweight, priority, queued: shouldWake, selfDelivery, woke: shouldWake,
       ...(replyRestricted ? { replyChannel: 'bulletin-board/meeting', warnings: replyWarnings } : {}),
       transport, ...(transportError === null ? {} : { transportError }),

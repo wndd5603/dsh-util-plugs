@@ -1,3 +1,7 @@
+## 2026.11.17-72 (dev)
+
+- **RC9 observability**: every live send now returns targetPermission and replyExpectation, so callers can verify the target mode without guessing; pending reminder drops the duplicate unread count.
+
 ## 2026.11.17-71 (dev)
 
 - **Residual clarity**: bind returns agent_home as basename with agent_home_path; message_routes explains retired/legacy; message_bus_status marks subenv deprecated; network_info pitfalls fix retained.
