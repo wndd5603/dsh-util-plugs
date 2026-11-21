@@ -158,8 +158,22 @@ backup(targetPath)
   - 本仓库：`count 1919 / 磁盘 1919`，`{current 1518, legacy 400, unknown 1}`，明文 421 > 400。
 - 其他同批修复：`counters` 改 per-root（原先一个宿主进程内多 workspace 共用一个计数器，
   与 `root.path` 并排显示会误导）；`countersScope` 明确写成"仅本项目根"。
-- 测试：`scripts/test-auto-backup-history.mjs` 6 例（含 legacy/unknown 计入与压缩、
-  旧快照按 basename 可查）；全套 54/54。
+- 测试：`scripts/test-auto-backup-history.mjs`（-92 时 6 例，-93 增至 7 例；
+  含 legacy/unknown 计入与压缩、仅旧命名即可撑破计数预算、旧快照按 basename 可查）。
+
+### 6.4 -93 补齐两个口径漏洞
+
+- `auto_backup_compact` 原本只裁"每文件明文窗口"，没有跑全局预算 ⇒ 快照分散在许多
+  文件时（本仓库 423 份明文分布在数百个 basename 上）干跑报 `wouldChange: 0`，
+  但明文数已超 400。现在干跑分列 `perFileWindow` 与 `global.wouldCompress`，
+  真正执行时再调 `compactGlobal()` 跑与钩子相同的全局 pass。
+- 计数单位写明为**普通文件**：`backupStatsScope` / `statsCrossCheck.note` 明确
+  "目录名以 `_改前_` 开头也不算快照"。起因是 game-captain 用 `ls | wc -l` 时把
+  31 个历史批次目录也算进了"份数"（780 vs 真实 654），随后自己认错——同一类
+  "范围没标注"的问题，在字段文案层面消除。
+- 实测（-93 live）：本仓库 `count 1925 / 磁盘 1925`、明文 423、gz 1502、
+  20.53 MB 四项与磁盘逐项相等；`statsCrossCheck.matchesDisk:true`、
+  `thresholds.overPlainBudget:true`。
 
 ## 七、如何用历史推导改动
 

@@ -81,6 +81,20 @@ test('the global count budget is measured on plain snapshots', (t) => {
     'plain snapshots are trimmed to the count budget (compression does not lower the total)')
 })
 
+test('legacy snapshots alone can push the directory over the count budget', (t) => {
+  const { manager } = fixture(t, { keepUncompressedPerFile: 99, compressWhenFilesOver: 3 })
+  mkdirSync(manager.backupDir, { recursive: true })
+  for (let index = 0; index < 6; index += 1) {
+    writeFileSync(join(manager.backupDir, '_改前_batch_' + String(index) + '_2026100' + String(index) + '_120000_levels.lua'), 'legacy-' + String(index))
+  }
+  assert.equal(manager.allBackupFiles().length, 6, 'legacy names must be visible')
+  const result = manager.compactGlobal()
+  assert.equal(result.compressed, 3, 'the count budget applies to legacy snapshots too')
+  const snapshots = manager.allBackupFiles()
+  assert.equal(snapshots.length, 6, 'compression never removes a snapshot')
+  assert.equal(snapshots.filter(snapshot => snapshot.compressed !== true).length, 3)
+})
+
 test('legacy and unparseable names are counted and compressed, never deleted', (t) => {
   const { target, manager } = fixture(t, { keepUncompressedPerFile: 1, compressWhenFilesOver: 1 })
   mkdirSync(manager.backupDir, { recursive: true })

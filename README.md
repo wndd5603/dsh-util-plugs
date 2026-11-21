@@ -6,7 +6,7 @@ A single install that adds eleven independently switchable plugins to DeepSeek H
 
 > Release policy: **no tag and no release unless the user explicitly asks.** The release script requires `--confirm-release`.
 
-> Version: 2026.11.17-92 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
+> Version: 2026.11.17-93 · Release tag: 0.0.2 · Not yet published on npm; install from GitHub.
 
 ## 演示 / Demos
 
@@ -22,10 +22,11 @@ Clean-profile recordings with synthetic data; no live credentials or private pro
 
 `dsh-util-plugs` gives DeepSeek Harness context awareness, cross-session messaging with a Web **Agent Hub**, shared boards/tasks, agent homes and teams, persistent agent memory, team coordination, workflows, a workbench overview, automatic file backups, safe host restart and a unified plugin console. Install once, then enable only the plugins you need in Settings → Plugins.
 
-### What is new in 2026.11.17-92 (dev)
+### What is new in 2026.11.17-93 (dev)
 
 - **Snapshot accounting covers the whole backup dir**: status and the global gzip budgets used to see only names written by the current hook, so on a project with mostly pre-redesign names the thresholds never fired. `current` / `legacy` / `unknown` names are now all counted, and `formatCounts` + `statsCrossCheck` show it.
 - **Legacy snapshots are addressable**: `auto_backup_history` / `auto_backup_show` match by basename suffix, so old snapshots can be listed and diffed too.
+- **`auto_backup_compact` runs the global budget**: previously it only trimmed the per-file window, so a spread-out directory reported `wouldChange: 0` while over budget. Dry run now reports `perFileWindow` and `global.wouldCompress`.
 - **Per-root counters**: `counters` no longer mix workspaces in one host process.
 - Also in -91 (docs/test only): the auto-backup README and the redesign doc state the lossless model (never delete; older snapshots are gzipped).
 
@@ -110,7 +111,7 @@ The package is self-contained: all eleven runtime plugins live under `vendor/`; 
 | `plugin-console` | Unified plugin console: cards, live configuration and extension contributions. | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 | `host-relaunch` | Two-step safe restart, Web header button and session resume. | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 
-Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-92; individual plugins keep their own versions.
+Each plugin is independently switchable and configurable. The bundle version is 2026.11.17-93; individual plugins keep their own versions.
 
 ### Web UI
 
@@ -160,10 +161,11 @@ MIT © 2026 wndd5603
 
 `dsh-util-plugs` 一次安装，为 DeepSeek Harness 增加 **11 个**可独立启用的插件：上下文感知、带 Web **协作网络**的跨会话消息、公告栏/任务板、智能体公寓、持久记忆、团队协作、智能体工作流、工作台总览、自动备份、安全宿主重启和统一插件控制台。安装后在「设置 → 插件」中按需启用。
 
-### 2026.11.17-92 新增
+### 2026.11.17-93 新增
 
 - **快照统计覆盖整个备份目录**：状态与全局压缩阈值原先只认当前钩子写出的文件名，项目里若以旧命名为主，阈值就永不触发。现在 `current`/`legacy`/`unknown` 三类全部计入，并用 `formatCounts` + `statsCrossCheck` 明示"工具看到的"与"磁盘实有的"是否一致。
 - **旧命名快照可检索**：`auto_backup_history` / `auto_backup_show` 按 basename 后缀匹配，旧快照也能列出、读取与对比。
+- **`auto_backup_compact` 会执行全局预算**：原先只裁剪每文件明文窗口，快照分散在多文件时会误报 `wouldChange: 0`；现在干跑分别给出 `perFileWindow` 与 `global.wouldCompress`。
 - **计数器按项目根隔离**：`counters` 不再把一个宿主进程内多个 workspace 的备份混在一起。
 - 另含 -91（仅文档/测试）：auto-backup README 与改造文档改为"无损历史"口径（永不删除，旧快照压缩为 `.gz`）。
 
@@ -224,7 +226,7 @@ dsh plugin --profile web add github:wndd5603/dsh-util-plugs#0.0.2
 | `host-relaunch` | 两步安全重启、Web 顶栏按钮与会话恢复。 | [`vendor/host-relaunch/README.md`](vendor/host-relaunch/README.md) |
 | `plugin-console` | 统一插件控制台：卡片、实时配置与扩展贡献。 | [`vendor/plugin-console/README.md`](vendor/plugin-console/README.md) |
 
-每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-92，各插件保留自己的版本号。
+每个插件项都可独立启用、禁用和配置。安装包版本为 2026.11.17-93，各插件保留自己的版本号。
 
 ### Web 界面
 

@@ -1,3 +1,8 @@
+## 2026.11.17-93 (dev)
+
+- **`auto_backup_compact` now runs the global budget pass**: it only trimmed the per-file plain window, so a directory whose plain snapshots are spread over many files reported `wouldChange: 0` while sitting over `compressWhenFilesOver`. It now reports `perFileWindow` and `global{wouldCompress}` separately in a dry run, and applies the same global pass the hook runs after every write (`global{applied, compressed, overLimit}`) when executed.
+- **Counting rule is stated, not implied**: `backupStatsScope` and `statsCrossCheck.note` now say the totals count `_改前_*` **regular files** only — a directory whose name starts with `_改前_` is never a snapshot (a peer hit exactly that ambiguity when comparing against `ls`).
+
 ## 2026.11.17-92 (dev)
 
 - **Snapshot accounting covers the whole backup dir**: `auto_backup_status` used to count only names written by the current hook (`_改前_<batch>_<YYYYMMDD_HHMMSSmmm>_<file>`); pre-redesign and hand-made names (`…_2026-11-04_222804.md`, `…_20261021_015421_AGENTS.md`, `…_20261116133341.md`) were invisible. On a project whose history is mostly old names the visible subset stayed small, so `compressWhenFilesOver` / `compressWhenTotalMBOver` never fired while the directory kept growing. The parser now classifies `current` / `legacy` / `unknown`, and **totals plus the global thresholds run over every `_改前_*` file**.

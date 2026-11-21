@@ -637,7 +637,7 @@ export function createBackupManager(config) {
           scannedOnDisk,
           counted: files.length,
           matchesDisk: scannedOnDisk === files.length,
-          note: 'scannedOnDisk counts every `_改前_` file in backupDir; counted is what the tools see. They must match.',
+          note: 'scannedOnDisk counts REGULAR FILES only (directories are never snapshots, even when their name starts with `_改前_`); counted is what the tools see. They must match.',
         },
         thresholds: {
           plainCountBudget: compressWhenFilesOver,
@@ -758,7 +758,7 @@ export function apply(ctx, config, deps = {}) {
         inactiveReason: resolved.root === null ? 'no projectRoot configured and no session workspace (hook is a no-op)' : inactiveReason,
         backupDir: manager === null ? null : manager.backupDir,
         backupStats: stats,
-        backupStatsScope: 'all `_改前_*` snapshots in backupDir (every batch, every name format, plain + .gz)',
+        backupStatsScope: 'all `_改前_*` REGULAR FILES in backupDir (every batch, every name format, plain + .gz; directories excluded)',
         counters: { ...counters },
         countersScope: 'this-host-process since start, for THIS project root only (never another workspace)',
         summary: {
@@ -778,7 +778,9 @@ export function apply(ctx, config, deps = {}) {
     description:
       '⚠ Scope: this workspace file_backups; reversible: yes (compression only keeps every snapshot); '
       + 'precondition: dryRun:false requires confirm:"COMPACT". '
-      + 'Gzip the oldest plain snapshots beyond the per-file plain window and the global count/size thresholds. '
+      + 'Gzip the oldest plain snapshots beyond the per-file plain window, then run the same global '
+      + 'count/size budget pass the hook runs after every write (a per-file window alone cannot trim a '
+      + 'directory whose plain snapshots are spread over many files). '
       + 'Nothing is deleted unless the operator set allowDelete:true and passes mode:"delete".',
     parameters: {
       type: 'object',
@@ -837,6 +839,21 @@ export function apply(ctx, config, deps = {}) {
           }
         }
       }
+      // Global budgets: the same pass the hook runs after every write. Without it
+      // this tool would report "nothing to do" while the directory sits over
+      // `compressWhenFilesOver`, because the per-file window alone can never
+      // trim a directory whose plain snapshots are spread over many files.
+      const plainAfterWindow = manager.allBackupFiles().filter(file => file.compressed !== true).length
+        - plan.filter(item => item.action === 'compress').length
+      const globalWouldCompress = Math.max(0, plainAfterWindow - manager.compressWhenFilesOver)
+      const global = dryRun
+        ? { applied: false, wouldCompress: globalWouldCompress, reason: 'dry-run: count budget only' }
+        : (() => {
+            const result = manager.compactGlobal()
+            compressed += result.compressed
+            deleted += result.deleted
+            return { applied: true, compressed: result.compressed, overLimit: result.overLimit === true }
+          })()
       return {
         ok: true,
         dryRun,
@@ -844,11 +861,13 @@ export function apply(ctx, config, deps = {}) {
         keepPerFile: keep,
         backupDir: manager.backupDir,
         formatCounts,
-        wouldChange: plan.length,
+        wouldChange: plan.length + globalWouldCompress,
+        perFileWindow: plan.length,
+        global,
         compressed,
         deleted,
         grouping: 'basename',
-        groupingCaveat: 'Snapshots preserve only the basename, so files with the same basename in different directories share one group.',
+        groupingCaveat: 'Snapshots preserve only the basename, so files with the same basename in different directories share one group. Unparseable names get their own group.',
         files: plan.slice(0, 50),
         filesShown: Math.min(50, plan.length),
         filesTotal: plan.length,
