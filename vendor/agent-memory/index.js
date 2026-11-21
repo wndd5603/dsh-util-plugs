@@ -317,7 +317,7 @@ export function apply(ctx, config) {
     }
   }
 
-  register(desc('memory_remember', 'Persist one durable memory (upsert by scope+key). Quality is advisory and never blocks a write.', {
+  register(desc('memory_remember', 'Persist one durable memory (upsert by scope+key). Quality is advisory and never blocks a write. For a 100 score: header lines project/workspace/domain/updated, three sections What/Why/Where|Evidence/Status|Next, and literal tags ["project","domain","kind"] (domain-specific values do not satisfy these literal tags).', {
     scope: str('project | agent | global (default project).'),
     key: str('Optional stable key; same scope+key updates instead of duplicating.'),
     content: str('Memory text. Prefer the M1 standard header + What/Why/Where|Evidence/Status|Decision/Next.'),

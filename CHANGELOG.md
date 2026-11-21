@@ -1,3 +1,7 @@
+## 2026.11.17-66 (dev)
+
+- **Pointer/memory guidance**: workbench pointer now declares itself the capability index and points to the separate session-network brief; memory_remember documents the literal tag/header rule that produces quality 100.
+
 ## 2026.11.17-65 (dev)
 
 - **Recall labels**: tool output now says tasks(assigned)/memory(global) and includes the unassigned board count; UNBOUND_SESSION regression asserts the bind hint.
