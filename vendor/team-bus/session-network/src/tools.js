@@ -1240,6 +1240,7 @@ export function registerTools(ctx, deps) {
             active: sessions.filter(item => item.routable).length,
             joinedCount: sessions.length,
             source: 'host-registry',
+            sessionsScope: 'joined aliases only; live sessions without an alias are not enumerated',
             transport: 'sqlite-directory',
             dataDirConfigured: dataDir !== null,
           },

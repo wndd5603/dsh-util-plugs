@@ -1,3 +1,7 @@
+## 2026.11.17-74 (dev)
+
+- **network_info scope note**: sessions[] now labels itself as joined-aliases-only; live unjoined sessions are explicitly out of scope instead of silently missing.
+
 ## 2026.11.17-73 (dev)
 
 - **Scope clarity**: message_bus_status countsSummary is explicitly global with countsMine, staleCount comes from joined[], and network_info includes live-agent sessions in addition to joined aliases.
