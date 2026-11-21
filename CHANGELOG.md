@@ -1,3 +1,7 @@
+## 2026.11.17-67 (dev)
+
+- **RC8 pending notices**: reminders now key off unread/readAt only (read deliveries never re-trigger), produce the unread count they report, and recommend message_queue({unreadOnly:true}). Regression covers total>0/unread=0.
+
 ## 2026.11.17-66 (dev)
 
 - **Pointer/memory guidance**: workbench pointer now declares itself the capability index and points to the separate session-network brief; memory_remember documents the literal tag/header rule that produces quality 100.

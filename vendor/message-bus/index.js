@@ -273,7 +273,6 @@ function formatPendingAge(oldestAt, nowMs) {
 
 /** <=2-line summary: count + oldest age + the two read-only tools to use. */
 function pendingReminderText(pending, nowMs) {
-  const total = Number(pending?.total) || 0
   const unread = Number(pending?.unread) || 0
   const parts = []
   if (Number(pending?.queued) > 0) parts.push(Number(pending.queued) + ' queued')
@@ -281,8 +280,8 @@ function pendingReminderText(pending, nowMs) {
   if (unread > 0) parts.push(unread + ' unread')
   const detail = parts.length > 0 ? ' (' + parts.join(', ') + ')' : ''
   const age = pending?.oldestAt ? '; oldest ' + formatPendingAge(pending.oldestAt, nowMs) + ' ago' : ''
-  const line1 = '[message-bus] ' + Math.max(total, unread) + ' message(s) pending for this session'
-    + detail + age + '. Inspect with message_queue({undeliveredOnly:true}); read with message_read({messageId}).'
+  const line1 = '[message-bus] ' + unread + ' unread message(s) for this session'
+    + detail + age + '. Inspect with message_queue({unreadOnly:true}); read with message_read({messageId}).'
   const reasons = Object.entries(pending?.byReason ?? {})
     .filter(([, count]) => Number(count) > 0)
     .sort((a, b) => Number(b[1]) - Number(a[1]))
@@ -347,9 +346,12 @@ export function createPendingReminderHandler(options) {
       if (typeof last === 'number' && at - last < intervalMs) return decision
       const pending = pendingSummary(sessionId)
       if (!isPlainObject(pending)) return decision
-      const pendingTotal = Number(pending.total)
       const unreadTotal = Number(pending.unread)
-      if (!(pendingTotal > 0) && !(unreadTotal > 0)) return decision
+      // Read receipts are authoritative for "new message" reminders: an
+      // undelivered delivery row whose message is already read must not
+      // keep re-triggering this notice. Delivery failures remain visible in
+      // message_bus_status counts, not as unread reminders.
+      if (!(unreadTotal > 0)) return decision
       const text = pendingReminderText(pending, at)
       if (text === '') return decision
       const reminder = createPendingReminderMessage(text)

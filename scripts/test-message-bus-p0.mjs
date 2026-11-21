@@ -251,6 +251,24 @@ test('pending reminder also fires for unread-only sessions', async () => {
     const reminder = decision.messages.find(isPendingReminderMessage)
     assert.ok(reminder, 'unread-only pending summary must inject one reminder')
     assert.match(reminder.content[0].text, /3 unread/u)
+    assert.match(reminder.content[0].text, /message_queue\(\{unreadOnly:true\}\)/u)
+  } finally {
+    handler.dispose()
+  }
+})
+
+test('pending reminder stays silent when every pending delivery is already read', async () => {
+  const handler = createPendingReminderHandler({
+    getConfig: () => ({ enabled: true, intervalMinutes: 15 }),
+    pendingSummary: () => ({ total: 2, unread: 0, queued: 0, undeliverable: 2, oldestAt: null, byReason: { 'session-not-found': 2 } }),
+    logger: { info() {}, warn() {} },
+  })
+  try {
+    const decision = await handler.handler(
+      { agent: { session: { id: TARGET } }, messages: [] },
+      async () => ({ messages: [] }),
+    )
+    assert.equal(decision.messages.some(isPendingReminderMessage), false)
   } finally {
     handler.dispose()
   }
