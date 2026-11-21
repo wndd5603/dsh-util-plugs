@@ -1,3 +1,7 @@
+## 2026.11.17-85 (dev)
+
+- **Round-2 gaps**: countsSummary separates deadLetters from retryable actionable; crossPermission.last locates the blocked delivery; message_bus_status carries versionIdentity/partOf; auto-backup large-file threshold lowered to 128 KB and a new `auto_backup_prune` tool can trim existing snapshots.
+
 ## 2026.11.17-84 (dev)
 
 - **Single first-turn pointer**: session-network autoInject now defaults false; workbench pointer is the canonical one. Set session-network autoInject.enabled=true to opt back in.

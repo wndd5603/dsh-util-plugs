@@ -48,9 +48,9 @@ export const Config = objectSchema({
   toolNames: stringArray(['write', 'edit'], { description: 'Tools whose target file is backed up before execution.' }),
   bashToolNames: stringArray(['bash', 'pwsh', 'shell', 'cmd'], { description: 'Shell tools whose write commands are detected and WARNed (cannot be backed up before execution).' }),
   keepPerFile: number(30, { description: 'Retention per file (small files).', int: true, min: 1 }),
-  largeFileBytes: number(524288, { description: 'Files at/above this size use largeRetention.', int: true, min: 1 }),
+  largeFileBytes: number(131072, { description: 'Files at/above this size use largeRetention (default 128 KB: a 200 KB source file keeps 5 copies, not 30).', int: true, min: 1 }),
   largeRetention: number(5, { description: 'Retention per large file.', int: true, min: 1 }),
-  largeWarnBytes: number(262144, { description: 'WARN once when a backed-up file is at/above this size.', int: true, min: 1 }),
+  largeWarnBytes: number(131072, { description: 'WARN once when a backed-up file is at/above this size.', int: true, min: 1 }),
   maxTotalMB: number(800, { description: 'Total backup size cap in MB; oldest `_改前_` files are pruned above it.', min: 1 }),
   fileOverrides: any(null, { description: 'Per-path retention overrides: { "doc/*.md": {keep: 10}, "*": {keepIfLargerThanKB: 512, keep: 5} }.' }),
 }, { description: 'Automatic pre-write backup configuration.', schemaVersion: 1 })
@@ -169,13 +169,13 @@ export function createBackupManager(config) {
   // 分级保留：大文件只留少量（用户 2026-10-24 要求）
   const largeFileBytes = Number.isFinite(config.largeFileBytes) && config.largeFileBytes > 0
     ? config.largeFileBytes
-    : 512 * 1024
+    : 128 * 1024
   const largeRetention = Number.isFinite(config.largeRetention) && config.largeRetention > 0
     ? config.largeRetention
     : 5
   const largeWarnBytes = Number.isFinite(config.largeWarnBytes) && config.largeWarnBytes > 0
     ? config.largeWarnBytes
-    : 256 * 1024
+    : 128 * 1024
   // 备份总量上限（MB），超限淘汰最旧 _改前_ 文件；绝不碰 归档_* 目录
   const maxTotalMB = Number.isFinite(config.maxTotalMB) && config.maxTotalMB > 0 ? config.maxTotalMB : 800
   const batch = (typeof config.batch === 'string' && config.batch.trim().length > 0 ? config.batch.trim() : 'auto')
@@ -428,6 +428,7 @@ export function createBackupManager(config) {
   return {
     shouldBackup, backup, prune, targetFromArguments, detectBashWrite,
     backupDir, projectRoot, keepPerFile, largeFileBytes, largeRetention, maxTotalMB, existingBackups, totalBackupMB,
+    allBackupFiles,
     /** Aggregate facts for the read-only status tool. */
     stats() {
       const files = allBackupFiles()
@@ -544,6 +545,68 @@ export function apply(ctx, config, deps = {}) {
       }
     },
     presentCall: () => ({ card: 'generic', title: 'Auto-backup status', kind: 'read' }),
+  })
+
+  ctx.tools.register({
+    name: 'auto_backup_prune',
+    description:
+      '⚠ Scope: this workspace file_backups; irreversible: yes for the pruned snapshots; precondition: dryRun:false + confirm:"PRUNE". '
+      + 'Trim existing `_改前_` snapshots down to a per-file retention without waiting for the next write. Default dry-run lists what would go.',
+    parameters: {
+      type: 'object',
+      properties: {
+        keepPerFile: { type: 'number', description: 'Keep at most N newest snapshots per file (default: the effective largeRetention, 5).' },
+        dryRun: { type: 'boolean', description: 'Default true; false requires confirm:"PRUNE".' },
+        confirm: { type: 'string', description: 'Must be exactly "PRUNE" to delete.' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args = {}, exec = {}) {
+      const resolved = rootFor(exec?.agent)
+      if (resolved.root === null) return { ok: false, code: 'NO_ROOT', message: 'no projectRoot and no session workspace' }
+      const manager = managerFor(resolved.root)
+      const keep = Number.isFinite(Number(args.keepPerFile)) && Number(args.keepPerFile) > 0
+        ? Math.trunc(Number(args.keepPerFile))
+        : manager.largeRetention
+      const dryRun = args.dryRun !== false
+      if (!dryRun && args.confirm !== 'PRUNE') {
+        return { ok: false, code: 'CONFIRM_REQUIRED', message: 'prune requires confirm:"PRUNE" when dryRun:false' }
+      }
+      // Group existing snapshots per original file name, newest first.
+      const groups = new Map()
+      for (const file of manager.allBackupFiles()) {
+        const key = file.entry.replace(/^_改前_/, '').replace(/^[^_]*_/, '').replace(/^\d{8}_\d{9}(?:_\d+)?_/, '')
+        const list = groups.get(key) ?? []
+        list.push(file)
+        groups.set(key, list)
+      }
+      const plan = []
+      let removed = 0
+      for (const [file, list] of groups) {
+        const sorted = [...list].sort((a, b) => b.mtime - a.mtime)
+        for (const stale of sorted.slice(keep)) {
+          plan.push({ file, entry: stale.entry, size: stale.size })
+          if (!dryRun) {
+            try { unlinkSync(stale.path); removed += 1 } catch { /* best effort */ }
+          }
+        }
+      }
+      return {
+        ok: true,
+        dryRun,
+        keepPerFile: keep,
+        backupDir: manager.backupDir,
+        wouldRemove: plan.length,
+        removed,
+        files: plan.slice(0, 50),
+        truncated: plan.length > 50,
+      }
+    },
+    presentCall: () => ({ card: 'generic', title: 'Prune auto-backups', kind: 'write' }),
   })
 
   if (cfg.enabled === false) {

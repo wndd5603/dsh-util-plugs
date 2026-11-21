@@ -1526,6 +1526,7 @@ export function apply(ctx, config) {
     }
   }
   let crossPermissionBlocked = 0
+  let crossPermissionLast = null
   /** Refuse a confined sender when the target runs with danger-full-access. */
   const assertCrossPermission = async (exec, target) => {
     if (cfg.crossPermissionGuard !== true) return
@@ -1536,6 +1537,14 @@ export function apply(ctx, config) {
       : sandboxModeOfAgent(target.agent)
     if (targetMode === 'danger-full-access') {
       crossPermissionBlocked++
+      crossPermissionLast = {
+        at: new Date().toISOString(),
+        from: exec?.agent?.session?.id ?? null,
+        fromMode: senderMode ?? null,
+        to: target.sessionId,
+        toMode: 'danger-full-access',
+        reason: 'CROSS_PERMISSION_DENIED',
+      }
       logger.warn('[message-bus] blocked cross-permission delivery from ' + String(senderMode ?? 'unknown')
         + ' to ' + target.sessionId + ' (danger-full-access)')
       throw codedError('CROSS_PERMISSION_DENIED',
@@ -2653,10 +2662,17 @@ export function apply(ctx, config) {
         ok: true,
         plugin: 'dsh-message-bus',
         version: PLUGIN_VERSION,
+        versionIdentity: 'dsh-message-bus@' + PLUGIN_VERSION + ' (row inside dsh-util-plugs; N is this package\'s own revision, not the bundle version)',
+        partOf: 'dsh-util-plugs (bundle; see workbench_status().packages[0].version for the bundle version)',
         enabled: cfg.enabled,
         strictMode: cfg.strictMode,
         crossPermissionGuard: cfg.crossPermissionGuard,
         crossPermissionBlocked,
+        crossPermission: {
+          count: crossPermissionBlocked,
+          last: crossPermissionLast,
+          note: 'last locates the most recent blocked delivery; the guard itself is unchanged.',
+        },
         autoResume: cfg.autoResume,
         resumedCount: resumedHandles.size,
         autoResumeRateLimitPerMinute: cfg.autoResumeRateLimitPerMinute,
@@ -2670,13 +2686,23 @@ export function apply(ctx, config) {
         joinedCount: directoryView?.joinedCount ?? 0,
         envelope: typeof store.envelopeCounts === 'function' ? safeCall(() => store.envelopeCounts(), null) : null,
         counts,
-        countsSummary: counts === null ? null : {
-          unread: counts.unread,
-          undelivered: counts.undeliveredDeliveries,
-          queued: counts.pending?.queued ?? 0,
-          actionable: counts.undeliveredDeliveries + (counts.pending?.queued ?? 0),
-          note: 'global across all recipients, not "mine"; countsMine below is this caller session. unread is per-recipient read state; undelivered/queued are delivery state. Use message_queue({unreadOnly:true}) for your reading, and inspect undeliverable reasons for queued failures.',
-        },
+        countsSummary: counts === null ? null : (() => {
+          const byReason = counts.pending?.byReason ?? {}
+          const deadLetters = Object.entries(byReason)
+            .filter(([reason]) => reason === 'session-not-found' || reason === 'recipient-archived')
+            .reduce((sum, [, n]) => sum + Number(n ?? 0), 0)
+          const retryable = Math.max(0, (counts.pending?.queued ?? 0) + counts.undeliveredDeliveries - deadLetters)
+          return {
+            unread: counts.unread,
+            undelivered: counts.undeliveredDeliveries,
+            queued: counts.pending?.queued ?? 0,
+            deadLetters,
+            retryable,
+            actionable: retryable,
+            byReason,
+            note: 'global across all recipients, not "mine"; countsMine below is this caller session. actionable excludes deadLetters (session-not-found / recipient-archived) because no retry can succeed. unread is per-recipient read state; undelivered/queued are delivery state. Use message_queue({unreadOnly:true}) for your reading.',
+          }
+        })(),
         countsMine: (() => {
           const mine = exec?.agent?.session?.id
           if (typeof mine !== 'string' || mine === '') return null
