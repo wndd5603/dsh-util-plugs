@@ -56,8 +56,10 @@ file_backups/rollback-anchors-20261121/        ← subdirectory: never scanned
   README.txt
 ```
 
-- The hook scans **regular files directly inside `backupDir`** (`_改前_*`), so a
-  subdirectory is never counted, compressed, or deleted.
+- The hook scans **regular files directly inside `backupDir`** (`_改前_*`). Any entry
+  that is a directory is skipped and **never descended into**, so nesting depth does
+  not matter: `anchors/a/` and `anchors/a/b/c/` are both invisible — never counted,
+  compressed, or deleted.
 - Copy (do not move) the snapshot you want to keep, then verify the copy:
   `sha256sum` both files and compare; the copy is independent of the pool.
 - Trade-off: an anchor is not tracked by `auto_backup_status` / `auto_backup_history`,
@@ -129,7 +131,8 @@ file_backups/回滚锚点_20261121/                 ← 子目录：永不被扫
   README.txt
 ```
 
-- 钩子只扫 `backupDir` **直属的普通文件**（`_改前_*`），子目录不计数、不压缩、不删除。
+- 钩子只扫 `backupDir` **直属的普通文件**（`_改前_*`）；**任何目录条目一律跳过，且从不进入**，
+  所以嵌套层级无关紧要：`锚点/a/` 与 `锚点/a/b/c/` 同样不可见，都不计数、不压缩、不删除。
 - 用**复制**（不是移动）：复制后用 `sha256sum` 对比两份文件一致；复制件独立于快照池。
 - 代价：锚点不出现在 `auto_backup_status` / `auto_backup_history` 里，也不跟随后续编辑
   —— 这正是它的目的：不允许它变。

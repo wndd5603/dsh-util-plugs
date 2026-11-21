@@ -205,6 +205,8 @@ auto_backup_show({ file: "lua_scripts/levels.lua", stamp: "20261121_212207210" }
 
 - 代价：锚点不进 `status`/`history`，不跟随后续编辑（这是目的）。
 - 已在 `vendor/auto-backup/README.md` 写成用户文档（中英各一节）。
+  实现依据 `index.js:380-386`：`readdirSync(backupDir)` 只枚举直属条目，目录条目被
+  `if (!info.isFile()) continue` 跳过且**从不下降** ⇒ **任意嵌套深度都不可见**（不只一层）。
 - 实测依据：game-captain 项目 3 个锚点复制到 `回滚锚点_教程优化_20261121/`，
   sha 逐字一致，且未被 compact 触碰。
 

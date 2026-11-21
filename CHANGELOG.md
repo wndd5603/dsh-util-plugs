@@ -1,3 +1,7 @@
+## 2026.11.17-96 (dev)
+
+- **Out-of-pool anchors: nesting depth stated** (docs only). The README said a subdirectory is never scanned but not whether that means one level or any depth. It is **any depth**: `allBackupFiles()` enumerates `readdirSync(backupDir)` entries and skips anything that is not a regular file **without ever descending into it** (`vendor/auto-backup/index.js:380-386`), so `anchors/a/b/c/` is as invisible as `anchors/`. Both language sections now say so, and `docs/AUTO_BACKUP_REDESIGN.md` §7.5 records the implementation reference.
+
 ## 2026.11.17-95 (dev)
 
 - **`envelopeMine` makes envelope counts comparable**: `envelope{envelopes, consumedEnvelopes}` is **global across all recipients** while `countsMine.unread` is **per recipient**, so a reader saw "0 unread but N unconsumed" and reasonably suspected duplicate delivery. `envelope` now carries `scope` + `note`, and a new `envelopeMine{sessionId, envelopes, consumedEnvelopes, scope}` gives the caller's own numbers (comparable with `countsMine.unread`).
