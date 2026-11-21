@@ -1,3 +1,7 @@
+## 2026.11.17-83 (dev)
+
+- **Archive path ownership**: observed archivePath must also be inside the caller role archive root; docs/ARCHIVE_*.md can no longer be mistaken for an archive.
+
 ## 2026.11.17-82 (dev)
 
 - **Archive root fallback**: team-hooks2 archiveReminder accepts `archiveRoot` (workspace-relative); find/resolve/canonical paths use it when team/members is read-only. Default unchanged.

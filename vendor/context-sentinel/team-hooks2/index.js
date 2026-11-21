@@ -2656,6 +2656,7 @@ export function apply(ctx, config) {
       const observedPath = typeof s.archivePath === 'string'
         && ARCHIVE_FILE_RE.test(s.archivePath)
         && !/(?:^|[\\/])scratch[\\/]/iu.test(s.archivePath)
+        && archiveBelongsToRole(s.archivePath, workspaceDir, roleName, archiveReminder.archiveRoot)
         ? s.archivePath
         : null
       const archivePath = observedPath ?? resolveManualArchivePath({ workspaceDir, roleName, knownPath: null, archiveRoot: archiveReminder.archiveRoot })
