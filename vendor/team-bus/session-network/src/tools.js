@@ -1230,6 +1230,7 @@ export function registerTools(ctx, deps) {
         for (const row of dbSessionRows) {
           const id = row?.session_id
           if (typeof id !== 'string' || id === '' || knownSessionIds.has(id)) continue
+          if (row.status === 'stale') continue
           knownSessionIds.add(id)
           sessions.push({
             sessionId: id,

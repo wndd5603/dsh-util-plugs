@@ -1,3 +1,7 @@
+## 2026.11.17-78 (dev)
+
+- **network sessions**: filter stale session-network DB rows from network_info; active intercommunicating sessions remain and historical stale ids no longer inflate total.
+
 ## 2026.11.17-77 (dev)
 
 - **network sessions from DB**: network_info now augments host-registry sessions with session-network DB rows, so known intercommunicating sessions without aliases appear with source=session-network-db.
