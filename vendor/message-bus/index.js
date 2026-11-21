@@ -2597,6 +2597,7 @@ export function apply(ctx, config) {
             : targetState === 'not-found' ? 'session-not-found'
               : targetState === 'unknown' ? 'target-state-unknown' : null,
           source: 'db',
+          statusNote: 'retired/legacy means the alias is not used for new registration or display; an existing route remains resolvable while usable is true.',
         })
       }
       return { ok: true, routes }
@@ -2681,6 +2682,11 @@ export function apply(ctx, config) {
             return { sessionId: mine, unread: null, messages: null, scope: 'mine (read failed)' }
           }
         })(),
+        subenv: {
+          allowTasks: cfg.subenv.allowTasks === true,
+          status: 'deprecated/disabled by default',
+          note: 'The custom embedded subenv task runner is retired; a standalone subenv may still be probed by its own package.',
+        },
         delivery: {
           lightweight,
           dedupeWindowMs,

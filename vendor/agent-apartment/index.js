@@ -1,7 +1,7 @@
 // DSH Agent Apartment host plugin: centralized agent homes, leases, teams,
 // task-role bindings, experience and root backup/migration.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApartment, getActiveRoot, setActiveRoot } from './src/store.js'
 import { buildBindingCandidates, buildBindingList, buildCollaborationBrief, buildDriftReport, COLLAB_ERROR_CODES, lookupBulletinTask } from './src/collab.js'
@@ -273,11 +273,17 @@ export function apply(ctx, config) {
     if (liveSession === undefined || liveSession === null) {
       throw codedError(COLLAB_ERROR_CODES.SESSION_NOT_FOUND, 'apartment: session not found: ' + sessionId)
     }
-    return apartment.bindAgentSession({
+    const bound = apartment.bindAgentSession({
       agentId,
       sessionId,
       isPrimary: typeof args?.isPrimary === 'boolean' ? args.isPrimary : undefined,
     })
+    return {
+      ...bound,
+      agent_home: typeof bound.agent_home === 'string' ? basename(bound.agent_home) : bound.agent_home,
+      agent_home_path: bound.agent_home ?? null,
+      homeScope: 'agent_home is basename; agent_home_path is absolute (same convention as collaboration_recall).',
+    }
   })
   register(desc('apartment_agent_unbind', 'Remove an agent/session binding (defaults to the caller session).', {
     agentId: str('Agent id.'),

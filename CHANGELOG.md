@@ -1,3 +1,7 @@
+## 2026.11.17-71 (dev)
+
+- **Residual clarity**: bind returns agent_home as basename with agent_home_path; message_routes explains retired/legacy; message_bus_status marks subenv deprecated; network_info pitfalls fix retained.
+
 ## 2026.11.17-70 (dev)
 
 - **network_info pitfalls fix**: the host-registry fast path now imports buildPitfalls directly (modules.pitfalls was unavailable there) and returns its items; pitfalls full-text parse bug fixed.
