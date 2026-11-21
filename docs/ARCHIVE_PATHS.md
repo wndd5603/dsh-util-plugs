@@ -31,6 +31,12 @@ team/members/<own role>/
 2. 由 operator 调整该角色的 `roleWritePolicy.allowOwnMemberDir` 或 `allowSegments`；
 3. 或把正式归档放到策略允许的目录，并在归档状态里明确注明（当前版本尚未提供自动替代根目录，属于已知未完成项）。
 
+若是用脚本写作（bash/node fs.writeFileSync）合并归档，`archivePathSource` 会保持
+`latest-or-canonical`，因为该字段只记录 write/edit 工具调用观察到的路径；这不表示归档失效。
+此时路径仍由“本角色归档根目录下最新 ARCHIVE_*.md”扫描得到。
+
+Windows 路径大小写不敏感；当前状态里可能出现 `lead` 而实际目录是 `Lead`，可解析，但不要把它当作路径不一致的证据。
+
 ## 提醒去重
 
 - 归档提醒只在 `phase=archive` 的周期内按 `reminderEveryNTurns` 提醒；
