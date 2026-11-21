@@ -55,7 +55,7 @@ function cleanInline(text) {
  * Each symptom maps to the matching `## N. 标题` section; action is assembled from
  * the section's 机理/方法论/诊断 bullets (not the markdown headings).
  */
-export function parsePitfallsText(text) {
+export function parsePitfallsText(text, { full = false } = {}) {
   const lines = String(text).replace(/\r\n/g, '\n').split('\n')
   const sections = new Map()
   let current = null
@@ -180,7 +180,7 @@ export function buildPitfalls({ file, query, limit, probe = true, full = false, 
   const q = typeof query === 'string' ? query.trim().toLowerCase() : ''
   let items = []
   if (text !== '') {
-    const parsed = parsePitfallsText(text)
+    const parsed = parsePitfallsText(text, { full })
     items = parsed.items
       .filter(item => q === '' || item.symptom.toLowerCase().includes(q) || item.action.toLowerCase().includes(q))
       .slice(0, max)

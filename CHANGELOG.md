@@ -1,3 +1,7 @@
+## 2026.11.17-70 (dev)
+
+- **network_info pitfalls fix**: the host-registry fast path now imports buildPitfalls directly (modules.pitfalls was unavailable there) and returns its items; pitfalls full-text parse bug fixed.
+
 ## 2026.11.17-69 (dev)
 
 - **RC3/RC1 residual**: network_info host-registry path now returns meetings + pitfalls (not empty arrays); bulletin_digest returns ok/matched/staleAfterHours/emptyReason; context_usage documents effective/pressure token semantics; message_bus_status adds caller-scoped countsMine; meeting_digest separates owned/unowned/absence pending actions.

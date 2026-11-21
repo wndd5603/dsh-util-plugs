@@ -12,6 +12,7 @@ import {
   updateMeetingActionInStore,
   validateMeetingDeadline,
 } from './meeting-digest.js'
+import { buildPitfalls as buildPitfallsDirect } from './pitfalls.js'
 
 export const AGENTS_AUTO_MARKER = '<!-- session-network:auto:v1 -->'
 export const AGENTS_MANAGED_MARKER = '<!-- session-network:managed:v1 -->'
@@ -1208,7 +1209,7 @@ export function registerTools(ctx, deps) {
           }
         })
         const pitfallsForNetwork = safeCall(
-          () => modules.pitfalls?.buildPitfalls?.({ limit: 10, probe: false }) ?? { count: 0, items: [] },
+          () => (modules.pitfalls?.buildPitfalls ?? buildPitfallsDirect)({ limit: 10, probe: false }),
           () => ({ count: 0, items: [] }),
         )
         const meetingDigest = safeCall(() => {
