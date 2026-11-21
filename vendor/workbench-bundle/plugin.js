@@ -189,7 +189,7 @@ export function createPointerText(config = {}) {
   const text = configured !== ''
     ? configured
     : [
-      '[workbench] 能力索引（网络简报另由 session-network 注入 2 行；本条不重复网络状态）：context_usage/context_guard_status 看上下文；team_hooks_status 看 hooks；message_* 收发（信封用 message_read 取正文）；network_info 看交流网。',
+      '[workbench] 能力索引（唯一首回合 pointer；session-network autoInject 默认关闭）：context_usage/context_guard_status 看上下文；team_hooks_status 看 hooks；message_* 收发（信封用 message_read 取正文）；network_info 看交流网。',
       '召回：协作/续接先 collaboration_recall()（身份/任务/租约/记忆键/artifact），正文再用 memory_search，结论用 memory_remember。状态/开关：workbench_status()；关闭组件用其 row id 的 config.enabled=false；勿同时安装组件包与元包。',
     ].join('\n')
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 3)

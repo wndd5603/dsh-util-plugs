@@ -8,7 +8,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   schemaVersion: 1,
   dataDir: null,
   dataDirAck: { acknowledgedAt: null, dir: null },
-  autoInject: { enabled: true, pointerTemplateVersion: 1 },
+  autoInject: { enabled: false, pointerTemplateVersion: 1 },
   agvAsk: { enabled: true, timeoutMs: 30000 },
   alias: { autoDerive: true, maxRename: 2, historyHours: 72 },
   delegation: { shadow: true, minLines: 150, minBytes: 8192, minInputFiles: 3 },

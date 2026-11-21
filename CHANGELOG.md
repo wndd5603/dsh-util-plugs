@@ -1,3 +1,7 @@
+## 2026.11.17-84 (dev)
+
+- **Single first-turn pointer**: session-network autoInject now defaults false; workbench pointer is the canonical one. Set session-network autoInject.enabled=true to opt back in.
+
 ## 2026.11.17-83 (dev)
 
 - **Archive path ownership**: observed archivePath must also be inside the caller role archive root; docs/ARCHIVE_*.md can no longer be mistaken for an archive.
