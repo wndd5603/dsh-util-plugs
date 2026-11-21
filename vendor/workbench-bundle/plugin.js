@@ -242,12 +242,14 @@ export function buildStatus(ctx, config, snapshot) {
   const profile = readJson(join(profileDir, 'package.json'))
   const bundles = Array.isArray(profile?.dsh?.profile?.bundles) ? profile.dsh.profile.bundles : []
   const nodeModules = join(profileDir, 'node_modules')
+  const bundleInstalled = bundles.includes('dsh-util-plugs')
   const packages = KNOWN_PACKAGES.map((known) => {
     const dir = packageDirOf(nodeModules, known.name)
     const manifest = dir === null ? null : readJson(join(dir, 'package.json'))
-    const installed = manifest !== null
+    const bundledIn = bundleInstalled && known.name !== 'dsh-util-plugs'
+    const installed = manifest !== null || bundledIn
     const changed = []
-    if (installed && snapshot !== undefined) {
+    if (manifest !== null && snapshot !== undefined) {
       const before = snapshot.get(known.name)
       const current = {
         packageJson: sha256File(join(dir, 'package.json')),
@@ -263,10 +265,12 @@ export function buildStatus(ctx, config, snapshot) {
     return {
       name: known.name,
       installed,
-      version: installed && typeof manifest.version === 'string' ? manifest.version : null,
-      enabledInProfile: bundles.includes(known.name),
-      license: installed && existsSync(join(dir, 'LICENSE')),
-      entries: installed ? known.entries.filter(entry => existsSync(join(dir, entry))) : [],
+      installedVia: bundledIn ? 'dsh-util-plugs bundle row' : (manifest !== null ? 'independent package' : 'missing'),
+      effective: bundledIn ? 'active(bundled-in-dsh-util-plugs)' : (manifest !== null ? 'available' : 'missing'),
+      version: manifest !== null && typeof manifest.version === 'string' ? manifest.version : null,
+      enabledInProfile: bundles.includes(known.name) || bundledIn,
+      license: manifest !== null && existsSync(join(dir, 'LICENSE')),
+      entries: manifest !== null ? known.entries.filter(entry => existsSync(join(dir, entry))) : [],
       stale: changed.length > 0,
       changed,
     }
@@ -291,6 +295,7 @@ export function buildStatus(ctx, config, snapshot) {
       kind: BRIEF_KIND,
       lines: createPointerText(config).split('\n').length,
       chars: createPointerText(config).length,
+      note: 'This pointer is canonical for the workbench; session-network may also inject a 2-line pointer. To keep exactly one, set workbench pointer=false or session-network autoInject.enabled=false.',
     },
     tools: { workbench_status: config.statusTool !== false },
     config: { defaults: defaultsOf(Config), fields: fieldDocs(Config) },

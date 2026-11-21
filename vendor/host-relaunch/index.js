@@ -2073,7 +2073,8 @@ function makeRestartTool(state) {
   return {
     name: 'restart_dsh',
     description:
-      'Restart the DeepSeek Harness Host from inside the conversation, then come back to the work automatically. '
+      '⚠ Scope: all sessions on this Host; reversible: no (in-flight turns are interrupted); precondition: clean preflight + token + PID suffix + allowRealRestart:true. '
+      + 'Restart the DeepSeek Harness Host from inside the conversation, then come back to the work automatically. '
       + 'TWO-STEP tool, never a one-shot restart. Step 2 is a human/operator gate: with the shipped '
       + 'allowRealRestart:false, confirm is refused; capability index: skill("team-bootstrap") §2. '
       + 'Step 1 (omit confirm): read-only preflight. It lists live sessions and REFUSES while any session other than '

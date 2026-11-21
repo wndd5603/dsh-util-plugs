@@ -1559,10 +1559,15 @@ function createDelegationAdvisor(ctx, config, hooks = {}) {
     }
     const lastAt = sessionId === null ? undefined : lastAdvisoryAt.get(sessionId)
     const armInfo = resolveArm()
+    const hookActive = settings.enabled && settings.mode !== 'off' && hookLoaded(armInfo.arm)
+    const inactiveReason = settings.enabled !== true
+      ? 'block-disabled'
+      : (settings.mode === 'off' ? 'mode=off' : (hookLoaded(armInfo.arm) ? null : 'arm=' + armInfo.arm))
     return {
       enabled: settings.enabled,
-      loaded: settings.enabled,
+      loaded: hookActive,
       hookLoaded: hookLoaded(armInfo.arm),
+      effective: hookActive ? 'active' : 'inactive(' + inactiveReason + ')',
       mode: settings.mode,
       // `arm` is the arm that will be used for the next turn (runtime file wins).
       arm: armInfo.arm,
@@ -2630,11 +2635,33 @@ export function apply(ctx, config) {
       install(agent)
       const s = normalizeArchiveSessionState(state.get(agent.session.id) ?? { phase: 'idle', cycle: false })
       const percent = measurePercent(agent)
+      const workspaceDir = sessionWorkspaceDir(agent)
+      let roleName
+      try {
+        roleName = ctx.get('agentTeams')?.membership(agent)?.name
+      } catch {
+        roleName = undefined
+      }
+      const observedPath = typeof s.archivePath === 'string'
+        && ARCHIVE_FILE_RE.test(s.archivePath)
+        && !/(?:^|[\\/])scratch[\\/]/iu.test(s.archivePath)
+        ? s.archivePath
+        : null
+      const archivePath = observedPath ?? resolveManualArchivePath({ workspaceDir, roleName, knownPath: null })
       return {
         session: agent.session.id,
         percent: percent === null ? null : percent,
+        effectivePercent: percent === null ? null : percent,
+        percentScope: 'caller-token-meter',
+        contextThresholds: {
+          source: 'team-hooks2',
+          archiveThreshold: archiveReminder.archiveThreshold,
+          dropThreshold: archiveReminder.dropThreshold,
+          contextMeterRole: 'context_guard notify/rearm is advisory only; team-hooks2 owns archive/read decisions',
+        },
         cycle: s.cycle === true,
         lastPercent: typeof s.lastPercent === 'number' ? s.lastPercent : null,
+        lastPercentScope: 'previous-caller-measurement',
         lastRemindPercent: typeof s.lastRemindPercent === 'number' ? s.lastRemindPercent : null,
         archiveReminder: {
           enabled: archiveReminder.enabled,
@@ -2652,7 +2679,9 @@ export function apply(ctx, config) {
           lastInjectedAt: typeof s.lastInjectedAt === 'string' ? s.lastInjectedAt : null,
           pendingRead: s.pendingRead === true,
           pendingReadKind: typeof s.pendingReadKind === 'string' ? s.pendingReadKind : null,
-          archivePath: typeof s.archivePath === 'string' ? s.archivePath : null,
+          archivePath,
+          archivePathSource: observedPath === null ? 'latest-or-canonical' : 'observed',
+          archiveThresholdPolicy: 'team-hooks2 owns archive decisions; context-meter notify/rearm is advisory only',
           lastManualCompactAt: typeof s.lastManualCompactAt === 'string' ? s.lastManualCompactAt : null,
           lastManualCompactSeq: Number.isInteger(s.lastManualCompactSeq) ? s.lastManualCompactSeq : null,
           templates: Object.keys(archiveReminder.templates),

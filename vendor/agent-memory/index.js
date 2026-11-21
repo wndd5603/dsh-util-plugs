@@ -422,7 +422,7 @@ export function apply(ctx, config) {
     }
   })
 
-  register(desc('memory_forget', 'Delete one memory by id. Disabled unless the operator sets allowForget:true; requires confirm:"FORGET" and appends an audit row.', {
+  register(desc('memory_forget', '⚠ Scope: one durable memory (all sessions using it); irreversible: yes; precondition: operator allowForget:true + confirm:"FORGET". Delete one memory by id; appends an audit row.', {
     id: str('Memory id.'), confirm: str('Must be exactly "FORGET".'),
   }, ['id', 'confirm']), async (args, exec) => {
     if (cfg.allowForget !== true || !isOperator(exec)) {

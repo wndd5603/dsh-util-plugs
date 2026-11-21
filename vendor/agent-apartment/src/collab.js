@@ -388,6 +388,15 @@ export function readBulletinTasks({ sessionIds = [], aliases = [], taskId, board
         result.warnings.push({ code: 'TASK_ASSIGNEE_UNRESOLVED', taskId: row.id, assigneeAlias: row.assignee_alias })
       }
     }
+    const unassignedSql = "SELECT COUNT(*) AS n FROM tasks WHERE assignee_session IS NULL AND assignee_alias IS NULL AND status NOT IN ('completed','terminated')" + filterSql
+    result.unassignedTotal = Number(opened.db.prepare(unassignedSql).get(...filterParams).n ?? 0)
+    if (result.unassignedTotal > 0) {
+      result.warnings.push({
+        code: 'UNASSIGNED_BOARD_TASKS',
+        count: result.unassignedTotal,
+        hint: 'These active board tasks have no assignee (not "mine" tasks); inspect bulletin_board_list/task_list and claim or assign them before treating tasks=0 as no work.',
+      })
+    }
     return result
   } catch (error) {
     result.available = false
@@ -509,9 +518,9 @@ const experienceRow = row => {
 
 const briefText = (agentId, counts) => '[collab] agent=' + agentId
   + ' aliases=' + counts.aliases
-  + ' tasks=' + counts.tasks
+  + ' tasks(assigned)=' + counts.tasks
   + ' leases=' + counts.leases
-  + ' memory=' + (counts.memory ?? 0)
+  + ' memory(global)=' + (counts.memory ?? 0)
   + ' warnings=' + counts.warnings
   + '; collaboration_recall()'
 
@@ -659,6 +668,8 @@ export function buildCollaborationBrief({ apartment, sessionId, taskId, boardId,
   const leaseBox = truncate(leaseItems, BRIEF_LIMITS.leases)
   const experienceBox = truncate(experienceItems, BRIEF_LIMITS.experiences)
   const memory = readMemoryRecall({ limit: 5 })
+  memory.scope = 'global'
+  memory.totalScope = 'global (all scopes; not "my" memories)'
   const artifact = readArtifactRecall()
   const counts = {
     teams: teamItems.length,
@@ -699,6 +710,7 @@ export function buildCollaborationBrief({ apartment, sessionId, taskId, boardId,
     teamTasks: teamTaskBox.items,
     leases: leaseBox.items,
     assignedTasks: bulletin.tasks,
+    unassignedTasks: bulletin.unassignedTotal ?? 0,
     experiences: experienceBox.items,
     memory,
     artifact,

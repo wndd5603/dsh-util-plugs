@@ -531,7 +531,15 @@ export function apply(ctx, config, deps = {}) {
         inactiveReason: resolved.root === null ? 'no projectRoot configured and no session workspace (hook is a no-op)' : inactiveReason,
         backupDir: manager === null ? null : manager.backupDir,
         backupStats: stats,
+        backupStatsScope: 'on-disk historical files',
         counters: { ...counters },
+        countersScope: 'this-host-process since start (not historical total)',
+        summary: {
+          onDisk: typeof stats?.count === 'number' ? stats.count : null,
+          processBackups: counters.backups,
+          lastProcessBackupAt: counters.lastBackupAt,
+          note: 'backupStats is historical disk total; counters only count this process. A null lastProcessBackupAt does not mean no historical backups.',
+        },
         config: { defaults: defaultsOf(Config), fields: fieldDocs(Config) },
       }
     },

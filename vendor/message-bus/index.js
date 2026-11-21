@@ -1538,7 +1538,7 @@ export function apply(ctx, config) {
       logger.warn('[message-bus] blocked cross-permission delivery from ' + String(senderMode ?? 'unknown')
         + ' to ' + target.sessionId + ' (danger-full-access)')
       throw codedError('CROSS_PERMISSION_DENIED',
-        'cross-permission delivery blocked: only a danger-full-access sender may deliver to a danger-full-access target')
+        'cross-permission delivery blocked: a confined sender may not deliver to a danger-full-access target. This is an anti-escalation guard, not a missing permission; use an alias/board/meeting route or ask an operator to bridge deliberately (crossPermissionGuard=false only for a trusted bridge).')
     }
   }
   /**
@@ -2534,8 +2534,7 @@ export function apply(ctx, config) {
 
   if (cfg.allowRouteRegister) ctx.tools.register({
     name: 'message_route_register',
-    description: 'Register or update an alias -> session route in the global bus database. '
-      + 'Makes cross-project addressing stable across restarts.',
+    description: '⚠ Scope: global alias→session route (affects other sessions); reversible: yes, re-register. Register or update an alias -> session route in the global bus database. Makes cross-project addressing stable across restarts.',
     parameters: {
       type: 'object',
       properties: {
@@ -2647,6 +2646,13 @@ export function apply(ctx, config) {
         joinedCount: directoryStatus?.joinedCount ?? 0,
         envelope: typeof store.envelopeCounts === 'function' ? safeCall(() => store.envelopeCounts(), null) : null,
         counts,
+        countsSummary: counts === null ? null : {
+          unread: counts.unread,
+          undelivered: counts.undeliveredDeliveries,
+          queued: counts.pending?.queued ?? 0,
+          actionable: counts.undeliveredDeliveries + (counts.pending?.queued ?? 0),
+          note: 'unread is per-recipient read state; undelivered/queued are delivery state. Use message_queue({unreadOnly:true}) for reading, and inspect undeliverable reasons for queued failures.',
+        },
         delivery: {
           lightweight,
           dedupeWindowMs,
@@ -2705,7 +2711,7 @@ export function apply(ctx, config) {
     ctx.tools.register({
       name: 'message_purge',
       description:
-        'OPERATOR-ONLY destructive purge of the global message bus. Requires confirm:"PURGE" plus either before '
+        '⚠ Scope: all sessions; irreversible: yes (messages/deliveries/read-state rows); precondition: allowPurge:true + explicit human confirmation. OPERATOR-ONLY destructive purge of the global message bus. Requires confirm:"PURGE" plus either before '
         + '(ISO timestamp: delete messages older than it) or all:true (delete everything). Deletes the messages and '
         + 'their deliveries/read-state rows; returns the deleted message count. Never use this to hide a delivery '
         + 'failure — read message_bus_status first.',

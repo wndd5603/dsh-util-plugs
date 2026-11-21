@@ -1126,7 +1126,11 @@ export function registerTools(ctx, deps) {
   }
 
   function meetingInvalid(message, code = 'MEETING_INVALID') {
-    return { ok: false, code, error: `${code}: ${message}` }
+    const result = { ok: false, code, error: `${code}: ${message}` }
+    if (code === 'MEETING_FINALIZED') {
+      result.hint = 'meeting_post is closed after finalize, but meeting_action_update still works: use {meetingId, actionId, status:"completed"|"closed"|"cancelled", owner?, due?} to close pending actions.'
+    }
+    return result
   }
 
   function meetingNotFound(meetingId) {
@@ -1266,18 +1270,19 @@ export function registerTools(ctx, deps) {
   ctx.tools.register({
     name: 'pitfalls',
     description:
-      'Known environment pitfalls extracted from the dsh-dev-pitfalls symptom index (<=10 lines). '
+      'Known environment pitfalls extracted from the dsh-dev-pitfalls symptom index (<=10 lines). Canonical quick entry; memory_search and the dsh-dev-pitfalls skill are supplemental. Use full:true for the complete action text. '
       + 'Used by session briefings instead of inlining pitfall lists.',
     parameters: baseParams({
       query: { type: 'string', description: 'Optional keyword filter.' },
       limit: { type: 'number', description: 'Max items (default 10, max 10).' },
+      full: { type: 'boolean', description: 'Return up to 4000 chars of each action instead of the 400-char summary.' },
     }),
     output: jsonOut,
     async execute(args = {}) {
       const homeDir = process.env.USERPROFILE ?? process.env.HOME ?? profileDir
       const limit = Number.isFinite(args.limit) ? Math.max(1, Math.min(10, args.limit)) : 10
       const result = modules.pitfalls?.buildPitfalls
-        ? safeCall(() => modules.pitfalls.buildPitfalls({ query: args.query, limit }), () => readPitfalls(homeDir, args.query, limit))
+        ? safeCall(() => modules.pitfalls.buildPitfalls({ query: args.query, limit, full: args.full === true }), () => readPitfalls(homeDir, args.query, limit))
         : readPitfalls(homeDir, args.query, limit)
       safeCall(() => audit?.({ action: 'pitfalls', count: result.count, caller: resolveAuditCaller(exec) }), () => {})
       return result
@@ -1812,7 +1817,7 @@ export function registerTools(ctx, deps) {
   ctx.tools.register({
     name: 'meeting_finalize',
     description:
-      'Finalize a meeting (status finalized) and record decisions/actions parsed from body (JSON or Markdown) '
+      '⚠ Scope: one meeting (all participants); reversible: no for FINAL, but meeting_action_update remains available; precondition: participant/convener. Finalize a meeting (status finalized) and record decisions/actions parsed from body (JSON or Markdown) '
       + 'or supplied by earlier posts. Only a registered participant or the convener may finalize (others get FORBIDDEN); '
       + 'legacy alias-convener meetings require an explicit meeting_open claim before writing. '
       + 'Idempotent: finalizing twice returns alreadyFinalized:true.',

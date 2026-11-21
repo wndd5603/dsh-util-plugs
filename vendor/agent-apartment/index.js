@@ -311,13 +311,17 @@ export function apply(ctx, config) {
     } catch {
       return {
         ok: false, code: COLLAB_ERROR_CODES.OPERATOR_REQUIRED, sessionId: null, agentId: null,
-        warnings: [], asOf: new Date().toISOString(), text: '',
+        warnings: [], asOf: new Date().toISOString(),
+        hint: 'This session cannot read another session\'s brief. Omit sessionId for the caller, or use an operator session.',
+        text: '[collab] operator required for another session; omit sessionId for caller-scoped recall.',
       }
     }
     if (requested === null) {
       return {
         ok: false, code: COLLAB_ERROR_CODES.UNBOUND_SESSION, sessionId: null, agentId: null,
-        warnings: [], asOf: new Date().toISOString(), text: '',
+        warnings: [], asOf: new Date().toISOString(),
+        hint: 'Bind this session to an agent first: apartment_agent_bind({agentId, sessionId, isPrimary:true}); then collaboration_recall() returns a caller-scoped brief.',
+        text: '[collab] UNBOUND_SESSION: bind via apartment_agent_bind({agentId, sessionId, isPrimary:true}).',
       }
     }
     const result = buildCollaborationBrief({

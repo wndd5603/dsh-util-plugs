@@ -82,7 +82,7 @@ export function parsePitfallsText(text) {
     if (symptom === '') continue
     const section = sections.get(row[2])
     if (section === undefined) continue
-    const action = section.bullets.slice(0, 4).map(bullet => bullet.text).join(' ').slice(0, 400)
+    const action = section.bullets.slice(0, 8).map(bullet => bullet.text).join(' ').slice(0, full ? 4000 : 400)
     items.push({
       symptom,
       action,
@@ -163,7 +163,7 @@ function checkSkillFile(file, text, checks) {
 /**
  * @param {{file?: string, query?: string, limit?: number, probe?: boolean, env?: object}} [options]
  */
-export function buildPitfalls({ file, query, limit, probe = true, env = process.env } = {}) {
+export function buildPitfalls({ file, query, limit, probe = true, full = false, env = process.env } = {}) {
   const startedAt = Date.now()
   const sourceFile = typeof file === 'string' && file.trim() !== '' ? file.trim() : defaultPitfallsFile({ env })
   const checks = []
