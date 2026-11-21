@@ -172,6 +172,16 @@ test('message_read denies third parties and only marks authorized reads', async 
     const read = tools.get('message_read')
     const status = tools.get('message_bus_status')
     const ack = tools.get('message_ack')
+    // A resume replays session history, so the status must expose WHEN the last
+    // auto-resume happened — `resumedCount` alone cannot explain a re-appearing
+    // envelope that was already read.
+    const resumeState = status.execute().autoResumeState
+    assert.equal(typeof resumeState, 'object')
+    assert.equal(resumeState.enabled, false, 'this fixture disables autoResume')
+    assert.equal(resumeState.last, null, 'no resume has happened in this fixture')
+    assert.equal(typeof resumeState.note, 'string')
+    assert.match(resumeState.note, /replays session history/)
+    assert.equal(status.execute().resumedCount, 0)
     const deniedAck = ack.execute({ ids: [sent.messageId] }, { agent: { session: { id: THIRD } } })
     assert.equal(deniedAck.ok, false)
     assert.deepEqual(deniedAck.denied, [sent.messageId])

@@ -1,3 +1,7 @@
+## 2026.11.17-94 (dev)
+
+- **`autoResumeState` makes "phantom re-delivery" diagnosable**: `resumedCount` only said *how many* sessions had been auto-resumed, which is not enough — `agents.resume()` replays session history, so an **already-read** `[message-bus] …` envelope can re-appear in context with **no restart at all**. `message_bus_status` now returns `autoResumeState{enabled, rateLimitPerMinute, liveHandles, last, note}` where `last` records `{at, sessionId, caller, reason, preset, model, historyReplayed}` for the most recent successful resume, so a reader can check whether a resume explains the repeat before suspecting duplicate delivery. Additive: `autoResume` (boolean) and `resumedCount` are unchanged.
+
 ## 2026.11.17-93 (dev)
 
 - **`auto_backup_compact` now runs the global budget pass**: it only trimmed the per-file plain window, so a directory whose plain snapshots are spread over many files reported `wouldChange: 0` while sitting over `compressWhenFilesOver`. It now reports `perFileWindow` and `global{wouldCompress}` separately in a dry run, and applies the same global pass the hook runs after every write (`global{applied, compressed, overLimit}`) when executed.

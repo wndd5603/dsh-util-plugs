@@ -1920,6 +1920,13 @@ export function apply(ctx, config) {
   const resumedHandles = new Map()
   const resuming = new Map()
   const resumeAttempts = new Map()
+  /**
+   * Last successful auto-resume. `agents.resume()` replays the session history,
+   * so an already-read `[message-bus] …` envelope can appear in context again
+   * WITHOUT any restart — this record is what lets a caller tell that apart from
+   * a duplicate delivery (a `resumedCount` alone says "how many", not "when/who").
+   */
+  let lastResume = null
   const flushingDeliveries = new Set()
   const resumeSelection = () => {
     try {
@@ -2016,6 +2023,18 @@ export function apply(ctx, config) {
           setup: composition.setup,
         })
         resumedHandles.set(sessionId, handle)
+        if (handle?.agent !== undefined) {
+          lastResume = {
+            at: nowIso(),
+            sessionId,
+            caller: callerSessionId ?? null,
+            reason: 'delivery-to-inactive',
+            preset: composition.agentPreset ?? null,
+            model: selection === undefined || selection === null ? null : { provider: selection.provider, model: selection.model },
+            historyReplayed: true,
+            note: 'resume replays session history, so earlier [message-bus] envelopes can re-appear in context without a restart',
+          }
+        }
         logger.info('[message-bus] auto-resumed ' + sessionId
           + (selection === undefined || selection === null ? '' : ' (' + selection.provider + '/' + selection.model + ')')
           + ' preset=' + composition.agentPreset)
@@ -2675,6 +2694,13 @@ export function apply(ctx, config) {
         },
         autoResume: cfg.autoResume,
         resumedCount: resumedHandles.size,
+        autoResumeState: {
+          enabled: cfg.autoResume,
+          rateLimitPerMinute: cfg.autoResumeRateLimitPerMinute,
+          liveHandles: resumedHandles.size,
+          last: lastResume,
+          note: 'last locates the most recent auto-resume. A resume replays session history, so an already-read [message-bus] envelope can re-appear in context with NO restart — check last.at before suspecting a duplicate delivery.',
+        },
         autoResumeRateLimitPerMinute: cfg.autoResumeRateLimitPerMinute,
         resumeModel: cfg.resumeModel,
         maxBodyChars: cfg.maxBodyChars,
